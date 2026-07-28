@@ -1,0 +1,9 @@
+services:
+  guild-manager:
+    build:
+      context: .
+    image: wwm-guild-manager:latest
+    container_name: wwm-guild-manager
+    ports:
+      - "8085:80"
+    restart: unless-stopped

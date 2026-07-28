@@ -9,7 +9,7 @@ export default defineConfig(({ mode }) => {
         port: 3000,
         host: '0.0.0.0',
       },
-      base: '/Where-Winds-Meet-Guild-Manager/',
+      base: process.env.BASE_PATH || env.BASE_PATH || '/Where-Winds-Meet-Guild-Manager/',
       plugins: [react()],
       define: {
         'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
