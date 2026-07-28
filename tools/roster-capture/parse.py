@@ -57,13 +57,24 @@ SECTIONS = {"Personal Info", "Guild Hero's Realm", "Skyward Bond", "Guild War", 
 LABEL_MAX_X = 0.45
 VALUE_MIN_X = 0.60
 
-# The sticky header, which never scrolls: avatar and level, name, position, sect.
+# The sticky header, which never scrolls: avatar and level, then the name with
+# the rank badge beside it, then the sect. The rank is deliberately not read --
+# it is assigned in the app instead -- but the badge still shares a line with
+# the name and has to be told apart from it.
 HEADER_TOP, HEADER_BOTTOM = 0.12, 0.28
 LEVEL_MAX_X = 0.26
-POSITION_MIN_X = 0.78
+
+# How far apart two readings may sit vertically and still be the same line.
+HEADER_LINE_TOLERANCE = 0.03
 
 OCR_SCALE = 3
 MIN_LABEL_RATIO = 0.72
+
+# Below this a "member" is a frame caught mid-load, not a person.
+MIN_FIELDS_FOR_MEMBER = 3
+
+# Two panel readings this alike are the same member read twice, not two people.
+NEAR_DUPLICATE = 0.85
 
 
 @dataclass
@@ -120,22 +131,31 @@ def read_header(readings: list[Reading], width: int, height: int) -> dict:
     if not band:
         return {}
 
-    level = [r for r in band if r.x0 < LEVEL_MAX_X * width and r.text.isdigit()]
-    position = [r for r in band if r.x0 >= POSITION_MIN_X * width]
-    middle = sorted(
-        (r for r in band if LEVEL_MAX_X * width <= r.x0 < POSITION_MIN_X * width),
-        key=lambda r: r.y_mid,
-    )
-    if not middle:
+    is_level = lambda r: r.x0 < LEVEL_MAX_X * width and r.text.strip().isdigit()
+    level = [r for r in band if is_level(r)]
+    rest = sorted((r for r in band if not is_level(r)), key=lambda r: r.y_mid)
+    if not rest:
         return {}
 
-    header = {"name": middle[0].text}
-    if len(middle) > 1:
-        header["sect"] = middle[1].text
+    tolerance = HEADER_LINE_TOLERANCE * height
+
+    def leftmost_of_line(candidates: list[Reading]) -> str:
+        top = min(r.y_mid for r in candidates)
+        line = [r for r in candidates if r.y_mid - top <= tolerance]
+        return min(line, key=lambda r: r.x0).text
+
+    # The name shares its line with the rank badge, which sits to its right --
+    # but a long badge like "Reclutadores" starts further left than a short one,
+    # and can even measure a pixel higher. Reading the line left to right is the
+    # only rule that holds for every badge; height is not.
+    header = {"name": leftmost_of_line(rest)}
+
+    top = min(r.y_mid for r in rest)
+    below = [r for r in rest if r.y_mid - top > tolerance]
+    if below:
+        header["sect"] = leftmost_of_line(below)
     if level:
         header["level"] = int(level[0].text)
-    if position:
-        header["position"] = position[0].text
     return header
 
 
@@ -298,9 +318,11 @@ def read_popup_name(inside: list[Reading], anchor: Reading, height: float) -> st
     return max(above, key=lambda r: r.y1 - r.y0).text.strip()
 
 
-# How far apart two frames may be and still count as the same click. Both
-# regions settle within a frame or two of each other, so this is generous.
-SAME_CLICK_SECONDS = 4.0
+# Time alone cannot say whether a pairing is real: a wrong one was measured at
+# 0.77s and a right one at 2.55s. What separates them is that a nickname belongs
+# to nobody, so the name check below does the deciding and this only bounds how
+# far to look for the member wearing it.
+SAME_CLICK_SECONDS = 3.0
 
 
 def load_timeline(folder: Path) -> dict[str, float]:
@@ -479,7 +501,7 @@ def main() -> int:
             panel_headers[path] = header["name"]
             member = members.setdefault(header["name"], Member(name=header["name"]))
             member.frames.append(path.name)
-            for key in ("level", "position", "sect"):
+            for key in ("level", "sect"):
                 if key in header:
                     member.record(key, str(header[key]), 1.0)
 
@@ -502,8 +524,11 @@ def main() -> int:
             # Members of some sects display a changeable alias in the popup
             # instead of their name. Clicking the portrait also selects them, so
             # the detail panel captured at that same moment carries the real one.
+            # A nickname is a name that belongs to nobody: if the popup shows a
+            # name the detail panel has produced for somebody, it is that member
+            # being browsed, not an alias, however close the two frames sit.
             real = beside_in_time(timeline, path.name, panel_names)
-            if real and real != found["nameAsRead"]:
+            if real and real != found["nameAsRead"] and found["nameAsRead"] not in members:
                 aliases.append((found["nameAsRead"], real))
                 found = {**found, "aliasAsRead": found["nameAsRead"], "nameAsRead": real}
             identities[found["nameAsRead"]] = found
@@ -525,6 +550,18 @@ def main() -> int:
 
     kinds = {key: kind for key, kind in FIELDS.values()}
     kinds.update({"level": "int", "position": "text", "sect": "text"})
+
+    # A frame caught while the panel was still loading, or mid-transition,
+    # yields a "member" with a name and nothing behind it. Requiring either an
+    # account number or a few real fields separates those from someone genuinely
+    # captured in a hurry, and what gets dropped is listed rather than vanishing.
+    discarded = [
+        name
+        for name, member in members.items()
+        if name not in identities and len(member.votes) < MIN_FIELDS_FOR_MEMBER
+    ]
+    for name in discarded:
+        del members[name]
 
     roster = []
     for member in sorted(members.values(), key=lambda m: m.name):
@@ -560,16 +597,31 @@ def main() -> int:
     out = args.out or args.folders[0] / "roster.json"
     out.write_text(json.dumps(document, indent=2, ensure_ascii=False), encoding="utf-8")
 
-    expected = len(FIELDS) + 3
+    expected = len(FIELDS) + 2
     print(f"{'miembro':16s} {'frames':>7s} {'campos':>8s} {'UID':>12s}   faltantes")
     print("-" * 86)
     for record in roster:
         got = {k for k, v in record["fields"].items() if v is not None}
-        missing = sorted(({key for key, _ in FIELDS.values()} | {"level", "position", "sect"}) - got)
+        missing = sorted(({key for key, _ in FIELDS.values()} | {"level", "sect"}) - got)
         print(
             f"{record['nameAsRead']:16s} {record['frames']:7d} {len(got):5d}/{expected:<2d} "
             f"{record.get('uid', '-'):>12s}   {', '.join(missing) if missing else 'ninguno'}"
         )
+
+    if discarded:
+        print(f"\nDescartados por venir vacios ({len(discarded)}): {', '.join(sorted(discarded))}")
+
+    names = [r["nameAsRead"] for r in roster]
+    pairs = [
+        (a, b)
+        for i, a in enumerate(names)
+        for b in names[i + 1 :]
+        if similarity(a, b) >= NEAR_DUPLICATE
+    ]
+    if pairs:
+        print("\nNombres casi identicos, probablemente la misma persona leida de dos formas:")
+        for a, b in pairs:
+            print(f"  {a}  /  {b}")
 
     without_uid = [r["nameAsRead"] for r in roster if "uid" not in r]
     if without_uid:

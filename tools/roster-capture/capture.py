@@ -110,7 +110,7 @@ class Identifier:
 
         engine = RapidOCR()
         self.parse = parse
-        self.wanted = {key for key, _ in parse.FIELDS.values()} | {"level", "position", "sect"}
+        self.wanted = {key for key, _ in parse.FIELDS.values()} | {"level", "sect"}
         self.ready.set()
         scratch: dict = {}
 
@@ -148,7 +148,7 @@ class Identifier:
 
         self.panels[name] = self.panels.get(name, 0) + 1
         got = self.fields.setdefault(name, set())
-        got.update(key for key in ("level", "position", "sect") if key in header)
+        got.update(key for key in ("level", "sect") if key in header)
         got.update(self.parse.FIELDS[label][0] for label, _, _ in self.parse.pair_fields(readings, width))
 
         # Naming what is still missing is the whole point: it says how much
