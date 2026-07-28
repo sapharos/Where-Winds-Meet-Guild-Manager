@@ -18,7 +18,9 @@ from __future__ import annotations
 
 import argparse
 import os
+import queue
 import sys
+import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime
@@ -61,6 +63,80 @@ SIGNATURE_SIZE = 64
 
 # Newer mss deprecates the lowercase factory; older releases lack the class.
 open_capture = getattr(mss, "MSS", None) or mss.mss
+
+
+class Identifier:
+    """Names each frame in the background while you keep browsing.
+
+    Recognising a frame costs a couple of seconds, far too long to hold up the
+    capture loop, so frames are queued and reported as their answers arrive --
+    usually while the next click is still happening. The point is to catch a
+    member whose account number failed to read now, when going back is one
+    click, instead of at the end of a sweep of seventy-six.
+    """
+
+    def __init__(self, announce):
+        self.announce = announce
+        self.queue: queue.Queue = queue.Queue()
+        self.uids: dict[str, str] = {}
+        self.panels: dict[str, int] = {}
+        self.ready = threading.Event()
+        threading.Thread(target=self._run, daemon=True).start()
+
+    def submit(self, kind: str, image: Image.Image) -> None:
+        self.queue.put((kind, image))
+
+    def drain(self, timeout: float = 20.0) -> None:
+        deadline = time.monotonic() + timeout
+        while not self.queue.empty() and time.monotonic() < deadline:
+            time.sleep(0.2)
+
+    def _run(self) -> None:
+        try:
+            from rapidocr_onnxruntime import RapidOCR
+
+            import parse
+        except Exception as err:  # noqa: BLE001 - capture must not depend on this
+            self.announce(f"{GREY}  (identificacion no disponible: {err}){RESET}")
+            self.ready.set()
+            return
+
+        engine = RapidOCR()
+        self.ready.set()
+        scratch: dict = {}
+
+        while True:
+            kind, image = self.queue.get()
+            try:
+                readings = parse.run_ocr(engine, image, scratch, f"live-{id(image)}")
+                scratch.clear()
+                if kind == "list":
+                    self._report_popup(parse.read_popup(readings, image.width, image.height))
+                else:
+                    self._report_panel(parse.read_header(readings, image.width, image.height))
+            except Exception as err:  # noqa: BLE001
+                self.announce(f"{GREY}       (no se pudo leer: {err}){RESET}")
+
+    def _report_popup(self, found) -> None:
+        # A list frame without a popup is just a scroll; saying so every time
+        # would bury the reports that matter.
+        if not found:
+            return
+        self.uids[found["nameAsRead"]] = found["uid"]
+        self.announce(
+            f"       {GREEN}UID de {found['nameAsRead']}{RESET}: {found['uid']}"
+            f"{GREY}   ({len(self.uids)} identificados){RESET}"
+        )
+
+    def _report_panel(self, header) -> None:
+        name = (header or {}).get("name")
+        if not name:
+            return
+        self.panels[name] = self.panels.get(name, 0) + 1
+        warning = "" if name in self.uids else f"   {BOLD}<- sin UID todavia{RESET}"
+        self.announce(
+            f"       datos de {name}{GREY}   (fotograma {self.panels[name]}){RESET}{warning}"
+        )
 
 
 @dataclass(frozen=True)
@@ -143,6 +219,11 @@ def main() -> int:
     )
     parser.add_argument("--calibrate", action="store_true", help="write one annotated screenshot and exit")
     parser.add_argument("--beep", action="store_true", help="also beep on each frame, to browse without looking")
+    parser.add_argument(
+        "--no-identify",
+        action="store_true",
+        help="skip naming frames as they are captured (faster startup, no live report)",
+    )
     args = parser.parse_args()
 
     enable_colour()
@@ -189,17 +270,23 @@ def main() -> int:
             spin = SPINNER[(ticks // 3) % len(SPINNER)]
             return f"{GREY}  {spin} mirando...   lista {counts['list']} / panel {counts['panel']}{RESET}"
 
-        def announce(line: str) -> None:
+        # The recogniser reports from its own thread, so writing is serialised.
+        printing = threading.Lock()
+
+        def announce(line: str, beep: bool = False) -> None:
             """Replace the live status line with an event, then redraw it."""
-            sys.stdout.write(("\r\033[K" if live else "") + line + "\n" + status())
-            sys.stdout.flush()
-            if args.beep:
+            with printing:
+                sys.stdout.write(("\r\033[K" if live else "") + line + "\n" + status())
+                sys.stdout.flush()
+            if beep and args.beep:
                 try:
                     import winsound
 
                     winsound.Beep(880, 60)
                 except Exception:
                     pass
+
+        identifier = None if args.no_identify else Identifier(announce)
 
         sys.stdout.write(status())
         sys.stdout.flush()
@@ -231,7 +318,7 @@ def main() -> int:
                     # Say so out loud when nothing was written, otherwise a
                     # revisited screen looks like the tool has stopped working.
                     if any(not differs(sig, seen, args.tolerance) for seen in saved[region.name]):
-                        announce(f"{GREY}  {stamp}  {name:5s}  ya lo tenia{RESET}      {BOLD}SIGUIENTE{RESET}")
+                        announce(f"{GREY}  {stamp}  {name:5s}  ya lo tenia{RESET}      {BOLD}SIGUIENTE{RESET}", beep=True)
                         continue
 
                     saved[region.name].append(sig)
@@ -239,8 +326,11 @@ def main() -> int:
                     image.save(out_dir / f"{region.name}-{counts[region.name]:04d}.png")
                     announce(
                         f"  {stamp}  {name:5s}  {GREEN}#{counts[region.name]:03d} guardado{RESET}"
-                        f"  {BOLD}SIGUIENTE{RESET}"
+                        f"  {BOLD}SIGUIENTE{RESET}",
+                        beep=True,
                     )
+                    if identifier is not None:
+                        identifier.submit(region.name, image.copy())
 
                 if live:
                     sys.stdout.write("\r" + status())
@@ -248,10 +338,20 @@ def main() -> int:
                 time.sleep(max(0.0, interval - (time.monotonic() - started)))
 
         except KeyboardInterrupt:
+            if identifier is not None:
+                sys.stdout.write("\r\033[K  terminando de leer los ultimos fotogramas...\n")
+                sys.stdout.flush()
+                identifier.drain()
             total = sum(counts.values())
             print(("\r\033[K" if live else "") + f"\n{total} fotogramas en {out_dir.resolve()}")
             print(f"  lista: {counts['list']}")
             print(f"  panel: {counts['panel']}")
+
+            if identifier is not None and identifier.panels:
+                sin_uid = sorted(set(identifier.panels) - set(identifier.uids))
+                print(f"\n{len(identifier.uids)} miembros con UID, {len(identifier.panels)} con datos")
+                if sin_uid:
+                    print(f"  sin UID: {', '.join(sin_uid)}")
             return 0
 
 

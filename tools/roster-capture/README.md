@@ -76,3 +76,25 @@ Los nombres con acentos vuelven sin ellos (Subaru por Subâru): el alfabeto del
 reconocedor no los tiene. No se corrige aqui a proposito, porque la lectura es
 identica siempre y eso es lo unico que necesita el emparejado contra un roster
 ya conocido. La ortografia correcta se confirma una vez, a mano.
+
+## Identificacion en vivo
+
+Mientras capturas, cada fotograma se lee en segundo plano y la consola informa
+de quien es:
+
+```
+  14:51:44  lista  #012 guardado  SIGUIENTE
+       UID de Muerte: 1087315722   (7 identificados)
+  14:51:52  panel  #031 guardado  SIGUIENTE
+       datos de Muerte   (fotograma 2)
+```
+
+Leer un fotograma cuesta un par de segundos, asi que se hace en un hilo aparte
+y el aviso llega mientras haces el clic siguiente; la captura nunca se detiene.
+
+Si aparecen datos de alguien cuyo panel social todavia no se ha leido, se marca
+`<- sin UID todavia`. Eso significa que te saltaste su retrato: vuelve a el
+antes de seguir, que en ese momento cuesta un clic. Al terminar se listan los
+que quedaron sin UID.
+
+Con `--no-identify` se desactiva, y el arranque es inmediato.
