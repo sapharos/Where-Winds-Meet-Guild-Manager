@@ -1,8 +1,41 @@
 # Self-hosting
 
-The app is a static single-page bundle: Vite builds it, nginx serves it, and all
-guild data lives in the browser's localStorage. There is no backend and no
-database, so the container is stateless and safe to recreate at any time.
+Two containers:
+
+- **web** — nginx serving the built React app, and proxying `/api` to the API so
+  everything is one origin (no CORS setup, no second port to expose).
+- **api** — Node/Express talking to PostgreSQL.
+
+PostgreSQL is *not* part of this stack. The API connects to the server you
+already run.
+
+## Configure
+
+Copy `.env.example` to `.env` (or paste the same keys as stack environment
+variables in Portainer):
+
+```
+DATABASE_URL=postgres://user:password@postgres:5432/wwm_guild
+DATABASE_SSL=false
+GUILD_ID=default-guild
+GUILD_NAME=My Guild
+WEB_PORT=8085
+```
+
+When PostgreSQL runs as another container, the host in `DATABASE_URL` is its
+container name — but only if both stacks share a Docker network. Attach this one
+by uncommenting the `networks` block at the bottom of `docker-compose.yml` and
+filling in the network your database is on. If instead you reach the database by
+host IP, no network change is needed.
+
+Create the database and a user before the first start; the API creates its own
+tables but will not create the database itself:
+
+```sql
+CREATE DATABASE wwm_guild;
+CREATE USER wwm WITH PASSWORD 'something-long';
+GRANT ALL PRIVILEGES ON DATABASE wwm_guild TO wwm;
+```
 
 ## Portainer (git stack)
 
@@ -10,40 +43,45 @@ database, so the container is stateless and safe to recreate at any time.
 2. Repository URL: `https://github.com/sapharos/Where-Winds-Meet-Guild-Manager`
 3. Reference: `refs/heads/master`
 4. Compose path: `docker-compose.yml`
-5. Deploy.
+5. Add the environment variables above.
+6. Deploy.
 
-Portainer builds the image on the host and publishes it on port `8085`. Change
-the host port in `docker-compose.yml` if that one is taken.
+The schema is created on first start. `GET /api/health` returns `{"status":"ok"}`
+once the API is connected, which is the quickest way to confirm the database
+credentials are right.
 
-## Plain Docker
+## Running it locally
 
-```bash
-docker compose up -d --build
-```
-
-## Base path
-
-`BASE_PATH` controls the URL prefix Vite bakes into the asset links. The
-Dockerfile sets it to `/` because nginx serves the app from the container root.
-Leave it alone unless you put the app behind a reverse proxy on a subpath, e.g.
-`/guild/`:
+`docker-compose.dev.yml` adds a throwaway PostgreSQL so the whole stack runs on a
+laptop without touching the real server:
 
 ```bash
-docker build --build-arg BASE_PATH=/guild/ -t wwm-guild-manager .
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 ```
 
-The default when the variable is unset is `/Where-Winds-Meet-Guild-Manager/`,
-which is what the upstream GitHub Pages deploy needs.
+To wipe that local database, `docker compose ... down -v`.
 
-## Internet access
+## Schema
 
-The page pulls Tailwind, Font Awesome, and Google Fonts from public CDNs at
-runtime, so client browsers need outbound internet even though the server is
-local. The Strategic Link feature also relies on PeerJS's public broker to
-introduce peers before they connect directly.
+`server/schema.sql`. Every row carries a `guild_id`, so one database can hold
+several guilds later without a migration. There is also a `users` table with
+`password_hash` and `role` — unused today, present so that adding logins is a
+matter of writing endpoints rather than restructuring live data.
 
-## Data
+## What this does not do yet
 
-Everything is per-browser. Members and war plans saved on one machine are not
-visible on another unless you use Export/Import or the live Strategic Link
-session. Rebuilding or deleting the container does not touch that data.
+**There is no authentication.** Anyone who can reach the web port can read and
+edit the roster and the war plans. Keep it on your LAN or behind a VPN or an
+authenticating reverse proxy until logins exist.
+
+**Last write wins.** Each save replaces a whole collection in one transaction, so
+the data is never left half-written, but two people editing the roster at the
+same time will have one overwrite the other. The Strategic Link (PeerJS) feature
+still works as before and is the intended way to run a planning session with
+several people watching.
+
+## Data safety
+
+All guild data lives in PostgreSQL, so back it up the way you back up that
+server. Export/Import still work and now read and write through the API; a
+backup file exported from the old localStorage build imports cleanly.

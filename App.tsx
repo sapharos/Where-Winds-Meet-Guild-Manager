@@ -14,6 +14,9 @@ const App: React.FC = () => {
   const [sessions, setSessions] = useState<GuildWarSession[]>([]);
   const [ranks, setRanks] = useState<GuildRank[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Collaboration State
@@ -23,43 +26,60 @@ const App: React.FC = () => {
   const connectionsRef = useRef<any[]>([]);
   const [connectedPeers, setConnectedPeers] = useState(0);
 
-  const loadAllData = useCallback(() => {
-    const loadedPlayers = storageService.getPlayers();
-    const loadedSessions = storageService.getSessions();
-    const loadedRanks = storageService.getRanks();
-    
-    setPlayers(loadedPlayers);
-    setSessions(loadedSessions);
-    
-    if (loadedRanks.length === 0) {
-      const defaultRanks: GuildRank[] = [
-        { id: 'rank-leader', name: 'Guild Leader', color: '#fbbf24' },
-        { id: 'rank-manager', name: 'Guild Manager', color: '#60a5fa' },
-      ];
-      setRanks(defaultRanks);
-      storageService.saveRanks(defaultRanks);
-    } else {
-      setRanks(loadedRanks);
-    }
-    
-    if (loadedSessions.length > 0) {
-      setActiveSessionId(loadedSessions[0].id);
-    } else {
-      const newSession: GuildWarSession = {
-        id: 'initial-session',
-        name: 'Operation: Wind Guard',
-        date: new Date().toISOString(),
-        assignments: [],
-        groups: [...DEFAULT_GROUPS]
-      };
-      setSessions([newSession]);
-      setActiveSessionId(newSession.id);
-      storageService.saveSessions([newSession]);
+  // Surfaces a write failure instead of letting the UI show state the server
+  // never accepted.
+  const persist = useCallback((op: Promise<unknown>) => {
+    op.then(() => setSaveError(null)).catch((err) => {
+      console.error('Save failed', err);
+      setSaveError('Changes could not be saved. Check the connection to the server.');
+    });
+  }, []);
+
+  const loadAllData = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const { players: loadedPlayers, sessions: loadedSessions, ranks: loadedRanks } =
+        await storageService.getState();
+
+      setPlayers(loadedPlayers);
+      setSessions(loadedSessions);
+
+      if (loadedRanks.length === 0) {
+        const defaultRanks: GuildRank[] = [
+          { id: 'rank-leader', name: 'Guild Leader', color: '#fbbf24' },
+          { id: 'rank-manager', name: 'Guild Manager', color: '#60a5fa' },
+        ];
+        setRanks(defaultRanks);
+        await storageService.saveRanks(defaultRanks);
+      } else {
+        setRanks(loadedRanks);
+      }
+
+      if (loadedSessions.length > 0) {
+        setActiveSessionId(loadedSessions[0].id);
+      } else {
+        const newSession: GuildWarSession = {
+          id: 'initial-session',
+          name: 'Operation: Wind Guard',
+          date: new Date().toISOString(),
+          assignments: [],
+          groups: [...DEFAULT_GROUPS]
+        };
+        setSessions([newSession]);
+        setActiveSessionId(newSession.id);
+        await storageService.saveSessions([newSession]);
+      }
+      setLoadError(null);
+    } catch (err) {
+      console.error('Load failed', err);
+      setLoadError('Could not reach the guild server. Data shown may be incomplete.');
+    } finally {
+      setIsLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    loadAllData();
+    void loadAllData();
   }, [loadAllData]);
 
   // PeerJS logic
@@ -163,53 +183,53 @@ const App: React.FC = () => {
     setConnectedPeers(0);
     setMyPeerId(null);
     setPeerRole('STANDALONE');
-    loadAllData(); // Revert to local state
+    void loadAllData(); // Revert to the server's copy
   };
 
   const handleAddPlayer = (p: Player) => {
     if (peerRole === 'CLIENT') return;
     const updated = [...players, p];
     setPlayers(updated);
-    storageService.savePlayers(updated);
+    persist(storageService.savePlayers(updated));
   };
 
   const handleUpdatePlayer = (p: Player) => {
     if (peerRole === 'CLIENT') return;
     const updated = players.map(prev => prev.id === p.id ? p : prev);
     setPlayers(updated);
-    storageService.savePlayers(updated);
+    persist(storageService.savePlayers(updated));
   };
 
   const handleDeletePlayer = (id: string) => {
     if (peerRole === 'CLIENT') return;
     const updated = players.filter(p => p.id !== id);
     setPlayers(updated);
-    storageService.savePlayers(updated);
-    
+    persist(storageService.savePlayers(updated));
+
     const updatedSessions = sessions.map(s => ({
       ...s,
       assignments: s.assignments.filter(a => a.playerId !== id)
     }));
     setSessions(updatedSessions);
-    storageService.saveSessions(updatedSessions);
+    persist(storageService.saveSessions(updatedSessions));
   };
 
   const handleAddRank = (r: GuildRank) => {
     if (peerRole === 'CLIENT') return;
     const updated = [...ranks, r];
     setRanks(updated);
-    storageService.saveRanks(updated);
+    persist(storageService.saveRanks(updated));
   };
 
   const handleDeleteRank = (id: string) => {
     if (peerRole === 'CLIENT') return;
     const updated = ranks.filter(r => r.id !== id);
     setRanks(updated);
-    storageService.saveRanks(updated);
-    
+    persist(storageService.saveRanks(updated));
+
     const updatedPlayers = players.map(p => p.rankId === id ? { ...p, rankId: undefined } : p);
     setPlayers(updatedPlayers);
-    storageService.savePlayers(updatedPlayers);
+    persist(storageService.savePlayers(updatedPlayers));
   };
 
   const handleExport = () => storageService.exportAllData();
@@ -221,8 +241,10 @@ const App: React.FC = () => {
     if (file) {
       const success = await storageService.importAllData(file);
       if (success) {
-        loadAllData();
+        await loadAllData();
         alert("Guild data successfully imported!");
+      } else {
+        alert("That file could not be imported.");
       }
     }
     if (e.target) e.target.value = '';
@@ -234,7 +256,7 @@ const App: React.FC = () => {
     if (peerRole === 'CLIENT') return;
     const updated = sessions.map(s => s.id === updatedSession.id ? updatedSession : s);
     setSessions(updated);
-    storageService.saveSessions(updated);
+    persist(storageService.saveSessions(updated));
   };
 
   return (
@@ -306,8 +328,20 @@ const App: React.FC = () => {
         </div>
       </header>
 
+      {(loadError || saveError) && (
+        <div className="bg-red-950/80 border-b border-red-800 text-red-200 text-sm px-6 py-2 flex items-center gap-3">
+          <i className="fa-solid fa-triangle-exclamation"></i>
+          <span>{loadError || saveError}</span>
+        </div>
+      )}
+
       <main className="max-w-[1600px] mx-auto p-6">
-        {activeTab === 'roster' ? (
+        {isLoading ? (
+          <div className="flex items-center justify-center h-96 text-slate-500 gap-3">
+            <i className="fa-solid fa-circle-notch fa-spin"></i>
+            Loading guild data...
+          </div>
+        ) : activeTab === 'roster' ? (
           <MemberManager 
             players={players} 
             ranks={ranks}

@@ -1,9 +1,34 @@
 services:
-  guild-manager:
+  web:
     build:
       context: .
-    image: wwm-guild-manager:latest
-    container_name: wwm-guild-manager
+    image: wwm-guild-manager-web:latest
+    container_name: wwm-guild-manager-web
     ports:
-      - "8085:80"
+      - "${WEB_PORT:-8085}:80"
+    depends_on:
+      - api
     restart: unless-stopped
+
+  api:
+    build:
+      context: ./server
+    image: wwm-guild-manager-api:latest
+    container_name: wwm-guild-manager-api
+    environment:
+      # Points at your existing PostgreSQL. See .env.example. The API refuses to
+      # start, with an explanatory log line, if this is left empty.
+      DATABASE_URL: ${DATABASE_URL:-}
+      DATABASE_SSL: ${DATABASE_SSL:-false}
+      GUILD_ID: ${GUILD_ID:-default-guild}
+      GUILD_NAME: ${GUILD_NAME:-My Guild}
+    restart: unless-stopped
+
+# The API talks to a PostgreSQL that lives outside this stack. Attach the
+# network your database is already on and uncomment, so "api" can resolve it
+# by container name.
+#
+# networks:
+#   default:
+#     name: <your-postgres-network>
+#     external: true

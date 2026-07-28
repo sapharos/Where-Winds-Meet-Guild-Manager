@@ -1,0 +1,30 @@
+# Adds a throwaway PostgreSQL so the stack can run end to end on a laptop.
+# Not for the real deployment -- there, the API points at your existing server.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: wwm-guild-manager-db
+    environment:
+      POSTGRES_USER: wwm
+      POSTGRES_PASSWORD: wwm_dev_password
+      POSTGRES_DB: wwm_guild
+    volumes:
+      - wwm_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wwm -d wwm_guild"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    environment:
+      DATABASE_URL: postgres://wwm:wwm_dev_password@postgres:5432/wwm_guild
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  wwm_pgdata:
