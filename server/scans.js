@@ -69,24 +69,41 @@ const SUGGEST_FLOOR = 0.6;
 export async function matchEntries(entries) {
   const [aliases, players] = await Promise.all([
     pool.query(`SELECT alias, player_id FROM player_aliases WHERE guild_id = $1`, [GUILD_ID]),
-    pool.query(`SELECT id, name FROM players WHERE guild_id = $1`, [GUILD_ID]),
+    pool.query(`SELECT id, name, game_uid AS "gameUid" FROM players WHERE guild_id = $1`, [GUILD_ID]),
   ]);
 
   const byAlias = new Map(aliases.rows.map((r) => [fold(r.alias), r.player_id]));
+  const byUid = new Map(players.rows.filter((p) => p.gameUid).map((p) => [p.gameUid, p.id]));
   const roster = players.rows;
 
   return entries.map((entry) => {
     const read = entry.nameAsRead ?? '';
-    const knownId = byAlias.get(fold(read));
+    const base = { nameAsRead: read, fields: entry.fields ?? {}, uid: entry.uid ?? null };
 
+    // The account number outranks everything: it is the one identifier the
+    // member cannot change, so it still matches after a rename.
+    const uidMatch = entry.uid ? byUid.get(String(entry.uid)) : undefined;
+    if (uidMatch) {
+      const player = roster.find((p) => p.id === uidMatch);
+      return {
+        ...base,
+        match: 'uid',
+        playerId: uidMatch,
+        playerName: player?.name ?? null,
+        renamed: player ? fold(player.name) !== fold(read) : false,
+        suggestions: [],
+      };
+    }
+
+    const knownId = byAlias.get(fold(read));
     if (knownId) {
       const player = roster.find((p) => p.id === knownId);
       return {
-        nameAsRead: read,
-        fields: entry.fields ?? {},
+        ...base,
         match: 'alias',
         playerId: knownId,
         playerName: player?.name ?? null,
+        renamed: false,
         suggestions: [],
       };
     }
@@ -101,11 +118,11 @@ export async function matchEntries(entries) {
     // less is a suggestion, never an automatic decision.
     const certain = ranked.find((s) => s.score === 1);
     return {
-      nameAsRead: read,
-      fields: entry.fields ?? {},
+      ...base,
       match: certain ? 'exact' : ranked.length ? 'suggested' : 'none',
       playerId: certain?.playerId ?? null,
       playerName: certain?.name ?? null,
+      renamed: false,
       suggestions: ranked,
     };
   });
@@ -132,14 +149,32 @@ export async function commitScan({ scannedAt, entries }) {
         playerId = randomUUID();
         const f = entry.fields ?? {};
         await client.query(
-          `INSERT INTO players (guild_id, id, name, role, level, sect, status)
-           VALUES ($1, $2, $3, 'DPS', $4, $5, 'Full Member')`,
-          [GUILD_ID, playerId, entry.createAs, f.level ?? 1, f.sect ?? 'Sectless'],
+          `INSERT INTO players (guild_id, id, name, role, level, sect, status, game_uid, online_id)
+           VALUES ($1, $2, $3, 'DPS', $4, $5, 'Full Member', $6, $7)`,
+          [
+            GUILD_ID,
+            playerId,
+            entry.createAs,
+            f.level ?? 1,
+            f.sect ?? 'Sectless',
+            entry.uid ? String(entry.uid) : null,
+            entry.onlineId ?? null,
+          ],
         );
         created.push({ id: playerId, name: entry.createAs });
       }
 
       if (!playerId) continue;
+
+      // Learn the account number the first time a sweep supplies it, so later
+      // sweeps match on it instead of on the name.
+      if (entry.uid) {
+        await client.query(
+          `UPDATE players SET game_uid = $1, online_id = COALESCE($2, online_id)
+            WHERE guild_id = $3 AND id = $4`,
+          [String(entry.uid), entry.onlineId ?? null, GUILD_ID, playerId],
+        );
+      }
 
       if (entry.nameAsRead) {
         await client.query(

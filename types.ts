@@ -56,6 +56,8 @@ export interface TacticalGroup {
 export interface Player {
   id: string;
   name: string;
+  gameUid?: string;
+  onlineId?: string;
   role: Role;
   level: number;
   sect: string;
@@ -126,13 +128,17 @@ export type ScanFields = Record<string, string | number | null>;
 export interface ScanDocument {
   scannedAt?: string;
   source?: string;
-  entries: { nameAsRead: string; fields: ScanFields }[];
+  entries: { nameAsRead: string; fields: ScanFields; uid?: string; onlineId?: string }[];
 }
 
 export interface ScanPreviewEntry {
   nameAsRead: string;
   fields: ScanFields;
-  match: 'alias' | 'exact' | 'suggested' | 'none';
+  uid: string | null;
+  // 'uid' outranks the rest: the account number cannot be changed, so it still
+  // identifies a member who renamed themselves.
+  match: 'uid' | 'alias' | 'exact' | 'suggested' | 'none';
+  renamed?: boolean;
   playerId: string | null;
   playerName: string | null;
   suggestions: { playerId: string; name: string; score: number }[];

@@ -186,6 +186,67 @@ def pair_fields(readings: list[Reading], width: int) -> list[tuple[str, str, flo
     return found
 
 
+# The social popup, opened by clicking a member's portrait. It lands inside the
+# member-list region, so it is already in the list-*.png frames and needs no
+# extra capturing -- only recognising.
+UID_PATTERN = re.compile(r"UID\s*[::]?\s*(\d{5,})", re.IGNORECASE)
+ONLINE_ID_PATTERN = re.compile(r"Online\s*ID\s*[::]?\s*(\S+)", re.IGNORECASE)
+
+# How far above the UID line the member's name sits, as a share of the popup.
+NAME_ABOVE_UID = (240, 350)
+
+
+def read_popup(readings: list[Reading]) -> dict | None:
+    """Pull the account number out of a frame showing the social popup."""
+    joined = [(r, f"{r.text}") for r in readings]
+
+    uid = None
+    uid_box = None
+    for reading, text in joined:
+        found = UID_PATTERN.search(text)
+        if found:
+            uid, uid_box = found.group(1), reading
+            break
+
+    # The recogniser sometimes splits "UID:" from its digits into two boxes.
+    if uid is None:
+        for i, (reading, text) in enumerate(joined):
+            if not re.fullmatch(r"UID\s*[::]?", text.strip(), re.IGNORECASE):
+                continue
+            near = [
+                r
+                for r, t in joined
+                if abs(r.y_mid - reading.y_mid) < 12 and r.x0 > reading.x0 and t.strip().isdigit()
+            ]
+            if near:
+                uid, uid_box = near[0].text.strip(), reading
+                break
+
+    if uid is None or uid_box is None:
+        return None
+
+    online_id = None
+    for _, text in joined:
+        found = ONLINE_ID_PATTERN.search(text)
+        if found:
+            online_id = found.group(1)
+            break
+
+    # The name is the tallest line in the band above the UID -- it is the only
+    # thing in the popup rendered at that size.
+    low, high = uid_box.y_mid - NAME_ABOVE_UID[1], uid_box.y_mid - NAME_ABOVE_UID[0]
+    candidates = [
+        r
+        for r in readings
+        if low <= r.y_mid <= high and not r.text.strip().isdigit() and len(r.text.strip()) > 1
+    ]
+    if not candidates:
+        return None
+
+    name = max(candidates, key=lambda r: r.y1 - r.y0).text.strip()
+    return {"nameAsRead": name, "uid": uid, "onlineId": online_id}
+
+
 def scanned_at(folder: Path) -> str:
     """Date the sweep was taken, from the folder name the capture tool made."""
     from datetime import datetime
@@ -259,8 +320,19 @@ def main() -> int:
             key, _ = FIELDS[known]
             member.record(key, raw, confidence)
 
+    # Account numbers come from the social popup, which lands in the list frames.
+    identities: dict[str, dict] = {}
+    list_frames = sorted(args.folder.glob("list-*.png"))
+    for n, path in enumerate(list_frames, 1):
+        print(f"\r  buscando UIDs {n}/{len(list_frames)}", end="", flush=True)
+        image = Image.open(path)
+        found = read_popup(run_ocr(engine, image, cache, path.name))
+        if found:
+            identities[found["nameAsRead"]] = found
+
     cache_path.write_text(json.dumps(cache))
-    print(f"\r  {len(frames)} fotogramas leidos, {skipped} sin cabecera reconocible\n")
+    print(f"\r  {len(frames)} fotogramas leidos, {skipped} sin cabecera reconocible")
+    print(f"  {len(identities)} UID encontrados en {len(list_frames)} fotogramas de lista\n")
 
     kinds = {key: kind for key, kind in FIELDS.values()}
     kinds.update({"level": "int", "position": "text", "sect": "text"})
@@ -276,14 +348,18 @@ def main() -> int:
                 "framesAgreeing": agreeing,
                 "framesSeen": len(votes),
             }
-        roster.append(
-            {
-                "nameAsRead": member.name,
-                "frames": len(member.frames),
-                "fields": fields,
-                "quality": quality,
-            }
-        )
+        entry = {
+            "nameAsRead": member.name,
+            "frames": len(member.frames),
+            "fields": fields,
+            "quality": quality,
+        }
+        identity = identities.get(member.name)
+        if identity:
+            entry["uid"] = identity["uid"]
+            if identity.get("onlineId"):
+                entry["onlineId"] = identity["onlineId"]
+        roster.append(entry)
 
     # Shaped for POST /api/scans/preview, so the file goes straight into the app.
     document = {
@@ -296,14 +372,21 @@ def main() -> int:
     out.write_text(json.dumps(document, indent=2, ensure_ascii=False), encoding="utf-8")
 
     expected = len(FIELDS) + 3
-    print(f"{'miembro':16s} {'frames':>7s} {'campos':>8s}   faltantes")
-    print("-" * 72)
+    print(f"{'miembro':16s} {'frames':>7s} {'campos':>8s} {'UID':>12s}   faltantes")
+    print("-" * 86)
     for record in roster:
         got = {k for k, v in record["fields"].items() if v is not None}
         missing = sorted(({key for key, _ in FIELDS.values()} | {"level", "position", "sect"}) - got)
         print(
-            f"{record['nameAsRead']:16s} {record['frames']:7d} {len(got):5d}/{expected:<2d}   "
-            f"{', '.join(missing) if missing else 'ninguno'}"
+            f"{record['nameAsRead']:16s} {record['frames']:7d} {len(got):5d}/{expected:<2d} "
+            f"{record.get('uid', '-'):>12s}   {', '.join(missing) if missing else 'ninguno'}"
+        )
+
+    without_uid = [r["nameAsRead"] for r in roster if "uid" not in r]
+    if without_uid:
+        print(
+            f"\nSin UID ({len(without_uid)}): {', '.join(without_uid)}"
+            "\n  Abre el panel social de cada uno (clic en su retrato) durante la captura."
         )
 
     print(f"\nEscrito {out}")

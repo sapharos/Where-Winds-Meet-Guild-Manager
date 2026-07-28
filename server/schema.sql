@@ -71,9 +71,18 @@ CREATE TABLE IF NOT EXISTS war_sessions (
   PRIMARY KEY (guild_id, id)
 );
 
+-- The game's own account number for a member, shown in the social popup. It
+-- cannot be changed, so it survives a rename, which no name-based match can.
+ALTER TABLE players ADD COLUMN IF NOT EXISTS game_uid  TEXT;
+ALTER TABLE players ADD COLUMN IF NOT EXISTS online_id TEXT;
+
+CREATE UNIQUE INDEX IF NOT EXISTS players_game_uid_idx
+  ON players (guild_id, game_uid) WHERE game_uid IS NOT NULL;
+
 -- What the recogniser reads for a member, which is stable but not always the
 -- real spelling: it has no diacritics, so Subâru always comes back as Subaru.
 -- Confirming that once here is what stops every later scan from asking again.
+-- Weaker than game_uid: a rename invalidates it, a uid never does.
 CREATE TABLE IF NOT EXISTS player_aliases (
   guild_id   TEXT NOT NULL REFERENCES guilds(id) ON DELETE CASCADE,
   alias      TEXT NOT NULL,

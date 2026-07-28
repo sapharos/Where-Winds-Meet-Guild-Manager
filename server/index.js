@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import cookieParser from 'cookie-parser';
 import express from 'express';
-import { pool, migrate, replaceAll, GUILD_ID } from './db.js';
+import { pool, migrate, replaceAll, replacePlayers, GUILD_ID } from './db.js';
 import { ROLES, PERMISSIONS } from './permissions.js';
 import { matchEntries, commitScan, historyFor, scanSummary } from './scans.js';
 import {
@@ -176,7 +176,8 @@ app.put('/api/permissions', requireAuth, requirePermission('permissions.manage')
 app.get('/api/state', requireAuth, asHandler(async (_req, res) => {
   const [players, ranks, sessions] = await Promise.all([
     pool.query(
-      `SELECT id, name, role, level, sect, platform, status, rank_id AS "rankId", notes
+      `SELECT id, name, role, level, sect, platform, status, rank_id AS "rankId", notes,
+              game_uid AS "gameUid", online_id AS "onlineId"
          FROM players WHERE guild_id = $1 ORDER BY name`,
       [GUILD_ID],
     ),
@@ -194,6 +195,8 @@ app.get('/api/state', requireAuth, asHandler(async (_req, res) => {
       platform: p.platform ?? undefined,
       rankId: p.rankId ?? undefined,
       notes: p.notes ?? undefined,
+      gameUid: p.gameUid ?? undefined,
+      onlineId: p.onlineId ?? undefined,
     })),
     ranks: ranks.rows,
     sessions: sessions.rows.map((s) => ({ ...s, date: s.date.toISOString() })),
@@ -203,12 +206,7 @@ app.get('/api/state', requireAuth, asHandler(async (_req, res) => {
 app.put('/api/players', requireAuth, requirePermission('roster.edit'), asHandler(async (req, res) => {
   const players = requireArray(req, res);
   if (!players) return;
-  await replaceAll(
-    'players',
-    ['id', 'name', 'role', 'level', 'sect', 'platform', 'status', 'rank_id', 'notes'],
-    players,
-    (p) => [p.id, p.name, p.role, p.level, p.sect, p.platform ?? null, p.status, p.rankId ?? null, p.notes ?? null],
-  );
+  await replacePlayers(players);
   res.json({ saved: players.length });
 }));
 

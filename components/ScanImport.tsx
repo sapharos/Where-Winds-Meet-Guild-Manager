@@ -64,6 +64,7 @@ const ScanImport: React.FC<Props> = ({ players, onImported }) => {
           return {
             nameAsRead: entry.nameAsRead,
             fields: entry.fields,
+            ...(entry.uid ? { uid: entry.uid } : {}),
             ...(decision.kind === 'link'
               ? { playerId: decision.playerId }
               : { createAs: decision.name.trim() }),
@@ -186,6 +187,7 @@ const ScanImport: React.FC<Props> = ({ players, onImported }) => {
               <thead>
                 <tr className="text-left text-slate-400">
                   <th className="p-2 border-b border-slate-800 font-semibold">Leído</th>
+                  <th className="p-2 border-b border-slate-800 font-semibold">UID</th>
                   <th className="p-2 border-b border-slate-800 font-semibold">Corresponde a</th>
                   <th className="p-2 border-b border-slate-800 font-semibold text-right">Actividad</th>
                   <th className="p-2 border-b border-slate-800 font-semibold text-right">Campos</th>
@@ -202,11 +204,25 @@ const ScanImport: React.FC<Props> = ({ players, onImported }) => {
                     <tr key={entry.nameAsRead} className="hover:bg-slate-800/30">
                       <td className="p-2 border-b border-slate-800/60">
                         <span className="text-slate-200 font-mono">{entry.nameAsRead}</span>
+                        {entry.match === 'uid' && (
+                          <span className="ml-2 text-[9px] uppercase tracking-wider bg-sky-700 text-white px-1.5 py-0.5 rounded">
+                            por UID
+                          </span>
+                        )}
                         {entry.match === 'alias' && (
                           <span className="ml-2 text-[9px] uppercase tracking-wider bg-emerald-800 text-white px-1.5 py-0.5 rounded">
                             conocido
                           </span>
                         )}
+                        {entry.renamed && (
+                          <div className="text-[10px] text-amber-500 mt-0.5">
+                            <i className="fa-solid fa-arrow-right-arrow-left mr-1"></i>
+                            se renombró: antes {entry.playerName}
+                          </div>
+                        )}
+                      </td>
+                      <td className="p-2 border-b border-slate-800/60 font-mono text-xs text-slate-500">
+                        {entry.uid ?? <span className="text-slate-700">—</span>}
                       </td>
                       <td className="p-2 border-b border-slate-800/60">
                         <select
