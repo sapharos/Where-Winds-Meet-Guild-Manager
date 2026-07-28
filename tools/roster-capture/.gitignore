@@ -1,2 +1,4 @@
 # Captured screenshots stay local; they are large and specific to one scan.
 frames/
+__pycache__/
+*.pyc
