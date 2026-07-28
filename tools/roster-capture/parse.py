@@ -202,7 +202,14 @@ UID_DIGITS = re.compile(r"^\d{8,12}$")
 # Bounds relative to the Profile button, as shares of the frame. The horizontal
 # one matters as much as the vertical: the popup covers only part of the member
 # list, and the rows still visible beside it are otherwise candidates.
-POPUP_BESIDE_PROFILE = (-0.14, 0.34)
+POPUP_BESIDE_PROFILE = (-0.14, 0.30)
+
+# Every layout stacks the same three lines at the top: the name, then the level
+# and combat role, then the sect and guild. So the role line locates the name,
+# which picking the largest text does not: an all-caps name like GIANNAA has no
+# descenders and measures shorter than the sect beneath it.
+POPUP_ROLES = ("DPS", "Tank", "Healer")
+NAME_ABOVE_ROLE = (0.03, 0.12)
 NAME_ABOVE_PROFILE = 0.45
 # The popup grows extra action buttons -- request to join a team, invite to
 # co-op -- depending on the member, which pushes the account number anywhere
@@ -253,20 +260,42 @@ def read_popup(readings: list[Reading], width: int, height: int) -> dict | None:
             online_id = found.group(1)
             break
 
-    # The name is the tallest line above the buttons; nothing else in the popup
-    # is rendered at that size.
-    candidates = [
-        r
-        for r in inside
-        if anchor.y_mid - NAME_ABOVE_PROFILE * height <= r.y_mid < anchor.y_mid
-        and not r.text.strip().isdigit()
-        and len(r.text.strip()) > 1
-    ]
-    if not candidates:
+    name = read_popup_name(inside, anchor, height)
+    if name is None:
         return None
-
-    name = max(candidates, key=lambda r: r.y1 - r.y0).text.strip()
     return {"nameAsRead": name, "uid": uid, "onlineId": online_id}
+
+
+def read_popup_name(inside: list[Reading], anchor: Reading, height: float) -> str | None:
+    """The line above the combat role, or failing that the biggest above the buttons."""
+    usable = [r for r in inside if len(r.text.strip()) > 1 and not r.text.strip().isdigit()]
+
+    role = next(
+        (
+            r
+            for r in inside
+            if any(similarity(r.text, known) > 0.85 for known in POPUP_ROLES)
+        ),
+        None,
+    )
+    if role is not None:
+        near = [
+            r
+            for r in usable
+            if NAME_ABOVE_ROLE[0] * height <= role.y_mid - r.y_mid <= NAME_ABOVE_ROLE[1] * height
+        ]
+        if near:
+            # Closest above wins: the sect sits below the role, never between.
+            return min(near, key=lambda r: role.y_mid - r.y_mid).text.strip()
+
+    above = [
+        r
+        for r in usable
+        if anchor.y_mid - NAME_ABOVE_PROFILE * height <= r.y_mid < anchor.y_mid
+    ]
+    if not above:
+        return None
+    return max(above, key=lambda r: r.y1 - r.y0).text.strip()
 
 
 def scanned_at(folder: Path) -> str:
