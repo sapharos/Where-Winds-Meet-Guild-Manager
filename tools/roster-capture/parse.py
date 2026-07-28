@@ -411,6 +411,47 @@ def cleanup_older(folders: list[Path]) -> None:
         print(f"  borrada {folder.name}")
 
 
+def merge_near_duplicates(
+    members: dict[str, Member], identities: dict[str, dict]
+) -> list[tuple[str, str, int, int]]:
+    """Fold two readings of one member into the spelling the frames agree on.
+
+    Runs of similar strokes are where the recogniser slips -- Naoomiii comes
+    back as Naoomili -- and each spelling then collects its own frames. The
+    majority reading wins, exactly as competing values do. Two account numbers
+    that differ mean two people, however alike their names read, so a uid
+    always overrules the resemblance.
+    """
+    merged: list[tuple[str, str, int, int]] = []
+    order = sorted(members, key=lambda n: (-len(members[n].frames), n))
+
+    for keep in order:
+        if keep not in members:
+            continue
+        for other in order:
+            if other == keep or other not in members:
+                continue
+            if similarity(keep, other) < NEAR_DUPLICATE:
+                continue
+
+            kept_uid = (identities.get(keep) or {}).get("uid")
+            other_uid = (identities.get(other) or {}).get("uid")
+            if kept_uid and other_uid and kept_uid != other_uid:
+                continue
+
+            merged.append((other, keep, len(members[other].frames), len(members[keep].frames)))
+            members[keep].frames.extend(members[other].frames)
+            for key, votes in members[other].votes.items():
+                members[keep].votes.setdefault(key, []).extend(votes)
+
+            if other_uid and not kept_uid:
+                identities[keep] = {**identities[other], "nameAsRead": keep}
+            identities.pop(other, None)
+            del members[other]
+
+    return merged
+
+
 def scanned_at(folder: Path) -> str:
     """Date the sweep was taken, from the folder name the capture tool made."""
     from datetime import datetime
@@ -563,6 +604,8 @@ def main() -> int:
     for name in discarded:
         del members[name]
 
+    folded = merge_near_duplicates(members, identities)
+
     roster = []
     for member in sorted(members.values(), key=lambda m: m.name):
         fields, quality = {}, {}
@@ -610,6 +653,11 @@ def main() -> int:
 
     if discarded:
         print(f"\nDescartados por venir vacios ({len(discarded)}): {', '.join(sorted(discarded))}")
+
+    if folded:
+        print("\nLecturas unificadas (gano la que mas fotogramas repiten):")
+        for dropped, kept, n_drop, n_keep in folded:
+            print(f"  {dropped} ({n_drop}) -> {kept} ({n_keep})")
 
     names = [r["nameAsRead"] for r in roster]
     pairs = [
