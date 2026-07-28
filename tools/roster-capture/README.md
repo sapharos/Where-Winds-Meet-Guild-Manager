@@ -113,3 +113,20 @@ miembro, asi que el panel derecho capturado en ese mismo instante lleva el
 nombre real. `frames.jsonl` guarda cuando se escribio cada fotograma y `parse.py`
 los empareja por tiempo, de modo que el UID acaba bajo el nombre real y no bajo
 un mote que puede cambiar manana.
+
+## El barrido en varias sesiones
+
+Nada se envia al servidor mientras capturas: `capture.py` solo escribe PNG en
+disco. Puedes parar con Ctrl+C y seguir otro dia; cada sesion crea su propia
+carpeta.
+
+Para que las dos cuenten como un solo escaneo y no como dos, pasa todas las
+carpetas a la vez:
+
+```bash
+python parse.py frames/20260728-130959 frames/20260729-101500
+```
+
+Se fusionan por nombre de miembro: quien aparezca en ambas suma sus campos, y un
+UID capturado en la segunda se une a los datos de la primera. El `roster.json`
+sale con la fecha de la primera carpeta.

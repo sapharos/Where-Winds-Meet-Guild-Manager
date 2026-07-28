@@ -369,76 +369,98 @@ def settle(votes: list[tuple[str, float]], kind: str) -> tuple[object, float, in
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("folder", type=Path, help="a frames/<date>-<time> folder")
-    parser.add_argument("--out", type=Path, default=None, help="where to write the JSON (default: <folder>/roster.json)")
+    parser.add_argument(
+        "folders",
+        type=Path,
+        nargs="+",
+        help="one or more frames/<date>-<time> folders; several are merged into one sweep",
+    )
+    parser.add_argument("--out", type=Path, default=None, help="where to write the JSON (default: <first folder>/roster.json)")
     parser.add_argument("--no-cache", action="store_true", help="ignore any cached recognition")
     args = parser.parse_args()
 
-    frames = sorted(args.folder.glob("panel-*.png"))
-    if not frames:
-        print(f"No panel-*.png in {args.folder}", file=sys.stderr)
+    total_panels = sum(len(list(folder.glob("panel-*.png"))) for folder in args.folders)
+    if not total_panels:
+        print(f"No panel-*.png in {', '.join(str(f) for f in args.folders)}", file=sys.stderr)
         return 1
 
     from rapidocr_onnxruntime import RapidOCR
 
     engine = RapidOCR()
-    cache_path = args.folder / ".ocr-cache.json"
-    cache = {} if args.no_cache or not cache_path.exists() else json.loads(cache_path.read_text())
 
     members: dict[str, Member] = {}
-    panel_headers: dict[Path, str] = {}
-    skipped = 0
-
-    for n, path in enumerate(frames, 1):
-        print(f"\r  leyendo {n}/{len(frames)}  {path.name}", end="", flush=True)
-        image = Image.open(path)
-        readings = run_ocr(engine, image, cache, path.name)
-
-        header = read_header(readings, image.width, image.height)
-        if not header.get("name"):
-            skipped += 1
-            continue
-
-        panel_headers[path] = header["name"]
-        member = members.setdefault(header["name"], Member(name=header["name"]))
-        member.frames.append(path.name)
-        for key in ("level", "position", "sect"):
-            if key in header:
-                member.record(key, str(header[key]), 1.0)
-
-        for known, raw, confidence in pair_fields(readings, image.width):
-            key, _ = FIELDS[known]
-            member.record(key, raw, confidence)
-
-    # Account numbers come from the social popup, which lands in the list frames.
-    timeline = load_timeline(args.folder)
-    panel_names = {path.name: name for path, name in panel_headers.items()}
     identities: dict[str, dict] = {}
     aliases: list[tuple[str, str]] = []
+    skipped = 0
+    read_panels = 0
+    read_lists = 0
+    without_timeline = False
 
-    list_frames = sorted(args.folder.glob("list-*.png"))
-    for n, path in enumerate(list_frames, 1):
-        print(f"\r  buscando UIDs {n}/{len(list_frames)}", end="", flush=True)
-        image = Image.open(path)
-        found = read_popup(run_ocr(engine, image, cache, path.name), image.width, image.height)
-        if not found:
-            continue
+    # Each folder is one sitting at the keyboard. A sweep of seventy-six rarely
+    # fits in one, so several are merged here rather than landing in the history
+    # as separate scans -- but the frame times inside each restart from zero, so
+    # the popup pairing has to stay within its own folder.
+    for folder in args.folders:
+        cache_path = folder / ".ocr-cache.json"
+        cache = {} if args.no_cache or not cache_path.exists() else json.loads(cache_path.read_text())
+        timeline = load_timeline(folder)
+        panel_headers: dict[Path, str] = {}
 
-        # Members of some sects display a changeable alias in the popup instead
-        # of their name. Clicking the portrait also selects them, so the detail
-        # panel captured at that same moment carries the real one.
-        real = beside_in_time(timeline, path.name, panel_names)
-        if real and real != found["nameAsRead"]:
-            aliases.append((found["nameAsRead"], real))
-            found = {**found, "aliasAsRead": found["nameAsRead"], "nameAsRead": real}
-        identities[found["nameAsRead"]] = found
+        frames = sorted(folder.glob("panel-*.png"))
+        for n, path in enumerate(frames, 1):
+            print(f"\r  {folder.name}: leyendo {n}/{len(frames)}", end="", flush=True)
+            image = Image.open(path)
+            readings = run_ocr(engine, image, cache, path.name)
 
-    cache_path.write_text(json.dumps(cache))
-    print(f"\r  {len(frames)} fotogramas leidos, {skipped} sin cabecera reconocible")
-    print(f"  {len(identities)} UID encontrados en {len(list_frames)} fotogramas de lista")
+            header = read_header(readings, image.width, image.height)
+            if not header.get("name"):
+                skipped += 1
+                continue
+
+            panel_headers[path] = header["name"]
+            member = members.setdefault(header["name"], Member(name=header["name"]))
+            member.frames.append(path.name)
+            for key in ("level", "position", "sect"):
+                if key in header:
+                    member.record(key, str(header[key]), 1.0)
+
+            for known, raw, confidence in pair_fields(readings, image.width):
+                key, _ = FIELDS[known]
+                member.record(key, raw, confidence)
+
+        read_panels += len(frames)
+
+        # Account numbers come from the social popup, which lands in list frames.
+        panel_names = {path.name: name for path, name in panel_headers.items()}
+        list_frames = sorted(folder.glob("list-*.png"))
+        for n, path in enumerate(list_frames, 1):
+            print(f"\r  {folder.name}: buscando UIDs {n}/{len(list_frames)}", end="", flush=True)
+            image = Image.open(path)
+            found = read_popup(run_ocr(engine, image, cache, path.name), image.width, image.height)
+            if not found:
+                continue
+
+            # Members of some sects display a changeable alias in the popup
+            # instead of their name. Clicking the portrait also selects them, so
+            # the detail panel captured at that same moment carries the real one.
+            real = beside_in_time(timeline, path.name, panel_names)
+            if real and real != found["nameAsRead"]:
+                aliases.append((found["nameAsRead"], real))
+                found = {**found, "aliasAsRead": found["nameAsRead"], "nameAsRead": real}
+            identities[found["nameAsRead"]] = found
+
+        read_lists += len(list_frames)
+        without_timeline = without_timeline or (not timeline and bool(list_frames))
+        cache_path.write_text(json.dumps(cache))
+
+    frames = [f for folder in args.folders for f in sorted(folder.glob("panel-*.png"))]
+    list_frames = [f for folder in args.folders for f in sorted(folder.glob("list-*.png"))]
+
+    print(f"\r  {read_panels} fotogramas leidos, {skipped} sin cabecera reconocible")
+    print(f"  {len(identities)} UID encontrados en {read_lists} fotogramas de lista")
     for shown, real in aliases:
         print(f"    '{shown}' es el mote de {real}")
-    if not timeline and list_frames:
+    if without_timeline:
         print("    (sin frames.jsonl: los motes de secta no se pueden resolver)")
     print()
 
@@ -471,12 +493,12 @@ def main() -> int:
 
     # Shaped for POST /api/scans/preview, so the file goes straight into the app.
     document = {
-        "scannedAt": scanned_at(args.folder),
-        "source": args.folder.name,
+        "scannedAt": scanned_at(args.folders[0]),
+        "source": ", ".join(f.name for f in args.folders),
         "entries": roster,
     }
 
-    out = args.out or args.folder / "roster.json"
+    out = args.out or args.folders[0] / "roster.json"
     out.write_text(json.dumps(document, indent=2, ensure_ascii=False), encoding="utf-8")
 
     expected = len(FIELDS) + 3
