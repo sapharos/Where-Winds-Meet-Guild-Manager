@@ -8,8 +8,6 @@ CREATE TABLE IF NOT EXISTS guilds (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Not read by the app yet. It exists so that adding login later is a matter of
--- writing the endpoints, not migrating live guild data.
 CREATE TABLE IF NOT EXISTS users (
   id            TEXT PRIMARY KEY,
   guild_id      TEXT NOT NULL REFERENCES guilds(id) ON DELETE CASCADE,
@@ -19,6 +17,24 @@ CREATE TABLE IF NOT EXISTS users (
   player_id     TEXT,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (guild_id, username)
+);
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS disabled BOOLEAN NOT NULL DEFAULT false;
+
+-- Which permissions each role holds. A row is a grant; no row is a denial.
+-- Editable at runtime, which is why this is data rather than a constant.
+CREATE TABLE IF NOT EXISTS role_permissions (
+  guild_id   TEXT NOT NULL REFERENCES guilds(id) ON DELETE CASCADE,
+  role       TEXT NOT NULL,
+  permission TEXT NOT NULL,
+  PRIMARY KEY (guild_id, role, permission)
+);
+
+-- Internal key/value, currently just the signing secret so that sessions
+-- survive a restart when none was supplied through the environment.
+CREATE TABLE IF NOT EXISTS app_settings (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS ranks (

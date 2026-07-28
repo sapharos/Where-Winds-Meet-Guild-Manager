@@ -79,6 +79,47 @@ export interface GuildWarSession {
   groups: TacticalGroup[];
 }
 
+// Authentication and access control. Named UserRole to keep it distinct from
+// Role above, which is a player's combat role.
+export type UserRole = 'admin' | 'leader' | 'subleader' | 'officer' | 'member';
+
+export const ROLE_LABELS: Record<UserRole, string> = {
+  admin: 'Administrador',
+  leader: 'Líder',
+  subleader: 'Sublíder',
+  officer: 'Oficial',
+  member: 'Miembro',
+};
+
+export const PERMISSION_LABELS: Record<string, string> = {
+  'roster.view': 'Ver el roster',
+  'roster.edit': 'Editar miembros',
+  'ranks.manage': 'Gestionar rangos',
+  'war.view': 'Ver la War Room',
+  'war.edit': 'Editar despliegues y unidades',
+  'data.export': 'Exportar datos',
+  'data.import': 'Importar datos',
+  'users.manage': 'Gestionar usuarios',
+  'permissions.manage': 'Editar permisos',
+};
+
+export interface AuthUser {
+  id: string;
+  username: string;
+  role: UserRole;
+}
+
+export interface ManagedUser extends AuthUser {
+  disabled: boolean;
+  createdAt?: string;
+}
+
+export interface PermissionCatalog {
+  roles: UserRole[];
+  permissions: string[];
+  matrix: Record<string, string[]>;
+}
+
 // Collaboration types
 export type PeerRole = 'HOST' | 'CLIENT' | 'STANDALONE';
 

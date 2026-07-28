@@ -22,6 +22,15 @@ services:
       DATABASE_SSL: ${DATABASE_SSL:-false}
       GUILD_ID: ${GUILD_ID:-default-guild}
       GUILD_NAME: ${GUILD_NAME:-My Guild}
+      # Signs session cookies. Leave empty and one is generated and kept in the
+      # database; set it to rotate every session out.
+      SESSION_SECRET: ${SESSION_SECRET:-}
+      # Set to true once the app is reached over HTTPS.
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      # Used only to create the very first account. After that, manage accounts
+      # in the app; changing these does nothing.
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
     restart: unless-stopped
 
 # The API talks to a PostgreSQL that lives outside this stack. Attach the

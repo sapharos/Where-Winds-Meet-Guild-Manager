@@ -78,17 +78,59 @@ several guilds later without a migration. There is also a `users` table with
 `password_hash` and `role` — unused today, present so that adding logins is a
 matter of writing endpoints rather than restructuring live data.
 
-## What this does not do yet
+## Accounts and roles
 
-**There is no authentication.** Anyone who can reach the web port can read and
-edit the roster and the war plans. Keep it on your LAN or behind a VPN or an
-authenticating reverse proxy until logins exist.
+Signing in is required; nothing is readable without it.
+
+On the very first start, when the guild has no accounts at all, one
+administrator is created. Set `ADMIN_USERNAME` and `ADMIN_PASSWORD` to choose
+the credentials. If you leave `ADMIN_PASSWORD` empty a random one is generated
+and printed **once** in the API container log:
+
+```bash
+docker logs wwm-guild-manager-api
+```
+
+After that first account exists, those two variables do nothing — manage
+accounts from the **Administración** tab in the app.
+
+There are five roles: `admin`, `leader`, `subleader`, `officer`, `member`. What
+each one may do is stored in the database and edited from the same tab, so you
+can change the arrangement without touching code. The defaults are in
+`server/permissions.js` and apply only when a guild has no matrix yet.
+
+Two safeguards exist because a permission editor can otherwise lock everyone out
+of their own guild:
+
+- `admin` always keeps *Gestionar usuarios* and *Editar permisos*. The checkboxes
+  are shown fixed, and the server re-adds them even if a request omits them.
+- The last enabled administrator cannot be demoted, disabled, or deleted, and
+  nobody can delete their own account.
+
+Permissions are read from the database on every request rather than from the
+session cookie, so a role change or a disabled account takes effect immediately
+for anyone already signed in.
+
+### Sessions
+
+Sessions are a signed JWT in an httpOnly cookie, valid for seven days.
+`SESSION_SECRET` signs them; leave it empty and one is generated and kept in the
+database, which means restarts do not sign everyone out. Changing it invalidates
+every existing session.
+
+Set `COOKIE_SECURE=true` once the app is served over HTTPS, so the cookie is
+never sent in the clear.
+
+## What this does not do yet
 
 **Last write wins.** Each save replaces a whole collection in one transaction, so
 the data is never left half-written, but two people editing the roster at the
 same time will have one overwrite the other. The Strategic Link (PeerJS) feature
 still works as before and is the intended way to run a planning session with
 several people watching.
+
+**The Strategic Link is not permission-aware.** Anyone given the broadcast id can
+follow along read-only without signing in. Treat that id as a shared secret.
 
 ## Data safety
 

@@ -1,15 +1,20 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Peer } from 'peerjs';
-import { Player, GuildWarSession, Lane, TacticalGroup, MembershipStatus, GuildRank, PeerRole, SyncPacket } from './types';
+import { Player, GuildWarSession, Lane, TacticalGroup, MembershipStatus, GuildRank, PeerRole, SyncPacket, ROLE_LABELS } from './types';
 import { storageService } from './services/storageService';
+import { authService, ApiError, Session } from './services/authService';
 import { DEFAULT_GROUPS } from './constants';
 import MemberManager from './components/MemberManager';
 import WarPlanner from './components/WarPlanner';
 import CollaborationPanel from './components/CollaborationPanel';
+import LoginScreen from './components/LoginScreen';
+import AdminPanel from './components/AdminPanel';
 
 const App: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'roster' | 'war-room'>('roster');
+  const [session, setSession] = useState<Session | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [activeTab, setActiveTab] = useState<'roster' | 'war-room' | 'admin'>('roster');
   const [players, setPlayers] = useState<Player[]>([]);
   const [sessions, setSessions] = useState<GuildWarSession[]>([]);
   const [ranks, setRanks] = useState<GuildRank[]>([]);
@@ -26,12 +31,32 @@ const App: React.FC = () => {
   const connectionsRef = useRef<any[]>([]);
   const [connectedPeers, setConnectedPeers] = useState(0);
 
+  const can = useCallback(
+    (permission: string) => session?.permissions.includes(permission) ?? false,
+    [session],
+  );
+
+  // Two independent reasons a section can be read-only: the role does not grant
+  // the permission, or this browser is following someone else's broadcast.
+  const rosterLocked = peerRole === 'CLIENT' || !can('roster.edit');
+  const ranksLocked = peerRole === 'CLIENT' || !can('ranks.manage');
+  const warLocked = peerRole === 'CLIENT' || !can('war.edit');
+
   // Surfaces a write failure instead of letting the UI show state the server
-  // never accepted.
+  // never accepted. An expired session drops back to the login screen rather
+  // than reporting a save error the user cannot act on.
   const persist = useCallback((op: Promise<unknown>) => {
     op.then(() => setSaveError(null)).catch((err) => {
+      if (err instanceof ApiError && err.status === 401) {
+        setSession(null);
+        return;
+      }
       console.error('Save failed', err);
-      setSaveError('Changes could not be saved. Check the connection to the server.');
+      setSaveError(
+        err instanceof ApiError && err.status === 403
+          ? 'Your role does not allow that change.'
+          : 'Changes could not be saved. Check the connection to the server.',
+      );
     });
   }, []);
 
@@ -44,13 +69,16 @@ const App: React.FC = () => {
       setPlayers(loadedPlayers);
       setSessions(loadedSessions);
 
+      // The first visitor to an empty guild seeds the defaults, but only if
+      // their role is allowed to write them -- a plain member signing in first
+      // should not be met with a permission error.
       if (loadedRanks.length === 0) {
         const defaultRanks: GuildRank[] = [
           { id: 'rank-leader', name: 'Guild Leader', color: '#fbbf24' },
           { id: 'rank-manager', name: 'Guild Manager', color: '#60a5fa' },
         ];
         setRanks(defaultRanks);
-        await storageService.saveRanks(defaultRanks);
+        if (can('ranks.manage')) await storageService.saveRanks(defaultRanks);
       } else {
         setRanks(loadedRanks);
       }
@@ -67,20 +95,34 @@ const App: React.FC = () => {
         };
         setSessions([newSession]);
         setActiveSessionId(newSession.id);
-        await storageService.saveSessions([newSession]);
+        if (can('war.edit')) await storageService.saveSessions([newSession]);
       }
       setLoadError(null);
     } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        setSession(null);
+        return;
+      }
       console.error('Load failed', err);
       setLoadError('Could not reach the guild server. Data shown may be incomplete.');
     } finally {
       setIsLoading(false);
     }
+  }, [can]);
+
+  // Restores an existing session on load; the cookie is httpOnly, so only the
+  // server can tell us whether one is still valid.
+  useEffect(() => {
+    authService
+      .me()
+      .then(setSession)
+      .catch(() => setSession(null))
+      .finally(() => setAuthChecked(true));
   }, []);
 
   useEffect(() => {
-    void loadAllData();
-  }, [loadAllData]);
+    if (session) void loadAllData();
+  }, [session, loadAllData]);
 
   // PeerJS logic
   const broadcastState = useCallback((p: Player[], s: GuildWarSession[], r: GuildRank[]) => {
@@ -187,21 +229,21 @@ const App: React.FC = () => {
   };
 
   const handleAddPlayer = (p: Player) => {
-    if (peerRole === 'CLIENT') return;
+    if (rosterLocked) return;
     const updated = [...players, p];
     setPlayers(updated);
     persist(storageService.savePlayers(updated));
   };
 
   const handleUpdatePlayer = (p: Player) => {
-    if (peerRole === 'CLIENT') return;
+    if (rosterLocked) return;
     const updated = players.map(prev => prev.id === p.id ? p : prev);
     setPlayers(updated);
     persist(storageService.savePlayers(updated));
   };
 
   const handleDeletePlayer = (id: string) => {
-    if (peerRole === 'CLIENT') return;
+    if (rosterLocked) return;
     const updated = players.filter(p => p.id !== id);
     setPlayers(updated);
     persist(storageService.savePlayers(updated));
@@ -211,32 +253,34 @@ const App: React.FC = () => {
       assignments: s.assignments.filter(a => a.playerId !== id)
     }));
     setSessions(updatedSessions);
-    persist(storageService.saveSessions(updatedSessions));
+    // Dropping a member also clears their deployments, which is a war-room
+    // write and needs that permission separately.
+    if (!warLocked) persist(storageService.saveSessions(updatedSessions));
   };
 
   const handleAddRank = (r: GuildRank) => {
-    if (peerRole === 'CLIENT') return;
+    if (ranksLocked) return;
     const updated = [...ranks, r];
     setRanks(updated);
     persist(storageService.saveRanks(updated));
   };
 
   const handleDeleteRank = (id: string) => {
-    if (peerRole === 'CLIENT') return;
+    if (ranksLocked) return;
     const updated = ranks.filter(r => r.id !== id);
     setRanks(updated);
     persist(storageService.saveRanks(updated));
 
     const updatedPlayers = players.map(p => p.rankId === id ? { ...p, rankId: undefined } : p);
     setPlayers(updatedPlayers);
-    persist(storageService.savePlayers(updatedPlayers));
+    if (!rosterLocked) persist(storageService.savePlayers(updatedPlayers));
   };
 
   const handleExport = () => storageService.exportAllData();
   const handleImportClick = () => fileInputRef.current?.click();
 
   const handleFileImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (peerRole === 'CLIENT') return;
+    if (peerRole === 'CLIENT' || !can('data.import')) return;
     const file = e.target.files?.[0];
     if (file) {
       const success = await storageService.importAllData(file);
@@ -250,14 +294,55 @@ const App: React.FC = () => {
     if (e.target) e.target.value = '';
   };
 
+  const handleLogin = async (username: string, password: string) => {
+    setSession(await authService.login(username, password));
+  };
+
+  const handleLogout = async () => {
+    if (peerRef.current) handleDisconnect();
+    await authService.logout().catch(() => undefined);
+    setSession(null);
+    setPlayers([]);
+    setSessions([]);
+    setRanks([]);
+    setActiveTab('roster');
+  };
+
+  const handleChangePassword = async () => {
+    const currentPassword = window.prompt('Contraseña actual:');
+    if (!currentPassword) return;
+    const newPassword = window.prompt('Nueva contraseña (mínimo 8 caracteres):');
+    if (!newPassword) return;
+    try {
+      await authService.changePassword(currentPassword, newPassword);
+      alert('Contraseña actualizada.');
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'No se pudo cambiar la contraseña.');
+    }
+  };
+
   const activeSession = sessions.find(s => s.id === activeSessionId);
+  const canSeeAdmin = can('users.manage') || can('permissions.manage');
 
   const handleUpdateSession = (updatedSession: GuildWarSession) => {
-    if (peerRole === 'CLIENT') return;
+    if (warLocked) return;
     const updated = sessions.map(s => s.id === updatedSession.id ? updatedSession : s);
     setSessions(updated);
     persist(storageService.saveSessions(updated));
   };
+
+  if (!authChecked) {
+    return (
+      <div className="min-h-screen bg-[#0a0b0c] text-slate-500 flex items-center justify-center gap-3">
+        <i className="fa-solid fa-circle-notch fa-spin"></i>
+        Cargando...
+      </div>
+    );
+  }
+
+  if (!session) {
+    return <LoginScreen onLogin={handleLogin} />;
+  }
 
   return (
     <div className="min-h-screen bg-[#0a0b0c] text-slate-200">
@@ -285,13 +370,22 @@ const App: React.FC = () => {
               <i className="fa-solid fa-users"></i>
               Guild Roster
             </button>
-            <button 
+            <button
               onClick={() => setActiveTab('war-room')}
               className={`px-6 py-2 rounded-md text-sm font-semibold transition-all flex items-center gap-2 ${activeTab === 'war-room' ? 'bg-amber-700 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
             >
               <i className="fa-solid fa-chess-knight"></i>
               War Room
             </button>
+            {canSeeAdmin && (
+              <button
+                onClick={() => setActiveTab('admin')}
+                className={`px-6 py-2 rounded-md text-sm font-semibold transition-all flex items-center gap-2 ${activeTab === 'admin' ? 'bg-amber-700 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
+              >
+                <i className="fa-solid fa-user-shield"></i>
+                Administración
+              </button>
+            )}
           </nav>
 
           <div className="flex items-center gap-4">
@@ -307,22 +401,53 @@ const App: React.FC = () => {
              <div className="h-8 w-px bg-slate-800 hidden xl:block"></div>
              
              <div className="flex bg-slate-950 p-1 rounded-lg border border-slate-800">
-                <button 
-                  onClick={handleExport}
-                  className="p-2 text-slate-400 hover:text-amber-500 hover:bg-slate-900 rounded transition-all"
-                  title="Export Guild Data"
-                >
-                  <i className="fa-solid fa-download"></i>
-                </button>
-                <button 
-                  onClick={handleImportClick}
-                  disabled={peerRole === 'CLIENT'}
-                  className={`p-2 rounded transition-all ${peerRole === 'CLIENT' ? 'text-slate-700 cursor-not-allowed' : 'text-slate-400 hover:text-amber-500 hover:bg-slate-900'}`}
-                  title="Import Guild Data"
-                >
-                  <i className="fa-solid fa-upload"></i>
-                </button>
+                {can('data.export') && (
+                  <button
+                    onClick={handleExport}
+                    className="p-2 text-slate-400 hover:text-amber-500 hover:bg-slate-900 rounded transition-all"
+                    title="Export Guild Data"
+                  >
+                    <i className="fa-solid fa-download"></i>
+                  </button>
+                )}
+                {can('data.import') && (
+                  <button
+                    onClick={handleImportClick}
+                    disabled={peerRole === 'CLIENT'}
+                    className={`p-2 rounded transition-all ${peerRole === 'CLIENT' ? 'text-slate-700 cursor-not-allowed' : 'text-slate-400 hover:text-amber-500 hover:bg-slate-900'}`}
+                    title="Import Guild Data"
+                  >
+                    <i className="fa-solid fa-upload"></i>
+                  </button>
+                )}
                 <input type="file" ref={fileInputRef} className="hidden" accept=".json" onChange={handleFileImport} />
+             </div>
+
+             <div className="h-8 w-px bg-slate-800 hidden xl:block"></div>
+
+             <div className="flex items-center gap-3">
+                <div className="text-right leading-tight hidden sm:block">
+                   <div className="text-sm font-semibold text-white">{session.user.username}</div>
+                   <div className="text-[10px] uppercase tracking-wider text-amber-500 font-bold">
+                     {ROLE_LABELS[session.user.role] ?? session.user.role}
+                   </div>
+                </div>
+                <div className="flex bg-slate-950 p-1 rounded-lg border border-slate-800">
+                   <button
+                     onClick={handleChangePassword}
+                     className="p-2 text-slate-400 hover:text-amber-500 hover:bg-slate-900 rounded transition-all"
+                     title="Cambiar contraseña"
+                   >
+                     <i className="fa-solid fa-key"></i>
+                   </button>
+                   <button
+                     onClick={handleLogout}
+                     className="p-2 text-slate-400 hover:text-amber-500 hover:bg-slate-900 rounded transition-all"
+                     title="Cerrar sesión"
+                   >
+                     <i className="fa-solid fa-right-from-bracket"></i>
+                   </button>
+                </div>
              </div>
           </div>
         </div>
@@ -341,22 +466,28 @@ const App: React.FC = () => {
             <i className="fa-solid fa-circle-notch fa-spin"></i>
             Loading guild data...
           </div>
+        ) : activeTab === 'admin' ? (
+          <AdminPanel
+            currentUser={session.user}
+            canManageUsers={can('users.manage')}
+            canManagePermissions={can('permissions.manage')}
+          />
         ) : activeTab === 'roster' ? (
-          <MemberManager 
-            players={players} 
+          <MemberManager
+            players={players}
             ranks={ranks}
-            isViewer={peerRole === 'CLIENT'}
-            onAdd={handleAddPlayer} 
-            onUpdate={handleUpdatePlayer} 
+            isViewer={rosterLocked}
+            onAdd={handleAddPlayer}
+            onUpdate={handleUpdatePlayer}
             onDelete={handleDeletePlayer}
             onAddRank={handleAddRank}
             onDeleteRank={handleDeleteRank}
           />
         ) : (
           activeSession ? (
-            <WarPlanner 
-              players={players} 
-              isViewer={peerRole === 'CLIENT'}
+            <WarPlanner
+              players={players}
+              isViewer={warLocked}
               activeSession={{...activeSession, ranks} as any}
               onUpdateSession={handleUpdateSession}
             />
