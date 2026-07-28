@@ -186,6 +186,16 @@ def pair_fields(readings: list[Reading], width: int) -> list[tuple[str, str, flo
     return found
 
 
+def scanned_at(folder: Path) -> str:
+    """Date the sweep was taken, from the folder name the capture tool made."""
+    from datetime import datetime
+
+    try:
+        return datetime.strptime(folder.name, "%Y%m%d-%H%M%S").astimezone().isoformat()
+    except ValueError:
+        return datetime.now().astimezone().isoformat()
+
+
 def to_value(raw: str, kind: str) -> str | int | None:
     if kind == "int":
         digits = re.sub(r"[^0-9]", "", raw)
@@ -257,28 +267,42 @@ def main() -> int:
 
     roster = []
     for member in sorted(members.values(), key=lambda m: m.name):
-        record = {"name_as_read": member.name, "frames": len(member.frames), "fields": {}}
+        fields, quality = {}, {}
         for key, votes in member.votes.items():
             value, confidence, agreeing = settle(votes, kinds.get(key, "text"))
-            record["fields"][key] = {
-                "value": value,
+            fields[key] = value
+            quality[key] = {
                 "confidence": round(confidence, 3),
-                "frames_agreeing": agreeing,
-                "frames_seen": len(votes),
+                "framesAgreeing": agreeing,
+                "framesSeen": len(votes),
             }
-        roster.append(record)
+        roster.append(
+            {
+                "nameAsRead": member.name,
+                "frames": len(member.frames),
+                "fields": fields,
+                "quality": quality,
+            }
+        )
+
+    # Shaped for POST /api/scans/preview, so the file goes straight into the app.
+    document = {
+        "scannedAt": scanned_at(args.folder),
+        "source": args.folder.name,
+        "entries": roster,
+    }
 
     out = args.out or args.folder / "roster.json"
-    out.write_text(json.dumps(roster, indent=2, ensure_ascii=False), encoding="utf-8")
+    out.write_text(json.dumps(document, indent=2, ensure_ascii=False), encoding="utf-8")
 
     expected = len(FIELDS) + 3
     print(f"{'miembro':16s} {'frames':>7s} {'campos':>8s}   faltantes")
     print("-" * 72)
     for record in roster:
-        got = {k for k, v in record["fields"].items() if v["value"] is not None}
+        got = {k for k, v in record["fields"].items() if v is not None}
         missing = sorted(({key for key, _ in FIELDS.values()} | {"level", "position", "sect"}) - got)
         print(
-            f"{record['name_as_read']:16s} {record['frames']:7d} {len(got):5d}/{expected:<2d}   "
+            f"{record['nameAsRead']:16s} {record['frames']:7d} {len(got):5d}/{expected:<2d}   "
             f"{', '.join(missing) if missing else 'ninguno'}"
         )
 

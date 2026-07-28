@@ -3,6 +3,7 @@ import cookieParser from 'cookie-parser';
 import express from 'express';
 import { pool, migrate, replaceAll, GUILD_ID } from './db.js';
 import { ROLES, PERMISSIONS } from './permissions.js';
+import { matchEntries, commitScan, historyFor, scanSummary } from './scans.js';
 import {
   initAuth,
   hashPassword,
@@ -228,6 +229,33 @@ app.put('/api/sessions', requireAuth, requirePermission('war.edit'), asHandler(a
     (s) => [s.id, s.name, s.date, JSON.stringify(s.assignments ?? []), JSON.stringify(s.groups ?? [])],
   );
   res.json({ saved: sessions.length });
+}));
+
+/* ----------------------------------------------------------------- scans */
+
+// Reading a scan changes nothing; it reports who each name matched so a person
+// can settle the ones the roster could not.
+app.post('/api/scans/preview', requireAuth, requirePermission('roster.edit'), asHandler(async (req, res) => {
+  const entries = req.body?.entries;
+  if (!Array.isArray(entries)) return res.status(400).json({ error: 'expected { entries: [...] }' });
+  res.json({ entries: await matchEntries(entries) });
+}));
+
+app.post('/api/scans/commit', requireAuth, requirePermission('roster.edit'), asHandler(async (req, res) => {
+  const entries = req.body?.entries;
+  if (!Array.isArray(entries)) return res.status(400).json({ error: 'expected { entries: [...] }' });
+  if (!entries.some((e) => e.playerId || e.createAs)) {
+    return res.status(400).json({ error: 'no entry names a player to store against' });
+  }
+  res.json(await commitScan({ scannedAt: req.body?.scannedAt, entries }));
+}));
+
+app.get('/api/scans', requireAuth, asHandler(async (_req, res) => {
+  res.json(await scanSummary());
+}));
+
+app.get('/api/players/:id/scans', requireAuth, asHandler(async (req, res) => {
+  res.json(await historyFor(req.params.id));
 }));
 
 migrate()

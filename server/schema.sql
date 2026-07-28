@@ -71,6 +71,48 @@ CREATE TABLE IF NOT EXISTS war_sessions (
   PRIMARY KEY (guild_id, id)
 );
 
+-- What the recogniser reads for a member, which is stable but not always the
+-- real spelling: it has no diacritics, so Subâru always comes back as Subaru.
+-- Confirming that once here is what stops every later scan from asking again.
+CREATE TABLE IF NOT EXISTS player_aliases (
+  guild_id   TEXT NOT NULL REFERENCES guilds(id) ON DELETE CASCADE,
+  alias      TEXT NOT NULL,
+  player_id  TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (guild_id, alias),
+  FOREIGN KEY (guild_id, player_id) REFERENCES players (guild_id, id) ON DELETE CASCADE
+);
+
+-- One row per member per scan, never updated. Overwriting would answer "how is
+-- this member doing now" while losing "is this member fading", which is the
+-- question that actually decides who stays in the guild.
+CREATE TABLE IF NOT EXISTS player_scans (
+  id                    BIGSERIAL PRIMARY KEY,
+  guild_id              TEXT NOT NULL REFERENCES guilds(id) ON DELETE CASCADE,
+  player_id             TEXT NOT NULL,
+  scanned_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+  position              TEXT,
+  level                 INTEGER,
+  sect                  TEXT,
+  region                TEXT,
+  language              TEXT,
+  days_joined           INTEGER,
+  week_activity         INTEGER,
+  treasure_tokens_week  INTEGER,
+  treasure_tokens_total INTEGER,
+  weekly_clears         INTEGER,
+  last_week_clears      INTEGER,
+  highest_floor         INTEGER,
+  league_participations INTEGER,
+  ranked_participations INTEGER,
+  duel_participations   INTEGER,
+  martial_mastery       INTEGER,
+  exploration_mastery   INTEGER,
+  profession_mastery    INTEGER,
+  FOREIGN KEY (guild_id, player_id) REFERENCES players (guild_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS player_scans_history_idx ON player_scans (guild_id, player_id, scanned_at DESC);
 CREATE INDEX IF NOT EXISTS players_guild_idx      ON players (guild_id);
 CREATE INDEX IF NOT EXISTS ranks_guild_idx        ON ranks (guild_id);
 CREATE INDEX IF NOT EXISTS war_sessions_guild_idx ON war_sessions (guild_id);
