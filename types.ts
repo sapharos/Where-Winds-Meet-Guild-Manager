@@ -120,6 +120,28 @@ export interface PermissionCatalog {
   matrix: Record<string, string[]>;
 }
 
+// Captured guild data
+export type ScanFields = Record<string, string | number | null>;
+
+export interface ScanDocument {
+  scannedAt?: string;
+  source?: string;
+  entries: { nameAsRead: string; fields: ScanFields }[];
+}
+
+export interface ScanPreviewEntry {
+  nameAsRead: string;
+  fields: ScanFields;
+  match: 'alias' | 'exact' | 'suggested' | 'none';
+  playerId: string | null;
+  playerName: string | null;
+  suggestions: { playerId: string; name: string; score: number }[];
+}
+
+export interface ScanRecord extends ScanFields {
+  scannedAt: string;
+}
+
 // Collaboration types
 export type PeerRole = 'HOST' | 'CLIENT' | 'STANDALONE';
 

@@ -10,11 +10,14 @@ import WarPlanner from './components/WarPlanner';
 import CollaborationPanel from './components/CollaborationPanel';
 import LoginScreen from './components/LoginScreen';
 import AdminPanel from './components/AdminPanel';
+import ScanImport from './components/ScanImport';
+import MemberHistory from './components/MemberHistory';
 
 const App: React.FC = () => {
   const [session, setSession] = useState<Session | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
-  const [activeTab, setActiveTab] = useState<'roster' | 'war-room' | 'admin'>('roster');
+  const [activeTab, setActiveTab] = useState<'roster' | 'war-room' | 'scan' | 'admin'>('roster');
+  const [historyFor, setHistoryFor] = useState<Player | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
   const [sessions, setSessions] = useState<GuildWarSession[]>([]);
   const [ranks, setRanks] = useState<GuildRank[]>([]);
@@ -377,6 +380,15 @@ const App: React.FC = () => {
               <i className="fa-solid fa-chess-knight"></i>
               War Room
             </button>
+            {can('roster.edit') && (
+              <button
+                onClick={() => setActiveTab('scan')}
+                className={`px-6 py-2 rounded-md text-sm font-semibold transition-all flex items-center gap-2 ${activeTab === 'scan' ? 'bg-amber-700 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
+              >
+                <i className="fa-solid fa-file-import"></i>
+                Escaneo
+              </button>
+            )}
             {canSeeAdmin && (
               <button
                 onClick={() => setActiveTab('admin')}
@@ -466,6 +478,8 @@ const App: React.FC = () => {
             <i className="fa-solid fa-circle-notch fa-spin"></i>
             Loading guild data...
           </div>
+        ) : activeTab === 'scan' ? (
+          <ScanImport players={players} onImported={() => void loadAllData()} />
         ) : activeTab === 'admin' ? (
           <AdminPanel
             currentUser={session.user}
@@ -482,6 +496,7 @@ const App: React.FC = () => {
             onDelete={handleDeletePlayer}
             onAddRank={handleAddRank}
             onDeleteRank={handleDeleteRank}
+            onShowHistory={setHistoryFor}
           />
         ) : (
           activeSession ? (
@@ -498,6 +513,8 @@ const App: React.FC = () => {
           )
         )}
       </main>
+
+      {historyFor && <MemberHistory player={historyFor} onClose={() => setHistoryFor(null)} />}
 
       {activeTab === 'war-room' && (
         <footer className="fixed bottom-0 left-0 right-0 bg-slate-950/90 backdrop-blur-md border-t border-slate-800 p-3 flex justify-center z-50">

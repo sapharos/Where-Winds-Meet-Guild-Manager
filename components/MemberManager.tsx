@@ -12,6 +12,7 @@ interface MemberManagerProps {
   onDelete: (id: string) => void;
   onAddRank: (r: GuildRank) => void;
   onDeleteRank: (id: string) => void;
+  onShowHistory?: (p: Player) => void;
 }
 
 const MemberManager: React.FC<MemberManagerProps> = ({ 
@@ -22,7 +23,8 @@ const MemberManager: React.FC<MemberManagerProps> = ({
   onUpdate, 
   onDelete, 
   onAddRank, 
-  onDeleteRank 
+  onDeleteRank,
+  onShowHistory
 }) => {
   const [isEditing, setIsEditing] = useState<Player | null>(null);
   const [showRankEditor, setShowRankEditor] = useState(false);
@@ -255,6 +257,7 @@ const MemberManager: React.FC<MemberManagerProps> = ({
                 player={p} 
                 onEdit={isViewer ? undefined : handleEdit} 
                 onDelete={isViewer ? undefined : onDelete} 
+                onShowHistory={onShowHistory}
                 ranks={ranks} 
               />
             ))
