@@ -60,3 +60,19 @@ fullscreen so the console stays reachable on a second monitor.
 Windows PowerShell 5.1 no admite `&&` como separador. Usa `;`, o el lanzador
 `capture.bat`, que se situa solo en esta carpeta y funciona desde cualquier
 shell y tambien haciendo doble clic.
+
+## Leer las capturas
+
+```bash
+python parse.py frames/20260728-130959
+```
+
+Agrupa los fotogramas por miembro usando el nombre de la cabecera fija, empareja
+cada etiqueta con su valor y escribe `roster.json` en la misma carpeta. La tabla
+final indica que campos falta por capturar de cada miembro, si te saltaste
+alguna posicion de scroll.
+
+Los nombres con acentos vuelven sin ellos (Subaru por Subâru): el alfabeto del
+reconocedor no los tiene. No se corrige aqui a proposito, porque la lectura es
+identica siempre y eso es lo unico que necesita el emparejado contra un roster
+ya conocido. La ortografia correcta se confirma una vez, a mano.
