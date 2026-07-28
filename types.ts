@@ -125,6 +125,28 @@ export interface PermissionCatalog {
 // Captured guild data
 export type ScanFields = Record<string, string | number | null>;
 
+// Every value a sweep carries, in the order the game's panel lists them, so a
+// gap can be filled in by hand without hunting for it.
+export const SCAN_FIELD_CATALOG: { key: string; label: string; kind: 'int' | 'text' }[] = [
+  { key: 'level', label: 'Nivel', kind: 'int' },
+  { key: 'sect', label: 'Secta', kind: 'text' },
+  { key: 'region', label: 'Región', kind: 'text' },
+  { key: 'language', label: 'Idioma', kind: 'text' },
+  { key: 'days_joined', label: 'Días en el gremio', kind: 'int' },
+  { key: 'week_activity', label: 'Actividad semanal', kind: 'int' },
+  { key: 'treasure_tokens_week', label: 'Tokens de la semana', kind: 'int' },
+  { key: 'treasure_tokens_total', label: 'Tokens totales', kind: 'int' },
+  { key: 'weekly_clears', label: 'Clears de la semana', kind: 'int' },
+  { key: 'last_week_clears', label: 'Clears semana previa', kind: 'int' },
+  { key: 'highest_floor', label: 'Piso más alto', kind: 'int' },
+  { key: 'league_participations', label: 'Partidas de liga', kind: 'int' },
+  { key: 'ranked_participations', label: 'Partidas ranked', kind: 'int' },
+  { key: 'duel_participations', label: 'Duelos', kind: 'int' },
+  { key: 'martial_mastery', label: 'Maestría marcial', kind: 'int' },
+  { key: 'exploration_mastery', label: 'Maestría exploración', kind: 'int' },
+  { key: 'profession_mastery', label: 'Maestría profesión', kind: 'int' },
+];
+
 export interface ScanDocument {
   scannedAt?: string;
   source?: string;

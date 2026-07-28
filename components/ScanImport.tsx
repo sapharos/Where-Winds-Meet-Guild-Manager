@@ -1,6 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { api } from '../services/authService';
-import { Player, ScanDocument, ScanPreviewEntry } from '../types';
+import { Player, ScanDocument, ScanFields, ScanPreviewEntry, SCAN_FIELD_CATALOG } from '../types';
 
 interface Props {
   players: Player[];
@@ -19,7 +19,20 @@ const ScanImport: React.FC<Props> = ({ players, onImported }) => {
   const [decisions, setDecisions] = useState<Record<string, Decision>>({});
   const [message, setMessage] = useState<{ text: string; ok: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
+  // Values typed by hand, kept apart from what was read so the two never blur.
+  const [edits, setEdits] = useState<Record<string, ScanFields>>({});
+  const [open, setOpen] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  const valuesFor = (entry: ScanPreviewEntry): ScanFields => ({
+    ...entry.fields,
+    ...(edits[entry.nameAsRead] ?? {}),
+  });
+
+  const setField = (name: string, key: string, raw: string, kind: 'int' | 'text') => {
+    const value = raw.trim() === '' ? null : kind === 'int' ? Number(raw) : raw;
+    setEdits((prev) => ({ ...prev, [name]: { ...(prev[name] ?? {}), [key]: value } }));
+  };
 
   const report = (text: string, ok = true) => setMessage({ text, ok });
 
@@ -44,6 +57,8 @@ const ScanImport: React.FC<Props> = ({ players, onImported }) => {
 
       setPreview(entries);
       setDecisions(initial);
+      setEdits({});
+      setOpen(null);
       setScannedAt(document.scannedAt ?? null);
       setMessage(null);
     } catch (err) {
@@ -63,7 +78,7 @@ const ScanImport: React.FC<Props> = ({ players, onImported }) => {
           if (!decision || decision.kind === 'skip') return null;
           return {
             nameAsRead: entry.nameAsRead,
-            fields: entry.fields,
+            fields: valuesFor(entry),
             ...(entry.uid ? { uid: entry.uid } : {}),
             ...(decision.kind === 'link'
               ? { playerId: decision.playerId }
@@ -88,6 +103,7 @@ const ScanImport: React.FC<Props> = ({ players, onImported }) => {
       );
       setPreview(null);
       setDecisions({});
+      setEdits({});
       onImported();
     } catch (err) {
       report(err instanceof Error ? err.message : 'No se pudo guardar', false);
@@ -196,12 +212,17 @@ const ScanImport: React.FC<Props> = ({ players, onImported }) => {
               <tbody>
                 {preview.map((entry) => {
                   const decision = decisions[entry.nameAsRead];
-                  const filled = Object.values(entry.fields).filter((v) => v !== null && v !== undefined).length;
+                  const values = valuesFor(entry);
+                  const filled = SCAN_FIELD_CATALOG.filter(
+                    (f) => values[f.key] !== null && values[f.key] !== undefined && values[f.key] !== '',
+                  ).length;
+                  const expanded = open === entry.nameAsRead;
                   const selectValue =
                     decision?.kind === 'link' ? decision.playerId : decision?.kind === 'skip' ? '__skip' : '__new';
 
                   return (
-                    <tr key={entry.nameAsRead} className="hover:bg-slate-800/30">
+                  <React.Fragment key={entry.nameAsRead}>
+                    <tr className="hover:bg-slate-800/30">
                       <td className="p-2 border-b border-slate-800/60">
                         <span className="text-slate-200 font-mono">{entry.nameAsRead}</span>
                         {entry.match === 'uid' && (
@@ -276,12 +297,54 @@ const ScanImport: React.FC<Props> = ({ players, onImported }) => {
                         )}
                       </td>
                       <td className="p-2 border-b border-slate-800/60 text-right text-slate-300">
-                        {entry.fields.week_activity ?? '—'}
+                        {values.week_activity ?? '—'}
                       </td>
                       <td className="p-2 border-b border-slate-800/60 text-right">
-                        <span className={filled < 18 ? 'text-amber-500' : 'text-slate-500'}>{filled}/18</span>
+                        <button
+                          onClick={() => setOpen(expanded ? null : entry.nameAsRead)}
+                          title="Ver y completar los datos leidos"
+                          className={`text-xs font-semibold hover:underline ${
+                            filled < SCAN_FIELD_CATALOG.length ? 'text-amber-500' : 'text-slate-500'
+                          }`}
+                        >
+                          {filled}/{SCAN_FIELD_CATALOG.length}
+                          <i className={`fa-solid fa-chevron-${expanded ? 'up' : 'down'} ml-2`}></i>
+                        </button>
                       </td>
                     </tr>
+
+                    {expanded && (
+                      <tr>
+                        <td colSpan={5} className="border-b border-slate-800 bg-slate-950/60 p-4">
+                          <p className="text-xs text-slate-500 mb-3">
+                            Lo que el escaneo no alcanzo a leer sale en ambar. Escribelo aqui y se guardara
+                            junto al resto; dejarlo vacio lo registra como no capturado.
+                          </p>
+                          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                            {SCAN_FIELD_CATALOG.map((f) => {
+                              const value = values[f.key];
+                              const empty = value === null || value === undefined || value === '';
+                              return (
+                                <label key={f.key} className="block">
+                                  <span className={`block text-[10px] uppercase tracking-wider mb-1 ${empty ? 'text-amber-500' : 'text-slate-500'}`}>
+                                    {f.label}
+                                  </span>
+                                  <input
+                                    type={f.kind === 'int' ? 'number' : 'text'}
+                                    value={value ?? ''}
+                                    onChange={(e) => setField(entry.nameAsRead, f.key, e.target.value, f.kind)}
+                                    className={`w-full bg-slate-950 border rounded p-1.5 text-sm outline-none focus:ring-1 focus:ring-amber-500 ${
+                                      empty ? 'border-amber-800/70' : 'border-slate-800'
+                                    }`}
+                                  />
+                                </label>
+                              );
+                            })}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
                   );
                 })}
               </tbody>
