@@ -335,6 +335,60 @@ def beside_in_time(timeline: dict[str, float], frame: str, panel_names: dict[str
     return panel_names[min(nearby)[1]]
 
 
+SESSION_NAME = re.compile(r"^\d{8}-\d{6}$")
+
+
+def folder_size(folder: Path) -> int:
+    return sum(f.stat().st_size for f in folder.rglob("*") if f.is_file())
+
+
+def cleanup_older(folders: list[Path]) -> None:
+    """Offer to delete capture folders from earlier sweeps.
+
+    Only ever offers folders beside the ones just read, never those themselves,
+    and never deletes without being told to: the frames are the only copy of a
+    sweep until its roster.json has been imported, so the confirmation lists
+    which folders were never parsed at all.
+    """
+    keep = {f.resolve() for f in folders}
+    candidates = sorted(
+        {
+            child
+            for folder in folders
+            for child in folder.parent.iterdir()
+            if child.is_dir() and SESSION_NAME.match(child.name) and child.resolve() not in keep
+        }
+    )
+    if not candidates:
+        print("\nNo hay capturas de semanas anteriores que borrar.")
+        return
+
+    total = sum(folder_size(c) for c in candidates)
+    print(f"\nCapturas anteriores que se pueden borrar ({total / 1e6:.0f} MB):")
+    for folder in candidates:
+        parsed = "" if (folder / "roster.json").exists() else "   SIN PARSEAR"
+        print(f"  {folder.name}   {folder_size(folder) / 1e6:5.0f} MB{parsed}")
+
+    if any(not (c / "roster.json").exists() for c in candidates):
+        print("\n  Ojo: las marcadas SIN PARSEAR nunca se leyeron. Sus datos se perderian.")
+
+    try:
+        answer = input("\nBorrar estas carpetas? [s/N] ").strip().lower()
+    except EOFError:
+        print("Sin confirmacion posible; no se borra nada.")
+        return
+
+    if answer not in ("s", "si", "sí", "y", "yes"):
+        print("No se borro nada.")
+        return
+
+    import shutil
+
+    for folder in candidates:
+        shutil.rmtree(folder)
+        print(f"  borrada {folder.name}")
+
+
 def scanned_at(folder: Path) -> str:
     """Date the sweep was taken, from the folder name the capture tool made."""
     from datetime import datetime
@@ -377,6 +431,11 @@ def main() -> int:
     )
     parser.add_argument("--out", type=Path, default=None, help="where to write the JSON (default: <first folder>/roster.json)")
     parser.add_argument("--no-cache", action="store_true", help="ignore any cached recognition")
+    parser.add_argument(
+        "--cleanup",
+        action="store_true",
+        help="after parsing, offer to delete capture folders from earlier sweeps",
+    )
     args = parser.parse_args()
 
     total_panels = sum(len(list(folder.glob("panel-*.png"))) for folder in args.folders)
@@ -520,6 +579,9 @@ def main() -> int:
         )
 
     print(f"\nEscrito {out}")
+
+    if args.cleanup:
+        cleanup_older(args.folders)
     return 0
 
 

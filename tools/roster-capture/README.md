@@ -130,3 +130,18 @@ python parse.py frames/20260728-130959 frames/20260729-101500
 Se fusionan por nombre de miembro: quien aparezca en ambas suma sus campos, y un
 UID capturado en la segunda se une a los datos de la primera. El `roster.json`
 sale con la fecha de la primera carpeta.
+
+## Limpiar capturas viejas
+
+Cada barrido deja unos cientos de PNG. Con `--cleanup`, al terminar de parsear
+se ofrece borrar las carpetas de barridos anteriores:
+
+```bash
+python parse.py frames/20260903-190000 --cleanup
+```
+
+Nunca borra las carpetas que acaba de leer, ni nada que no tenga forma de
+captura, ni nada sin confirmarlo antes. Las carpetas que jamas se parsearon se
+marcan `SIN PARSEAR`: sus fotogramas son la unica copia de ese barrido hasta que
+su roster.json se importa en la app, asi que conviene mirarlas antes de decir
+que si.
