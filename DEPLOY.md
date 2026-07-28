@@ -15,7 +15,7 @@ Copy `.env.example` to `.env` (or paste the same keys as stack environment
 variables in Portainer):
 
 ```
-DATABASE_URL=postgres://user:password@postgres:5432/wwm_guild
+DATABASE_URL=postgres://wwm:the-password@192.168.1.80:5433/wwm_db
 DATABASE_SSL=false
 GUILD_ID=default-guild
 GUILD_NAME=My Guild
@@ -28,13 +28,23 @@ by uncommenting the `networks` block at the bottom of `docker-compose.yml` and
 filling in the network your database is on. If instead you reach the database by
 host IP, no network change is needed.
 
-Create the database and a user before the first start; the API creates its own
-tables but will not create the database itself:
+Create the database and a role before the first start; the API creates its own
+tables but will not create the database itself. Give the app its own role and
+make it the owner, so its credentials are not the same ones any other
+application on that server uses:
 
 ```sql
-CREATE DATABASE wwm_guild;
 CREATE USER wwm WITH PASSWORD 'something-long';
-GRANT ALL PRIVILEGES ON DATABASE wwm_guild TO wwm;
+CREATE DATABASE wwm_db OWNER wwm;
+```
+
+Note that PostgreSQL lets any role connect to any database by default. The `wwm`
+role owns only `wwm_db`, but it is not *blocked* from opening a connection to
+your other databases. If you want that closed off, revoke the default on each
+one — check first that nothing else depends on it:
+
+```sql
+REVOKE CONNECT ON DATABASE other_db FROM PUBLIC;
 ```
 
 ## Portainer (git stack)
