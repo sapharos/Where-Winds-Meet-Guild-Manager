@@ -192,11 +192,16 @@ def pair_fields(readings: list[Reading], width: int) -> list[tuple[str, str, flo
 UID_PATTERN = re.compile(r"UID\s*[::]?\s*(\d{5,})", re.IGNORECASE)
 ONLINE_ID_PATTERN = re.compile(r"Online\s*ID\s*[::]?\s*(\S+)", re.IGNORECASE)
 
-# How far above the UID line the member's name sits, as a share of the popup.
-NAME_ABOVE_UID = (240, 350)
+# Where the member's name sits relative to the UID line, as shares of the frame
+# rather than pixels, so the same numbers hold at another resolution. The
+# horizontal bound matters as much as the vertical one: the popup only covers
+# part of the member list, and the rows still showing beside it would otherwise
+# be mistaken for the name.
+NAME_ABOVE_UID = (0.30, 0.50)
+NAME_BESIDE_UID = (-0.12, 0.28)
 
 
-def read_popup(readings: list[Reading]) -> dict | None:
+def read_popup(readings: list[Reading], width: int, height: int) -> dict | None:
     """Pull the account number out of a frame showing the social popup."""
     joined = [(r, f"{r.text}") for r in readings]
 
@@ -232,13 +237,20 @@ def read_popup(readings: list[Reading]) -> dict | None:
             online_id = found.group(1)
             break
 
-    # The name is the tallest line in the band above the UID -- it is the only
-    # thing in the popup rendered at that size.
-    low, high = uid_box.y_mid - NAME_ABOVE_UID[1], uid_box.y_mid - NAME_ABOVE_UID[0]
+    # The name is the tallest line in the box above the UID -- nothing else in
+    # the popup is rendered at that size.
+    low = uid_box.y_mid - NAME_ABOVE_UID[1] * height
+    high = uid_box.y_mid - NAME_ABOVE_UID[0] * height
+    left = uid_box.x0 + NAME_BESIDE_UID[0] * width
+    right = uid_box.x0 + NAME_BESIDE_UID[1] * width
+
     candidates = [
         r
         for r in readings
-        if low <= r.y_mid <= high and not r.text.strip().isdigit() and len(r.text.strip()) > 1
+        if low <= r.y_mid <= high
+        and left <= r.x0 <= right
+        and not r.text.strip().isdigit()
+        and len(r.text.strip()) > 1
     ]
     if not candidates:
         return None
@@ -326,7 +338,7 @@ def main() -> int:
     for n, path in enumerate(list_frames, 1):
         print(f"\r  buscando UIDs {n}/{len(list_frames)}", end="", flush=True)
         image = Image.open(path)
-        found = read_popup(run_ocr(engine, image, cache, path.name))
+        found = read_popup(run_ocr(engine, image, cache, path.name), image.width, image.height)
         if found:
             identities[found["nameAsRead"]] = found
 
