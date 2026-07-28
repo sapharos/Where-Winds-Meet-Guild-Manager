@@ -8,7 +8,7 @@ database, so the container is stateless and safe to recreate at any time.
 
 1. **Stacks → Add stack → Repository**
 2. Repository URL: `https://github.com/sapharos/Where-Winds-Meet-Guild-Manager`
-3. Reference: `refs/heads/docker-deploy`
+3. Reference: `refs/heads/master`
 4. Compose path: `docker-compose.yml`
 5. Deploy.
 
