@@ -192,63 +192,68 @@ def pair_fields(readings: list[Reading], width: int) -> list[tuple[str, str, flo
 UID_PATTERN = re.compile(r"UID\s*[::]?\s*(\d{5,})", re.IGNORECASE)
 ONLINE_ID_PATTERN = re.compile(r"Online\s*ID\s*[::]?\s*(\S+)", re.IGNORECASE)
 
-# Where the member's name sits relative to the UID line, as shares of the frame
-# rather than pixels, so the same numbers hold at another resolution. The
-# horizontal bound matters as much as the vertical one: the popup only covers
-# part of the member list, and the rows still showing beside it would otherwise
-# be mistaken for the name.
-NAME_ABOVE_UID = (0.30, 0.50)
-NAME_BESIDE_UID = (-0.12, 0.28)
+# The popup comes in two shapes. Your own account labels the number "UID:" and
+# adds an Online ID; everyone else's shows the number bare beside a "More"
+# link. What both always carry is a Profile button, so that is the anchor: the
+# name sits above it, the account number below.
+PROFILE_LABEL = "Profile"
+UID_DIGITS = re.compile(r"^\d{8,12}$")
+
+# Bounds relative to the Profile button, as shares of the frame. The horizontal
+# one matters as much as the vertical: the popup covers only part of the member
+# list, and the rows still visible beside it are otherwise candidates.
+POPUP_BESIDE_PROFILE = (-0.14, 0.34)
+NAME_ABOVE_PROFILE = 0.45
+UID_BELOW_PROFILE = 0.20
 
 
 def read_popup(readings: list[Reading], width: int, height: int) -> dict | None:
     """Pull the account number out of a frame showing the social popup."""
-    joined = [(r, f"{r.text}") for r in readings]
+    anchor = next(
+        (r for r in readings if similarity(r.text, PROFILE_LABEL) > 0.85),
+        None,
+    )
+    if anchor is None:
+        return None
 
+    left = anchor.x0 + POPUP_BESIDE_PROFILE[0] * width
+    right = anchor.x0 + POPUP_BESIDE_PROFILE[1] * width
+    inside = [r for r in readings if left <= r.x0 <= right]
+
+    # A labelled "UID: 123..." if this is your own account, otherwise the bare
+    # run of digits below the buttons. Length alone separates it from the level
+    # and from the activity numbers showing through from the list.
     uid = None
-    uid_box = None
-    for reading, text in joined:
-        found = UID_PATTERN.search(text)
+    for reading in inside:
+        found = UID_PATTERN.search(reading.text)
         if found:
-            uid, uid_box = found.group(1), reading
+            uid = found.group(1)
             break
-
-    # The recogniser sometimes splits "UID:" from its digits into two boxes.
     if uid is None:
-        for i, (reading, text) in enumerate(joined):
-            if not re.fullmatch(r"UID\s*[::]?", text.strip(), re.IGNORECASE):
-                continue
-            near = [
-                r
-                for r, t in joined
-                if abs(r.y_mid - reading.y_mid) < 12 and r.x0 > reading.x0 and t.strip().isdigit()
-            ]
-            if near:
-                uid, uid_box = near[0].text.strip(), reading
-                break
-
-    if uid is None or uid_box is None:
+        below = [
+            r
+            for r in inside
+            if anchor.y_mid < r.y_mid <= anchor.y_mid + UID_BELOW_PROFILE * height
+            and UID_DIGITS.match(r.text.strip())
+        ]
+        if below:
+            uid = min(below, key=lambda r: r.y_mid).text.strip()
+    if uid is None:
         return None
 
     online_id = None
-    for _, text in joined:
-        found = ONLINE_ID_PATTERN.search(text)
+    for reading in inside:
+        found = ONLINE_ID_PATTERN.search(reading.text)
         if found:
             online_id = found.group(1)
             break
 
-    # The name is the tallest line in the box above the UID -- nothing else in
-    # the popup is rendered at that size.
-    low = uid_box.y_mid - NAME_ABOVE_UID[1] * height
-    high = uid_box.y_mid - NAME_ABOVE_UID[0] * height
-    left = uid_box.x0 + NAME_BESIDE_UID[0] * width
-    right = uid_box.x0 + NAME_BESIDE_UID[1] * width
-
+    # The name is the tallest line above the buttons; nothing else in the popup
+    # is rendered at that size.
     candidates = [
         r
-        for r in readings
-        if low <= r.y_mid <= high
-        and left <= r.x0 <= right
+        for r in inside
+        if anchor.y_mid - NAME_ABOVE_PROFILE * height <= r.y_mid < anchor.y_mid
         and not r.text.strip().isdigit()
         and len(r.text.strip()) > 1
     ]
