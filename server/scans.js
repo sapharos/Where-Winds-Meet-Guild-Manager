@@ -212,6 +212,13 @@ export async function commitScan({ scannedAt, entries }) {
     return { stored, created, scannedAt: when.toISOString() };
   } catch (err) {
     await client.query('ROLLBACK');
+    // A unique violation here means two members were given one account number,
+    // which is worth saying plainly rather than as a server error.
+    if (err.code === '23505' && err.constraint === 'players_game_uid_idx') {
+      const clash = new Error('two members cannot share one account number');
+      clash.status = 409;
+      throw clash;
+    }
     throw err;
   } finally {
     client.release();

@@ -25,6 +25,7 @@ const MIN_PASSWORD = 8;
 
 const asHandler = (fn) => (req, res) =>
   Promise.resolve(fn(req, res)).catch((err) => {
+    if (err.status) return res.status(err.status).json({ error: err.message });
     console.error(`${req.method} ${req.path} failed:`, err);
     res.status(500).json({ error: 'internal error' });
   });

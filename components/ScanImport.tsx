@@ -21,7 +21,14 @@ const ScanImport: React.FC<Props> = ({ players, onImported }) => {
   const [busy, setBusy] = useState(false);
   // Values typed by hand, kept apart from what was read so the two never blur.
   const [edits, setEdits] = useState<Record<string, ScanFields>>({});
+  // The account number is not one of the fields: it identifies the member
+  // rather than describing them, and it is the one thing worth typing in when a
+  // sweep misses it, since every later sweep matches on it.
+  const [uids, setUids] = useState<Record<string, string>>({});
   const [open, setOpen] = useState<string | null>(null);
+
+  const uidFor = (entry: ScanPreviewEntry): string =>
+    uids[entry.nameAsRead] ?? entry.uid ?? '';
   const fileRef = useRef<HTMLInputElement>(null);
 
   const valuesFor = (entry: ScanPreviewEntry): ScanFields => ({
@@ -58,6 +65,7 @@ const ScanImport: React.FC<Props> = ({ players, onImported }) => {
       setPreview(entries);
       setDecisions(initial);
       setEdits({});
+      setUids({});
       setOpen(null);
       setScannedAt(document.scannedAt ?? null);
       setMessage(null);
@@ -70,6 +78,10 @@ const ScanImport: React.FC<Props> = ({ players, onImported }) => {
 
   const commit = async () => {
     if (!preview) return;
+    if (duplicated.size) {
+      report(`Hay un UID repetido en dos miembros: ${[...duplicated].join(', ')}`, false);
+      return;
+    }
     setBusy(true);
     try {
       const entries = preview
@@ -79,7 +91,7 @@ const ScanImport: React.FC<Props> = ({ players, onImported }) => {
           return {
             nameAsRead: entry.nameAsRead,
             fields: valuesFor(entry),
-            ...(entry.uid ? { uid: entry.uid } : {}),
+            ...(uidFor(entry).trim() ? { uid: uidFor(entry).trim() } : {}),
             ...(decision.kind === 'link'
               ? { playerId: decision.playerId }
               : { createAs: decision.name.trim() }),
@@ -104,6 +116,7 @@ const ScanImport: React.FC<Props> = ({ players, onImported }) => {
       setPreview(null);
       setDecisions({});
       setEdits({});
+      setUids({});
       onImported();
     } catch (err) {
       report(err instanceof Error ? err.message : 'No se pudo guardar', false);
@@ -113,6 +126,15 @@ const ScanImport: React.FC<Props> = ({ players, onImported }) => {
   };
 
   const pending = preview?.filter((e) => !e.playerId).length ?? 0;
+
+  // Two members cannot share an account number; the database refuses it, so it
+  // is worth saying before the save rather than after.
+  const seen = new Map<string, number>();
+  for (const entry of preview ?? []) {
+    const uid = uidFor(entry).trim();
+    if (uid) seen.set(uid, (seen.get(uid) ?? 0) + 1);
+  }
+  const duplicated = new Set([...seen].filter(([, n]) => n > 1).map(([uid]) => uid));
 
   return (
     <div className="space-y-6">
@@ -242,8 +264,31 @@ const ScanImport: React.FC<Props> = ({ players, onImported }) => {
                           </div>
                         )}
                       </td>
-                      <td className="p-2 border-b border-slate-800/60 font-mono text-xs text-slate-500">
-                        {entry.uid ?? <span className="text-slate-700">—</span>}
+                      <td className="p-2 border-b border-slate-800/60">
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          value={uidFor(entry)}
+                          placeholder="sin UID"
+                          title={
+                            entry.uid
+                              ? 'Leido del panel social. Cambialo solo si esta mal.'
+                              : 'No se leyo. Abre su panel social en el juego y escribelo aqui.'
+                          }
+                          onChange={(e) =>
+                            setUids((prev) => ({
+                              ...prev,
+                              [entry.nameAsRead]: e.target.value.replace(/[^0-9]/g, ''),
+                            }))
+                          }
+                          className={`w-28 bg-slate-950 border rounded p-1 text-xs font-mono outline-none focus:ring-1 focus:ring-amber-500 ${
+                            duplicated.has(uidFor(entry))
+                              ? 'border-red-600 text-red-300'
+                              : uidFor(entry)
+                                ? 'border-slate-800 text-slate-400'
+                                : 'border-amber-800/70 text-slate-500'
+                          }`}
+                        />
                       </td>
                       <td className="p-2 border-b border-slate-800/60">
                         <select
