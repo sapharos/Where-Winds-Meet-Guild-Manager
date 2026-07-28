@@ -204,7 +204,12 @@ UID_DIGITS = re.compile(r"^\d{8,12}$")
 # list, and the rows still visible beside it are otherwise candidates.
 POPUP_BESIDE_PROFILE = (-0.14, 0.34)
 NAME_ABOVE_PROFILE = 0.45
-UID_BELOW_PROFILE = 0.20
+# The popup grows extra action buttons -- request to join a team, invite to
+# co-op -- depending on the member, which pushes the account number anywhere
+# from 60 to 240 pixels below the button. Reach far enough for the tallest
+# variant; nothing else in this narrow column runs to eight digits, so the
+# generous window costs no precision.
+UID_BELOW_PROFILE = 0.55
 
 
 def read_popup(readings: list[Reading], width: int, height: int) -> dict | None:

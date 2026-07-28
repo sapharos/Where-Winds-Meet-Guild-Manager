@@ -46,8 +46,12 @@ def enable_colour() -> None:
 
 # Fractions of the screen rather than pixels, so the same defaults work at any
 # resolution with this UI layout. Measured from a 1920x1080 capture.
+# The list box reaches well below the rows on purpose: clicking a member opens
+# a social popup anchored to their row, and for members low down it extends
+# past the last row. Cropping tighter loses the account number for exactly
+# those members.
 DEFAULT_REGIONS = {
-    "list": (0.060, 0.140, 0.630, 0.820),
+    "list": (0.055, 0.130, 0.640, 0.930),
     "panel": (0.665, 0.140, 0.940, 0.870),
 }
 
