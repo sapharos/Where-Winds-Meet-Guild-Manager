@@ -52,10 +52,12 @@ FIELDS = {
 # Headings that introduce a section and carry no value of their own.
 SECTIONS = {"Personal Info", "Guild Hero's Realm", "Skyward Bond", "Guild War", "Mastery"}
 
-# Column boundaries as fractions of the panel width. Labels hug the left edge,
-# values are right-aligned, and nothing legitimate lands in between.
+# Labels hug the left edge; values are right-aligned. A value is recognised by
+# where it ends, not where it starts: "Espanol(Latino)" begins at 0.60 of the
+# width and "2" at 0.92, so a rule about left edges is really a rule about how
+# long the text is, and loses the long ones.
 LABEL_MAX_X = 0.45
-VALUE_MIN_X = 0.60
+VALUE_MIN_RIGHT = 0.75
 
 # The sticky header, which never scrolls: avatar and level, then the name with
 # the rank badge beside it, then the sect. The rank is deliberately not read --
@@ -84,6 +86,7 @@ class Reading:
     x0: float
     y0: float
     y1: float
+    x1: float = 0.0
 
     @property
     def y_mid(self) -> float:
@@ -117,6 +120,7 @@ def run_ocr(engine, image: Image.Image, cache: dict, key: str) -> list[Reading]:
             text=text.strip(),
             confidence=float(conf),
             x0=min(p[0] for p in box) / OCR_SCALE,
+            x1=max(p[0] for p in box) / OCR_SCALE,
             y0=min(p[1] for p in box) / OCR_SCALE,
             y1=max(p[1] for p in box) / OCR_SCALE,
         )
@@ -159,10 +163,14 @@ def read_header(readings: list[Reading], width: int, height: int) -> dict:
     return header
 
 
-def pair_fields(readings: list[Reading], width: int) -> list[tuple[str, str, float]]:
+def pair_fields(readings: list[Reading], width: int, height: int) -> list[tuple[str, str, float]]:
     """Match left-column labels to the right-column value beside them."""
-    labels = sorted((r for r in readings if r.x0 < LABEL_MAX_X * width), key=lambda r: r.y_mid)
-    values = sorted((r for r in readings if r.x0 >= VALUE_MIN_X * width), key=lambda r: r.y_mid)
+    # The sticky header is not part of the list: its name and sect sit in the
+    # label column and its rank badge in the value column, where they compete
+    # with real fields for the pairing.
+    body = [r for r in readings if r.y_mid > HEADER_BOTTOM * height]
+    labels = sorted((r for r in body if r.x0 < LABEL_MAX_X * width), key=lambda r: r.y_mid)
+    values = sorted((r for r in body if r.x1 >= VALUE_MIN_RIGHT * width), key=lambda r: r.y_mid)
 
     found: list[tuple[str, str, float]] = []
     used_values: set[int] = set()
@@ -523,7 +531,7 @@ def main() -> int:
     # as separate scans -- but the frame times inside each restart from zero, so
     # the popup pairing has to stay within its own folder.
     for folder in args.folders:
-        cache_path = folder / ".ocr-cache.json"
+        cache_path = folder / ".ocr-cache-v2.json"
         cache = {} if args.no_cache or not cache_path.exists() else json.loads(cache_path.read_text())
         timeline = load_timeline(folder)
         panel_headers: dict[Path, str] = {}
@@ -546,7 +554,7 @@ def main() -> int:
                 if key in header:
                     member.record(key, str(header[key]), 1.0)
 
-            for known, raw, confidence in pair_fields(readings, image.width):
+            for known, raw, confidence in pair_fields(readings, image.width, image.height):
                 key, _ = FIELDS[known]
                 member.record(key, raw, confidence)
 

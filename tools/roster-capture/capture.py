@@ -90,6 +90,20 @@ class Identifier:
     def missing(self, name: str) -> list:
         return sorted(self.wanted - self.fields.get(name, set()))
 
+    def _where(self, absent: list) -> str:
+        """Turn a set of missing fields into which way to scroll."""
+        if self.parse is None:
+            return ""
+        order = [key for key, _ in self.parse.FIELDS.values()]
+        places = [order.index(k) for k in absent if k in order]
+        if not places or len(places) != len(absent):
+            return ""
+        if min(places) >= len(order) - 3:
+            return f"   {BOLD}baja mas{RESET}"
+        if max(places) <= 2:
+            return f"   {BOLD}sube al principio{RESET}"
+        return ""
+
     def submit(self, kind: str, image: Image.Image) -> None:
         self.queue.put((kind, image))
 
@@ -126,6 +140,7 @@ class Identifier:
                         parse.read_header(readings, image.width, image.height),
                         readings,
                         image.width,
+                        image.height,
                     )
             except Exception as err:  # noqa: BLE001
                 self.announce(f"{GREY}       (no se pudo leer: {err}){RESET}")
@@ -141,7 +156,7 @@ class Identifier:
             f"{GREY}   ({len(self.uids)} identificados){RESET}"
         )
 
-    def _report_panel(self, header, readings, width: int) -> None:
+    def _report_panel(self, header, readings, width: int, height: int) -> None:
         name = (header or {}).get("name")
         if not name:
             return
@@ -149,14 +164,16 @@ class Identifier:
         self.panels[name] = self.panels.get(name, 0) + 1
         got = self.fields.setdefault(name, set())
         got.update(key for key in ("level", "sect") if key in header)
-        got.update(self.parse.FIELDS[label][0] for label, _, _ in self.parse.pair_fields(readings, width))
+        got.update(self.parse.FIELDS[label][0] for label, _, _ in self.parse.pair_fields(readings, width, height))
 
         # Naming what is still missing is the whole point: it says how much
-        # further to scroll, while going back is still one click away.
+        # further to scroll, while going back is still one click away. Which way
+        # to scroll matters as much as how much, so the fields are read in the
+        # order the panel lists them and turned into a direction.
         absent = self.missing(name)
         if absent:
             shown = ", ".join(absent[:3]) + ("..." if len(absent) > 3 else "")
-            progress = f"{len(got)}/{len(self.wanted)}   {GREY}faltan: {shown}{RESET}"
+            progress = f"{len(got)}/{len(self.wanted)}   {GREY}faltan: {shown}{RESET}{self._where(absent)}"
         else:
             progress = f"{GREEN}{len(got)}/{len(self.wanted)} completo{RESET}"
 
