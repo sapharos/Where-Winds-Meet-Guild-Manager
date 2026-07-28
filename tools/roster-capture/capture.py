@@ -17,6 +17,7 @@ Press Ctrl+C in this window when you are done.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import queue
 import sys
@@ -80,8 +81,14 @@ class Identifier:
         self.queue: queue.Queue = queue.Queue()
         self.uids: dict[str, str] = {}
         self.panels: dict[str, int] = {}
+        self.fields: dict[str, set] = {}
+        self.parse = None
+        self.wanted: set = set()
         self.ready = threading.Event()
         threading.Thread(target=self._run, daemon=True).start()
+
+    def missing(self, name: str) -> list:
+        return sorted(self.wanted - self.fields.get(name, set()))
 
     def submit(self, kind: str, image: Image.Image) -> None:
         self.queue.put((kind, image))
@@ -102,6 +109,8 @@ class Identifier:
             return
 
         engine = RapidOCR()
+        self.parse = parse
+        self.wanted = {key for key, _ in parse.FIELDS.values()} | {"level", "position", "sect"}
         self.ready.set()
         scratch: dict = {}
 
@@ -113,7 +122,11 @@ class Identifier:
                 if kind == "list":
                     self._report_popup(parse.read_popup(readings, image.width, image.height))
                 else:
-                    self._report_panel(parse.read_header(readings, image.width, image.height))
+                    self._report_panel(
+                        parse.read_header(readings, image.width, image.height),
+                        readings,
+                        image.width,
+                    )
             except Exception as err:  # noqa: BLE001
                 self.announce(f"{GREY}       (no se pudo leer: {err}){RESET}")
 
@@ -128,15 +141,27 @@ class Identifier:
             f"{GREY}   ({len(self.uids)} identificados){RESET}"
         )
 
-    def _report_panel(self, header) -> None:
+    def _report_panel(self, header, readings, width: int) -> None:
         name = (header or {}).get("name")
         if not name:
             return
+
         self.panels[name] = self.panels.get(name, 0) + 1
+        got = self.fields.setdefault(name, set())
+        got.update(key for key in ("level", "position", "sect") if key in header)
+        got.update(self.parse.FIELDS[label][0] for label, _, _ in self.parse.pair_fields(readings, width))
+
+        # Naming what is still missing is the whole point: it says how much
+        # further to scroll, while going back is still one click away.
+        absent = self.missing(name)
+        if absent:
+            shown = ", ".join(absent[:3]) + ("..." if len(absent) > 3 else "")
+            progress = f"{len(got)}/{len(self.wanted)}   {GREY}faltan: {shown}{RESET}"
+        else:
+            progress = f"{GREEN}{len(got)}/{len(self.wanted)} completo{RESET}"
+
         warning = "" if name in self.uids else f"   {BOLD}<- sin UID todavia{RESET}"
-        self.announce(
-            f"       datos de {name}{GREY}   (fotograma {self.panels[name]}){RESET}{warning}"
-        )
+        self.announce(f"       {name}   {progress}{warning}")
 
 
 @dataclass(frozen=True)
@@ -291,9 +316,13 @@ def main() -> int:
         sys.stdout.write(status())
         sys.stdout.flush()
 
+        begun = time.monotonic()
+        manifest = (out_dir / "frames.jsonl").open("w", encoding="utf-8")
+
         try:
             while True:
                 started = time.monotonic()
+                elapsed = started - begun
                 ticks += 1
 
                 for region in regions:
@@ -323,7 +352,18 @@ def main() -> int:
 
                     saved[region.name].append(sig)
                     counts[region.name] += 1
-                    image.save(out_dir / f"{region.name}-{counts[region.name]:04d}.png")
+                    filename = f"{region.name}-{counts[region.name]:04d}.png"
+                    image.save(out_dir / filename)
+
+                    # Clicking a portrait changes both regions at once, so the
+                    # times are what later pairs a social popup with the detail
+                    # panel beside it. That pairing is the only way to learn the
+                    # real name of a member whose sect lets them show an alias.
+                    manifest.write(
+                        json.dumps({"file": filename, "kind": region.name, "t": round(elapsed, 3)}) + "\n"
+                    )
+                    manifest.flush()
+
                     announce(
                         f"  {stamp}  {name:5s}  {GREEN}#{counts[region.name]:03d} guardado{RESET}"
                         f"  {BOLD}SIGUIENTE{RESET}",
@@ -338,6 +378,7 @@ def main() -> int:
                 time.sleep(max(0.0, interval - (time.monotonic() - started)))
 
         except KeyboardInterrupt:
+            manifest.close()
             if identifier is not None:
                 sys.stdout.write("\r\033[K  terminando de leer los ultimos fotogramas...\n")
                 sys.stdout.flush()
@@ -349,9 +390,16 @@ def main() -> int:
 
             if identifier is not None and identifier.panels:
                 sin_uid = sorted(set(identifier.panels) - set(identifier.uids))
+                incompletos = {n: identifier.missing(n) for n in identifier.panels}
+                incompletos = {n: m for n, m in incompletos.items() if m}
+
                 print(f"\n{len(identifier.uids)} miembros con UID, {len(identifier.panels)} con datos")
                 if sin_uid:
                     print(f"  sin UID: {', '.join(sin_uid)}")
+                if incompletos:
+                    print(f"  con datos incompletos ({len(incompletos)}):")
+                    for n, m in sorted(incompletos.items()):
+                        print(f"    {n}: faltan {', '.join(m)}")
             return 0
 
 

@@ -298,6 +298,43 @@ def read_popup_name(inside: list[Reading], anchor: Reading, height: float) -> st
     return max(above, key=lambda r: r.y1 - r.y0).text.strip()
 
 
+# How far apart two frames may be and still count as the same click. Both
+# regions settle within a frame or two of each other, so this is generous.
+SAME_CLICK_SECONDS = 4.0
+
+
+def load_timeline(folder: Path) -> dict[str, float]:
+    """When each frame was written, from the manifest the capture tool keeps."""
+    path = folder / "frames.jsonl"
+    if not path.exists():
+        return {}
+
+    timeline = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        try:
+            row = json.loads(line)
+            timeline[row["file"]] = float(row["t"])
+        except (ValueError, KeyError):
+            continue
+    return timeline
+
+
+def beside_in_time(timeline: dict[str, float], frame: str, panel_names: dict[str, str]) -> str | None:
+    """The member showing in the detail panel when this frame was taken."""
+    when = timeline.get(frame)
+    if when is None:
+        return None
+
+    nearby = [
+        (abs(timeline[name] - when), name)
+        for name in panel_names
+        if name in timeline and abs(timeline[name] - when) <= SAME_CLICK_SECONDS
+    ]
+    if not nearby:
+        return None
+    return panel_names[min(nearby)[1]]
+
+
 def scanned_at(folder: Path) -> str:
     """Date the sweep was taken, from the folder name the capture tool made."""
     from datetime import datetime
@@ -349,6 +386,7 @@ def main() -> int:
     cache = {} if args.no_cache or not cache_path.exists() else json.loads(cache_path.read_text())
 
     members: dict[str, Member] = {}
+    panel_headers: dict[Path, str] = {}
     skipped = 0
 
     for n, path in enumerate(frames, 1):
@@ -361,6 +399,7 @@ def main() -> int:
             skipped += 1
             continue
 
+        panel_headers[path] = header["name"]
         member = members.setdefault(header["name"], Member(name=header["name"]))
         member.frames.append(path.name)
         for key in ("level", "position", "sect"):
@@ -372,18 +411,36 @@ def main() -> int:
             member.record(key, raw, confidence)
 
     # Account numbers come from the social popup, which lands in the list frames.
+    timeline = load_timeline(args.folder)
+    panel_names = {path.name: name for path, name in panel_headers.items()}
     identities: dict[str, dict] = {}
+    aliases: list[tuple[str, str]] = []
+
     list_frames = sorted(args.folder.glob("list-*.png"))
     for n, path in enumerate(list_frames, 1):
         print(f"\r  buscando UIDs {n}/{len(list_frames)}", end="", flush=True)
         image = Image.open(path)
         found = read_popup(run_ocr(engine, image, cache, path.name), image.width, image.height)
-        if found:
-            identities[found["nameAsRead"]] = found
+        if not found:
+            continue
+
+        # Members of some sects display a changeable alias in the popup instead
+        # of their name. Clicking the portrait also selects them, so the detail
+        # panel captured at that same moment carries the real one.
+        real = beside_in_time(timeline, path.name, panel_names)
+        if real and real != found["nameAsRead"]:
+            aliases.append((found["nameAsRead"], real))
+            found = {**found, "aliasAsRead": found["nameAsRead"], "nameAsRead": real}
+        identities[found["nameAsRead"]] = found
 
     cache_path.write_text(json.dumps(cache))
     print(f"\r  {len(frames)} fotogramas leidos, {skipped} sin cabecera reconocible")
-    print(f"  {len(identities)} UID encontrados en {len(list_frames)} fotogramas de lista\n")
+    print(f"  {len(identities)} UID encontrados en {len(list_frames)} fotogramas de lista")
+    for shown, real in aliases:
+        print(f"    '{shown}' es el mote de {real}")
+    if not timeline and list_frames:
+        print("    (sin frames.jsonl: los motes de secta no se pueden resolver)")
+    print()
 
     kinds = {key: kind for key, kind in FIELDS.values()}
     kinds.update({"level": "int", "position": "text", "sect": "text"})

@@ -86,8 +86,14 @@ de quien es:
   14:51:44  lista  #012 guardado  SIGUIENTE
        UID de Muerte: 1087315722   (7 identificados)
   14:51:52  panel  #031 guardado  SIGUIENTE
-       datos de Muerte   (fotograma 2)
+       Muerte   13/18   faltan: martial_mastery, exploration_mastery...
+  14:51:58  panel  #032 guardado  SIGUIENTE
+       Muerte   18/18 completo
 ```
+
+El contador dice cuanto falta por bajar: si tras el ultimo scroll no pone
+`completo`, los campos que nombra siguen mas abajo en el panel. Al terminar se
+listan los miembros que quedaron incompletos y que campos les faltan.
 
 Leer un fotograma cuesta un par de segundos, asi que se hace en un hilo aparte
 y el aviso llega mientras haces el clic siguiente; la captura nunca se detiene.
@@ -98,3 +104,12 @@ antes de seguir, que en ese momento cuesta un clic. Al terminar se listan los
 que quedaron sin UID.
 
 Con `--no-identify` se desactiva, y el arranque es inmediato.
+
+## Motes de secta
+
+Algunos miembros pueden mostrar un mote temporal en su panel social en vez de su
+nombre (KaelithRen por maskmango). Al pulsar el retrato tambien se selecciona al
+miembro, asi que el panel derecho capturado en ese mismo instante lleva el
+nombre real. `frames.jsonl` guarda cuando se escribio cada fotograma y `parse.py`
+los empareja por tiempo, de modo que el UID acaba bajo el nombre real y no bajo
+un mote que puede cambiar manana.
