@@ -200,9 +200,16 @@ export async function commitScan({ scannedAt, entries }) {
 
       // Keep the roster showing what the game last reported.
       await client.query(
-        `UPDATE players SET level = COALESCE($1, level), sect = COALESCE($2, sect)
-          WHERE guild_id = $3 AND id = $4`,
-        [entry.fields?.level ?? null, entry.fields?.sect ?? null, GUILD_ID, playerId],
+        `UPDATE players SET level = COALESCE($1, level), sect = COALESCE($2, sect),
+                            game_position = COALESCE($3, game_position)
+          WHERE guild_id = $4 AND id = $5`,
+        [
+          entry.fields?.level ?? null,
+          entry.fields?.sect ?? null,
+          entry.fields?.position ?? null,
+          GUILD_ID,
+          playerId,
+        ],
       );
     }
 

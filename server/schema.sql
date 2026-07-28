@@ -76,6 +76,11 @@ CREATE TABLE IF NOT EXISTS war_sessions (
 ALTER TABLE players ADD COLUMN IF NOT EXISTS game_uid  TEXT;
 ALTER TABLE players ADD COLUMN IF NOT EXISTS online_id TEXT;
 
+-- The rank the game itself shows, kept verbatim. The interface maps it to a
+-- rank it understands, but storing the original means a label we have not met
+-- yet can be classified properly later without rescanning.
+ALTER TABLE players ADD COLUMN IF NOT EXISTS game_position TEXT;
+
 CREATE UNIQUE INDEX IF NOT EXISTS players_game_uid_idx
   ON players (guild_id, game_uid) WHERE game_uid IS NOT NULL;
 

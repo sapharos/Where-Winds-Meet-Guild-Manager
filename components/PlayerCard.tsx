@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { Player, Role, MembershipStatus, GuildRank } from '../types';
+import { Player, Role, MembershipStatus, GuildRank, positionLabel } from '../types';
 import { ROLE_COLORS, ROLE_ICONS, PLATFORM_ICONS, STATUS_COLORS } from '../constants';
 
 interface PlayerCardProps {
@@ -15,6 +15,7 @@ interface PlayerCardProps {
 
 const PlayerCard: React.FC<PlayerCardProps> = ({ player, onEdit, onDelete, onShowHistory, className = '', compact = false, ranks = [] }) => {
   const rank = ranks.find(r => r.id === player.rankId);
+  const position = positionLabel(player.gamePosition);
 
   return (
     <div className={`p-3 rounded-lg border border-slate-800 bg-slate-900/50 hover:bg-slate-800/80 transition-all ${className}`}>
@@ -34,7 +35,21 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onEdit, onDelete, onSho
             </div>
             {!compact ? (
               <div className="flex flex-wrap items-center gap-2 mt-0.5">
-                <p className="text-[10px] text-slate-400">{player.sect} • Lv.{player.level}</p>
+                <p className="text-[10px] text-slate-400">
+                  {player.sect} • Lv.{player.level}
+                  {position && (
+                    <span
+                      className="ml-1 text-amber-500/80"
+                      title={
+                        player.gamePosition && player.gamePosition.toLowerCase() !== position.toLowerCase()
+                          ? `El juego lo llama "${player.gamePosition}"`
+                          : undefined
+                      }
+                    >
+                      {' • '}{position}
+                    </span>
+                  )}
+                </p>
                 <span className={`text-[8px] px-1.5 py-0.5 rounded border uppercase font-bold tracking-tighter ${STATUS_COLORS[player.status || MembershipStatus.FULL_MEMBER]}`}>
                   {player.status === MembershipStatus.APPRENTICE ? 'Apprentice' : 'Member'}
                 </span>
