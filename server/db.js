@@ -53,10 +53,22 @@ export async function migrate() {
  * also leaves server-owned columns like game_uid alone -- the UI never sends
  * those back and would otherwise blank them.
  */
-export async function replacePlayers(players) {
+export async function replacePlayers(players, { mayAssignRanks = false } = {}) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+
+    // Rank is a leader's decision, not part of ordinary roster upkeep. Whoever
+    // may not assign it gets their submitted rank_id ignored rather than an
+    // error, so editing a member's level never depends on rights they lack.
+    if (!mayAssignRanks) {
+      const { rows } = await client.query(
+        `SELECT id, rank_id AS "rankId" FROM players WHERE guild_id = $1`,
+        [GUILD_ID],
+      );
+      const existing = new Map(rows.map((r) => [r.id, r.rankId]));
+      players = players.map((p) => ({ ...p, rankId: existing.get(p.id) ?? null }));
+    }
 
     const keep = players.map((p) => p.id);
     if (keep.length) {

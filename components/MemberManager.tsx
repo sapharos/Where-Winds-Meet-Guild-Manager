@@ -13,6 +13,7 @@ interface MemberManagerProps {
   onAddRank: (r: GuildRank) => void;
   onDeleteRank: (id: string) => void;
   onShowHistory?: (p: Player) => void;
+  canManageRanks?: boolean;
 }
 
 const MemberManager: React.FC<MemberManagerProps> = ({ 
@@ -24,7 +25,8 @@ const MemberManager: React.FC<MemberManagerProps> = ({
   onDelete, 
   onAddRank, 
   onDeleteRank,
-  onShowHistory
+  onShowHistory,
+  canManageRanks = false
 }) => {
   const [isEditing, setIsEditing] = useState<Player | null>(null);
   const [showRankEditor, setShowRankEditor] = useState(false);
@@ -142,10 +144,17 @@ const MemberManager: React.FC<MemberManagerProps> = ({
             </div>
 
             <div>
-              <label className="block text-xs uppercase tracking-wider text-slate-500 mb-1">Guild Rank (Optional)</label>
+              <label className="block text-xs uppercase tracking-wider text-slate-500 mb-1">
+                Guild Rank (Optional)
+                {!canManageRanks && (
+                  <span className="ml-2 normal-case tracking-normal text-slate-600">
+                    solo el lider y el administrador
+                  </span>
+                )}
+              </label>
               <div className="flex gap-2">
-                <select 
-                  disabled={isViewer}
+                <select
+                  disabled={isViewer || !canManageRanks}
                   className="flex-1 bg-slate-950 border border-slate-800 rounded p-2 outline-none text-sm"
                   value={formData.rankId || ''}
                   onChange={e => setFormData({...formData, rankId: e.target.value || undefined})}
@@ -155,13 +164,15 @@ const MemberManager: React.FC<MemberManagerProps> = ({
                     <option key={r.id} value={r.id}>{r.name}</option>
                   ))}
                 </select>
-                <button 
-                  type="button"
-                  onClick={() => setShowRankEditor(!showRankEditor)}
-                  className={`p-2 rounded border transition-colors ${showRankEditor ? 'bg-amber-600 border-amber-500 text-white' : 'bg-slate-950 border-slate-800 text-slate-500'}`}
-                >
-                  <i className="fa-solid fa-gear"></i>
-                </button>
+                {canManageRanks && (
+                  <button
+                    type="button"
+                    onClick={() => setShowRankEditor(!showRankEditor)}
+                    className={`p-2 rounded border transition-colors ${showRankEditor ? 'bg-amber-600 border-amber-500 text-white' : 'bg-slate-950 border-slate-800 text-slate-500'}`}
+                  >
+                    <i className="fa-solid fa-gear"></i>
+                  </button>
+                )}
               </div>
             </div>
 

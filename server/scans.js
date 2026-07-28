@@ -5,7 +5,6 @@ import { pool, GUILD_ID } from './db.js';
 // did not read arrives as null rather than being left out, so a gap in the
 // history is visible instead of looking like a value that never changed.
 export const SCAN_FIELDS = [
-  'position',
   'level',
   'sect',
   'region',
@@ -25,18 +24,7 @@ export const SCAN_FIELDS = [
   'profession_mastery',
 ];
 
-const TEXT_FIELDS = new Set(['position', 'sect', 'region', 'language']);
-
-/**
- * Whether the game is calling this member an apprentice. It counts them
- * separately from full members, and a leader needs to see who is still waiting
- * to be promoted. This is a label only -- what anyone may do in this app comes
- * from their account role, and apprentices and members share it.
- */
-function membershipFrom(position) {
-  if (!position) return null;
-  return /apprentice|aprendiz/i.test(String(position)) ? 'Apprentice' : 'Full Member';
-}
+const TEXT_FIELDS = new Set(['sect', 'region', 'language']);
 
 /** Fold away case, accents and punctuation so Subâru and Subaru compare equal. */
 function fold(value) {
@@ -160,18 +148,17 @@ export async function commitScan({ scannedAt, entries }) {
         playerId = randomUUID();
         const f = entry.fields ?? {};
         await client.query(
-          `INSERT INTO players (guild_id, id, name, role, level, sect, status, game_uid, online_id, game_position)
-           VALUES ($1, $2, $3, 'DPS', $4, $5, $6, $7, $8, $9)`,
+          `INSERT INTO players (guild_id, id, name, role, level, sect, status, game_uid, online_id)
+           VALUES ($1, $2, $3, 'DPS', $4, $5, $6, $7, $8)`,
           [
             GUILD_ID,
             playerId,
             entry.createAs,
             f.level ?? 1,
             f.sect ?? 'Sectless',
-            membershipFrom(f.position) ?? 'Full Member',
+            'Full Member',
             entry.uid ? String(entry.uid) : null,
             entry.onlineId ?? null,
-            f.position ?? null,
           ],
         );
         created.push({ id: playerId, name: entry.createAs });
@@ -211,20 +198,13 @@ export async function commitScan({ scannedAt, entries }) {
       );
       stored++;
 
-      // Keep the roster showing what the game last reported.
+      // Keep the roster showing what the game last reported. Rank is not among
+      // it: that is assigned in the app, by a leader, and a sweep must not
+      // quietly overwrite their decision.
       await client.query(
-        `UPDATE players SET level = COALESCE($1, level), sect = COALESCE($2, sect),
-                            game_position = COALESCE($3, game_position),
-                            status = COALESCE($4, status)
-          WHERE guild_id = $5 AND id = $6`,
-        [
-          entry.fields?.level ?? null,
-          entry.fields?.sect ?? null,
-          entry.fields?.position ?? null,
-          membershipFrom(entry.fields?.position),
-          GUILD_ID,
-          playerId,
-        ],
+        `UPDATE players SET level = COALESCE($1, level), sect = COALESCE($2, sect)
+          WHERE guild_id = $3 AND id = $4`,
+        [entry.fields?.level ?? null, entry.fields?.sect ?? null, GUILD_ID, playerId],
       );
     }
 

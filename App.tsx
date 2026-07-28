@@ -497,6 +497,7 @@ const App: React.FC = () => {
             onAddRank={handleAddRank}
             onDeleteRank={handleDeleteRank}
             onShowHistory={setHistoryFor}
+            canManageRanks={!ranksLocked}
           />
         ) : (
           activeSession ? (

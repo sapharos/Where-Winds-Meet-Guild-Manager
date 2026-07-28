@@ -177,7 +177,7 @@ app.get('/api/state', requireAuth, asHandler(async (_req, res) => {
   const [players, ranks, sessions] = await Promise.all([
     pool.query(
       `SELECT id, name, role, level, sect, platform, status, rank_id AS "rankId", notes,
-              game_uid AS "gameUid", online_id AS "onlineId", game_position AS "gamePosition"
+              game_uid AS "gameUid", online_id AS "onlineId"
          FROM players WHERE guild_id = $1 ORDER BY name`,
       [GUILD_ID],
     ),
@@ -197,7 +197,6 @@ app.get('/api/state', requireAuth, asHandler(async (_req, res) => {
       notes: p.notes ?? undefined,
       gameUid: p.gameUid ?? undefined,
       onlineId: p.onlineId ?? undefined,
-      gamePosition: p.gamePosition ?? undefined,
     })),
     ranks: ranks.rows,
     sessions: sessions.rows.map((s) => ({ ...s, date: s.date.toISOString() })),
@@ -207,7 +206,7 @@ app.get('/api/state', requireAuth, asHandler(async (_req, res) => {
 app.put('/api/players', requireAuth, requirePermission('roster.edit'), asHandler(async (req, res) => {
   const players = requireArray(req, res);
   if (!players) return;
-  await replacePlayers(players);
+  await replacePlayers(players, { mayAssignRanks: req.permissions.includes('ranks.manage') });
   res.json({ saved: players.length });
 }));
 

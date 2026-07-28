@@ -53,32 +53,11 @@ export interface TacticalGroup {
   color: string;
 }
 
-// Ranks the game shows in its Positions column, mapped to what we call them.
-// Anything absent from this table is treated as an officer rank on purpose:
-// ordinary members are always labelled "Members", so an unfamiliar label is
-// some kind of elevated rank, and reading it as one errs the safer way.
-export const GAME_POSITIONS: Record<string, string> = {
-  members: 'Miembro',
-  member: 'Miembro',
-  miembros: 'Miembro',
-  apprentice: 'Aprendiz',
-  oficiales: 'Oficial',
-  officers: 'Oficial',
-  officer: 'Oficial',
-  elites: 'Oficial',
-};
-
-export function positionLabel(raw?: string): string | undefined {
-  if (!raw?.trim()) return undefined;
-  return GAME_POSITIONS[raw.trim().toLowerCase()] ?? 'Oficial';
-}
-
 export interface Player {
   id: string;
   name: string;
   gameUid?: string;
   onlineId?: string;
-  gamePosition?: string;
   role: Role;
   level: number;
   sect: string;
