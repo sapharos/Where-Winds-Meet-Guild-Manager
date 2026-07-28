@@ -36,15 +36,24 @@ export async function initAuth() {
   await seedAdmin();
 }
 
+/**
+ * Give a guild the defaults for any permission it has never been offered.
+ *
+ * The matrix belongs to the leaders once they have touched it, so this must not
+ * reinstate something they deliberately revoked. What it tracks instead is
+ * which permissions have ever been introduced: a name absent from that list is
+ * new to this deployment, never seen by anyone, and gets its default. Every
+ * other decision is left exactly as they made it.
+ */
 async function seedPermissions() {
-  const { rows } = await pool.query(
-    `SELECT 1 FROM role_permissions WHERE guild_id = $1 LIMIT 1`,
-    [GUILD_ID],
-  );
-  if (rows.length) return;
+  const known = await pool.query(`SELECT value FROM app_settings WHERE key = 'known_permissions'`);
+  const introduced = new Set(known.rows.length ? JSON.parse(known.rows[0].value) : []);
+  const fresh = PERMISSIONS.filter((p) => !introduced.has(p));
+  if (!fresh.length) return;
 
   for (const [role, perms] of Object.entries(DEFAULT_PERMISSIONS)) {
     for (const permission of perms) {
+      if (!fresh.includes(permission)) continue;
       await pool.query(
         `INSERT INTO role_permissions (guild_id, role, permission) VALUES ($1, $2, $3)
            ON CONFLICT DO NOTHING`,
@@ -52,7 +61,13 @@ async function seedPermissions() {
       );
     }
   }
-  console.log('Seeded default role permissions');
+
+  await pool.query(
+    `INSERT INTO app_settings (key, value) VALUES ('known_permissions', $1)
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+    [JSON.stringify([...introduced, ...fresh])],
+  );
+  console.log(`Applied defaults for new permissions: ${fresh.join(', ')}`);
 }
 
 async function seedAdmin() {

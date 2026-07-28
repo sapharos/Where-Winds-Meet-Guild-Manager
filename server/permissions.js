@@ -10,6 +10,7 @@ export const PERMISSIONS = [
   'war.edit',
   'data.export',
   'data.import',
+  'builds.manage',
   'users.manage',
   'permissions.manage',
 ];

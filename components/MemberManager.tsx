@@ -13,6 +13,7 @@ interface MemberManagerProps {
   onAddRank: (r: GuildRank) => void;
   onDeleteRank: (id: string) => void;
   onShowHistory?: (p: Player) => void;
+  onShowBuilds?: (p: Player) => void;
   canManageRanks?: boolean;
 }
 
@@ -26,6 +27,7 @@ const MemberManager: React.FC<MemberManagerProps> = ({
   onAddRank, 
   onDeleteRank,
   onShowHistory,
+  onShowBuilds,
   canManageRanks = false
 }) => {
   const [isEditing, setIsEditing] = useState<Player | null>(null);
@@ -269,6 +271,7 @@ const MemberManager: React.FC<MemberManagerProps> = ({
                 onEdit={isViewer ? undefined : handleEdit} 
                 onDelete={isViewer ? undefined : onDelete} 
                 onShowHistory={onShowHistory}
+                onShowBuilds={onShowBuilds}
                 ranks={ranks} 
               />
             ))

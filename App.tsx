@@ -12,12 +12,14 @@ import LoginScreen from './components/LoginScreen';
 import AdminPanel from './components/AdminPanel';
 import ScanImport from './components/ScanImport';
 import MemberHistory from './components/MemberHistory';
+import BuildEditor from './components/BuildEditor';
 
 const App: React.FC = () => {
   const [session, setSession] = useState<Session | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
   const [activeTab, setActiveTab] = useState<'roster' | 'war-room' | 'scan' | 'admin'>('roster');
   const [historyFor, setHistoryFor] = useState<Player | null>(null);
+  const [buildsFor, setBuildsFor] = useState<Player | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
   const [sessions, setSessions] = useState<GuildWarSession[]>([]);
   const [ranks, setRanks] = useState<GuildRank[]>([]);
@@ -497,6 +499,7 @@ const App: React.FC = () => {
             onAddRank={handleAddRank}
             onDeleteRank={handleDeleteRank}
             onShowHistory={setHistoryFor}
+            onShowBuilds={setBuildsFor}
             canManageRanks={!ranksLocked}
           />
         ) : (
@@ -516,6 +519,15 @@ const App: React.FC = () => {
       </main>
 
       {historyFor && <MemberHistory player={historyFor} onClose={() => setHistoryFor(null)} />}
+
+      {buildsFor && (
+        <BuildEditor
+          player={buildsFor}
+          canEdit={peerRole !== 'CLIENT'}
+          onClose={() => setBuildsFor(null)}
+          onSaved={() => void loadAllData()}
+        />
+      )}
 
       {activeTab === 'war-room' && (
         <footer className="fixed bottom-0 left-0 right-0 bg-slate-950/90 backdrop-blur-md border-t border-slate-800 p-3 flex justify-center z-50">

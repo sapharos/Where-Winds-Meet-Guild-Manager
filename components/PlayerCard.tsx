@@ -8,12 +8,13 @@ interface PlayerCardProps {
   onEdit?: (p: Player) => void;
   onDelete?: (id: string) => void;
   onShowHistory?: (p: Player) => void;
+  onShowBuilds?: (p: Player) => void;
   className?: string;
   compact?: boolean;
   ranks?: GuildRank[];
 }
 
-const PlayerCard: React.FC<PlayerCardProps> = ({ player, onEdit, onDelete, onShowHistory, className = '', compact = false, ranks = [] }) => {
+const PlayerCard: React.FC<PlayerCardProps> = ({ player, onEdit, onDelete, onShowHistory, onShowBuilds, className = '', compact = false, ranks = [] }) => {
   const rank = ranks.find(r => r.id === player.rankId);
 
   return (
@@ -60,6 +61,15 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ player, onEdit, onDelete, onSho
           </div>
         </div>
         <div className="flex gap-2 shrink-0">
+          {onShowBuilds && (
+            <button
+              onClick={() => onShowBuilds(player)}
+              title="Builds y armas"
+              className="text-slate-400 hover:text-amber-500 transition-colors"
+            >
+              <i className="fa-solid fa-hand-fist"></i>
+            </button>
+          )}
           {onShowHistory && (
             <button
               onClick={() => onShowHistory(player)}

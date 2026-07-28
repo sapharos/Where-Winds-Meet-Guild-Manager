@@ -4,6 +4,7 @@ import express from 'express';
 import { pool, migrate, replaceAll, replacePlayers, GUILD_ID } from './db.js';
 import { ROLES, PERMISSIONS } from './permissions.js';
 import { matchEntries, commitScan, historyFor, scanSummary } from './scans.js';
+import { listBuilds, saveBuilds, mayEditBuilds } from './builds.js';
 import {
   initAuth,
   hashPassword,
@@ -82,7 +83,7 @@ app.post('/api/auth/change-password', requireAuth, asHandler(async (req, res) =>
 
 app.get('/api/users', requireAuth, requirePermission('users.manage'), asHandler(async (_req, res) => {
   const { rows } = await pool.query(
-    `SELECT id, username, role, disabled, created_at AS "createdAt"
+    `SELECT id, username, role, disabled, player_id AS "playerId", created_at AS "createdAt"
        FROM users WHERE guild_id = $1 ORDER BY username`,
     [GUILD_ID],
   );
@@ -255,6 +256,39 @@ app.get('/api/scans', requireAuth, asHandler(async (_req, res) => {
 
 app.get('/api/players/:id/scans', requireAuth, asHandler(async (req, res) => {
   res.json(await historyFor(req.params.id));
+}));
+
+/* ---------------------------------------------------------------- builds */
+
+app.get('/api/builds', requireAuth, asHandler(async (_req, res) => {
+  res.json(await listBuilds());
+}));
+
+app.get('/api/players/:id/builds', requireAuth, asHandler(async (req, res) => {
+  res.json(await listBuilds(req.params.id));
+}));
+
+app.put('/api/players/:id/builds', requireAuth, asHandler(async (req, res) => {
+  if (!(await mayEditBuilds(req, req.params.id))) {
+    return res.status(403).json({ error: 'you may only edit your own builds' });
+  }
+  res.json(await saveBuilds(req.params.id, req.body?.builds));
+}));
+
+// Which roster entry an account belongs to, which is what lets a member edit
+// their own builds without any permission at all.
+app.patch('/api/users/:id/player', requireAuth, requirePermission('users.manage'), asHandler(async (req, res) => {
+  const playerId = req.body?.playerId ?? null;
+  if (playerId) {
+    const { rows } = await pool.query(`SELECT 1 FROM players WHERE guild_id = $1 AND id = $2`, [GUILD_ID, playerId]);
+    if (!rows.length) return res.status(404).json({ error: 'no such member' });
+  }
+  await pool.query(`UPDATE users SET player_id = $1 WHERE id = $2 AND guild_id = $3`, [
+    playerId,
+    req.params.id,
+    GUILD_ID,
+  ]);
+  res.json({ ok: true });
 }));
 
 migrate()

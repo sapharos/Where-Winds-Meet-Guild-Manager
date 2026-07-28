@@ -126,6 +126,25 @@ CREATE TABLE IF NOT EXISTS player_scans (
   FOREIGN KEY (guild_id, player_id) REFERENCES players (guild_id, id) ON DELETE CASCADE
 );
 
+-- A member carries several builds, and a build fills more than one role: a
+-- weapon pair played as tank and healer at once is why a single combat role on
+-- the roster was never enough. Never captured from the game -- these are chosen
+-- by people, so a sweep must not touch them.
+CREATE TABLE IF NOT EXISTS player_builds (
+  id         TEXT PRIMARY KEY,
+  guild_id   TEXT NOT NULL REFERENCES guilds(id) ON DELETE CASCADE,
+  player_id  TEXT NOT NULL,
+  name       TEXT NOT NULL,
+  weapons    JSONB NOT NULL DEFAULT '[]'::jsonb,
+  roles      JSONB NOT NULL DEFAULT '[]'::jsonb,
+  is_primary BOOLEAN NOT NULL DEFAULT false,
+  notes      TEXT,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  FOREIGN KEY (guild_id, player_id) REFERENCES players (guild_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS player_builds_owner_idx ON player_builds (guild_id, player_id);
+
 CREATE INDEX IF NOT EXISTS player_scans_history_idx ON player_scans (guild_id, player_id, scanned_at DESC);
 CREATE INDEX IF NOT EXISTS players_guild_idx      ON players (guild_id);
 CREATE INDEX IF NOT EXISTS ranks_guild_idx        ON ranks (guild_id);

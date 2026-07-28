@@ -46,6 +46,35 @@ export interface GuildRank {
   color: string;
 }
 
+// The martial arts weapons, in the pairs the game teaches them, with the
+// playstyle each pair is built around. A build names the weapons carried; the
+// roles it fills are chosen separately, because a pair can be played more than
+// one way and hybrids are the whole point.
+export const WEAPON_PAIRS: { playstyle: string; weapons: [string, string] }[] = [
+  { playstyle: 'Movilidad, objetivo único', weapons: ['Nameless Sword', 'Nameless Spear'] },
+  { playstyle: 'Movilidad, sangrado', weapons: ['Strategic Sword', 'Heavenquaker Spear'] },
+  { playstyle: 'DPS y movilidad, sin defensa', weapons: ['Infernal Twinblades', 'Mortal Rope Dart'] },
+  { playstyle: 'Soporte y curación', weapons: ['Panacea Fan', 'Soulshade Umbrella'] },
+  { playstyle: 'Distancia, ataques aéreos', weapons: ['Inkwell Fan', 'Vernal Umbrella'] },
+  { playstyle: 'Supervivencia, reducción de daño', weapons: ['Stormbreaker Spear', 'Thundercry Blade'] },
+  { playstyle: 'Control, buffs y debuffs', weapons: ['Everspring Umbrella', 'Unfettered Rope Dart'] },
+  { playstyle: 'Objetivo único, daño explosivo', weapons: ['Snowparting Blade', 'Phalanxbane Blade'] },
+];
+
+export const ALL_WEAPONS = WEAPON_PAIRS.flatMap((p) => p.weapons);
+
+export interface PlayerBuild {
+  id: string;
+  playerId: string;
+  name: string;
+  weapons: string[];
+  // More than one is the point: a pair played as Tank and Healer at once is a
+  // real build, and a single primary role cannot describe it.
+  roles: Role[];
+  isPrimary: boolean;
+  notes?: string;
+}
+
 export interface TacticalGroup {
   id: string;
   name: string;
@@ -101,6 +130,7 @@ export const PERMISSION_LABELS: Record<string, string> = {
   'war.edit': 'Editar despliegues y unidades',
   'data.export': 'Exportar datos',
   'data.import': 'Importar datos',
+  'builds.manage': 'Editar builds de cualquiera',
   'users.manage': 'Gestionar usuarios',
   'permissions.manage': 'Editar permisos',
 };
