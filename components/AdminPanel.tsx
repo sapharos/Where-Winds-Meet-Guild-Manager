@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { authService } from '../services/authService';
+import WeaponSets from './WeaponSets';
 import { AuthUser, ManagedUser, PERMISSION_LABELS, PermissionCatalog, UserRole, ROLE_LABELS } from '../types';
 
 // Mirrors the server's LOCKED table so the boxes it will refuse to clear are
@@ -13,9 +14,10 @@ interface Props {
   currentUser: AuthUser;
   canManageUsers: boolean;
   canManagePermissions: boolean;
+  canManageBuilds: boolean;
 }
 
-const AdminPanel: React.FC<Props> = ({ currentUser, canManageUsers, canManagePermissions }) => {
+const AdminPanel: React.FC<Props> = ({ currentUser, canManageUsers, canManagePermissions, canManageBuilds }) => {
   const [users, setUsers] = useState<ManagedUser[]>([]);
   const [catalog, setCatalog] = useState<PermissionCatalog | null>(null);
   const [matrix, setMatrix] = useState<Record<string, string[]>>({});
@@ -201,6 +203,8 @@ const AdminPanel: React.FC<Props> = ({ currentUser, canManageUsers, canManagePer
           </table>
         </div>
       </section>
+
+      <WeaponSets canEdit={canManageBuilds} />
 
       {canManageUsers && (
         <section className="bg-slate-900/60 border border-slate-800 rounded-xl p-6">

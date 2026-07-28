@@ -327,7 +327,7 @@ const App: React.FC = () => {
   };
 
   const activeSession = sessions.find(s => s.id === activeSessionId);
-  const canSeeAdmin = can('users.manage') || can('permissions.manage');
+  const canSeeAdmin = can('users.manage') || can('permissions.manage') || can('builds.manage');
 
   const handleUpdateSession = (updatedSession: GuildWarSession) => {
     if (warLocked) return;
@@ -487,6 +487,7 @@ const App: React.FC = () => {
             currentUser={session.user}
             canManageUsers={can('users.manage')}
             canManagePermissions={can('permissions.manage')}
+            canManageBuilds={can('builds.manage')}
           />
         ) : activeTab === 'roster' ? (
           <MemberManager
@@ -523,7 +524,7 @@ const App: React.FC = () => {
       {buildsFor && (
         <BuildEditor
           player={buildsFor}
-          canEdit={peerRole !== 'CLIENT'}
+          canEdit={peerRole !== 'CLIENT' && can('builds.manage')}
           onClose={() => setBuildsFor(null)}
           onSaved={() => void loadAllData()}
         />

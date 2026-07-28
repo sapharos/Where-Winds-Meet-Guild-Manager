@@ -1,11 +1,20 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../services/authService';
-import { Player, PlayerBuild, Role, WEAPON_PAIRS } from '../types';
+import { Player, PlayerBuild, Role, WeaponSet } from '../types';
 
 const ROLE_STYLE: Record<Role, string> = {
   [Role.TANK]: 'border-blue-500 text-blue-300 bg-blue-500/15',
   [Role.HEALER]: 'border-green-500 text-green-300 bg-green-500/15',
   [Role.DPS]: 'border-red-500 text-red-300 bg-red-500/15',
+};
+
+/** A set's icon: a Font Awesome class, an uploaded picture, or nothing. */
+export const SetBadge: React.FC<{ set: WeaponSet; size?: number }> = ({ set, size = 18 }) => {
+  if (!set.icon) return <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: set.color }} />;
+  if (set.icon.startsWith('data:')) {
+    return <img src={set.icon} alt="" width={size} height={size} className="rounded object-cover" />;
+  }
+  return <i className={`fa-solid ${set.icon}`} style={{ color: set.color, fontSize: size * 0.8 }} />;
 };
 
 const blank = (): PlayerBuild => ({
@@ -26,6 +35,7 @@ interface Props {
 
 const BuildEditor: React.FC<Props> = ({ player, canEdit, onClose, onSaved }) => {
   const [builds, setBuilds] = useState<PlayerBuild[] | null>(null);
+  const [sets, setSets] = useState<WeaponSet[]>([]);
   const [message, setMessage] = useState<{ text: string; ok: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -33,6 +43,7 @@ const BuildEditor: React.FC<Props> = ({ player, canEdit, onClose, onSaved }) => 
     api<PlayerBuild[]>(`/players/${player.id}/builds`)
       .then(setBuilds)
       .catch((err) => setMessage({ text: err instanceof Error ? err.message : 'Error', ok: false }));
+    api<WeaponSet[]>('/weapon-sets').then(setSets).catch(() => setSets([]));
   }, [player.id]);
 
   const update = (id: string, patch: Partial<PlayerBuild>) =>
@@ -163,25 +174,35 @@ const BuildEditor: React.FC<Props> = ({ player, canEdit, onClose, onSaved }) => 
                   Armas ({build.weapons.length}/4)
                 </span>
                 <div className="space-y-1.5">
-                  {WEAPON_PAIRS.map((pair) => (
-                    <div key={pair.playstyle} className="flex items-center gap-2 flex-wrap">
-                      {pair.weapons.map((weapon) => (
-                        <button
-                          key={weapon}
-                          disabled={!canEdit}
-                          onClick={() => update(build.id, { weapons: toggle(build.weapons, weapon) })}
-                          className={`text-[11px] px-2 py-1 rounded border transition-all ${
-                            build.weapons.includes(weapon)
-                              ? 'border-amber-600 text-amber-400 bg-amber-600/10'
-                              : 'border-slate-800 text-slate-600 hover:text-slate-400'
-                          }`}
-                        >
-                          {weapon}
-                        </button>
-                      ))}
-                      <span className="text-[10px] text-slate-700 italic">{pair.playstyle}</span>
+                  {sets.map((set) => (
+                    <div key={set.id} className="flex items-center gap-2 flex-wrap">
+                      <SetBadge set={set} />
+                      {set.weapons.map((weapon) => {
+                        const picked = build.weapons.includes(weapon);
+                        return (
+                          <button
+                            key={weapon}
+                            disabled={!canEdit}
+                            onClick={() => update(build.id, { weapons: toggle(build.weapons, weapon) })}
+                            className="text-[11px] px-2 py-1 rounded border transition-all"
+                            style={
+                              picked
+                                ? { borderColor: set.color, color: set.color, backgroundColor: `${set.color}1a` }
+                                : undefined
+                            }
+                          >
+                            <span className={picked ? '' : 'text-slate-600'}>{weapon}</span>
+                          </button>
+                        );
+                      })}
+                      <span className="text-[10px] text-slate-700 italic">{set.name}</span>
                     </div>
                   ))}
+                  {!sets.length && (
+                    <p className="text-xs text-slate-600">
+                      No hay conjuntos de armas definidos. Se crean en Administración.
+                    </p>
+                  )}
                 </div>
               </div>
 

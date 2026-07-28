@@ -126,6 +126,23 @@ CREATE TABLE IF NOT EXISTS player_scans (
   FOREIGN KEY (guild_id, player_id) REFERENCES players (guild_id, id) ON DELETE CASCADE
 );
 
+-- The weapon sets a build can draw from. Kept as data rather than a constant
+-- because the game adds weapons, and waiting on a code change to record what
+-- the guild is already playing is the wrong way round. The icon holds either a
+-- Font Awesome class or a small data URI, so an uploaded picture needs no file
+-- storage and survives a redeploy like everything else here.
+CREATE TABLE IF NOT EXISTS weapon_sets (
+  id         TEXT PRIMARY KEY,
+  guild_id   TEXT NOT NULL REFERENCES guilds(id) ON DELETE CASCADE,
+  name       TEXT NOT NULL,
+  weapons    JSONB NOT NULL DEFAULT '[]'::jsonb,
+  color      TEXT NOT NULL DEFAULT '#f59e0b',
+  icon       TEXT,
+  sort_order INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS weapon_sets_guild_idx ON weapon_sets (guild_id, sort_order);
+
 -- A member carries several builds, and a build fills more than one role: a
 -- weapon pair played as tank and healer at once is why a single combat role on
 -- the roster was never enough. Never captured from the game -- these are chosen

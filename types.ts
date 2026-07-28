@@ -46,22 +46,18 @@ export interface GuildRank {
   color: string;
 }
 
-// The martial arts weapons, in the pairs the game teaches them, with the
-// playstyle each pair is built around. A build names the weapons carried; the
-// roles it fills are chosen separately, because a pair can be played more than
-// one way and hybrids are the whole point.
-export const WEAPON_PAIRS: { playstyle: string; weapons: [string, string] }[] = [
-  { playstyle: 'Movilidad, objetivo único', weapons: ['Nameless Sword', 'Nameless Spear'] },
-  { playstyle: 'Movilidad, sangrado', weapons: ['Strategic Sword', 'Heavenquaker Spear'] },
-  { playstyle: 'DPS y movilidad, sin defensa', weapons: ['Infernal Twinblades', 'Mortal Rope Dart'] },
-  { playstyle: 'Soporte y curación', weapons: ['Panacea Fan', 'Soulshade Umbrella'] },
-  { playstyle: 'Distancia, ataques aéreos', weapons: ['Inkwell Fan', 'Vernal Umbrella'] },
-  { playstyle: 'Supervivencia, reducción de daño', weapons: ['Stormbreaker Spear', 'Thundercry Blade'] },
-  { playstyle: 'Control, buffs y debuffs', weapons: ['Everspring Umbrella', 'Unfettered Rope Dart'] },
-  { playstyle: 'Objetivo único, daño explosivo', weapons: ['Snowparting Blade', 'Phalanxbane Blade'] },
-];
-
-export const ALL_WEAPONS = WEAPON_PAIRS.flatMap((p) => p.weapons);
+// A weapon set as the guild defines it. Kept on the server rather than here
+// because the game keeps adding weapons: recording what people already play
+// should not wait on a code change. The icon is either a Font Awesome class or
+// a small inline picture.
+export interface WeaponSet {
+  id: string;
+  name: string;
+  weapons: string[];
+  color: string;
+  icon?: string | null;
+  sortOrder?: number;
+}
 
 export interface PlayerBuild {
   id: string;

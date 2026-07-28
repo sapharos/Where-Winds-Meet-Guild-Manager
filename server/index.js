@@ -5,6 +5,7 @@ import { pool, migrate, replaceAll, replacePlayers, GUILD_ID } from './db.js';
 import { ROLES, PERMISSIONS } from './permissions.js';
 import { matchEntries, commitScan, historyFor, scanSummary } from './scans.js';
 import { listBuilds, saveBuilds, mayEditBuilds } from './builds.js';
+import { listWeaponSets, saveWeaponSets, seedWeaponSets } from './weapons.js';
 import {
   initAuth,
   hashPassword,
@@ -258,6 +259,18 @@ app.get('/api/players/:id/scans', requireAuth, asHandler(async (req, res) => {
   res.json(await historyFor(req.params.id));
 }));
 
+/* ---------------------------------------------------------- weapon sets */
+
+app.get('/api/weapon-sets', requireAuth, asHandler(async (_req, res) => {
+  res.json(await listWeaponSets());
+}));
+
+// Curating the vocabulary builds are described with is the same job as editing
+// them, so it needs no permission of its own.
+app.put('/api/weapon-sets', requireAuth, requirePermission('builds.manage'), asHandler(async (req, res) => {
+  res.json(await saveWeaponSets(req.body?.sets));
+}));
+
 /* ---------------------------------------------------------------- builds */
 
 app.get('/api/builds', requireAuth, asHandler(async (_req, res) => {
@@ -293,6 +306,7 @@ app.patch('/api/users/:id/player', requireAuth, requirePermission('users.manage'
 
 migrate()
   .then(initAuth)
+  .then(seedWeaponSets)
   .then(() => {
     app.listen(PORT, () => console.log(`API listening on ${PORT}`));
   })
