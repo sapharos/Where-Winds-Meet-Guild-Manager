@@ -17,6 +17,7 @@ Press Ctrl+C in this window when you are done.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import time
 from dataclasses import dataclass
@@ -26,6 +27,22 @@ from pathlib import Path
 import mss
 import numpy as np
 from PIL import Image, ImageDraw
+
+GREEN, GREY, BOLD, RESET = "\033[32m", "\033[90m", "\033[1m", "\033[0m"
+SPINNER = "|/-\\"
+
+
+def enable_colour() -> None:
+    """Turn on ANSI handling in the old Windows console; harmless elsewhere."""
+    if os.name != "nt":
+        return
+    try:
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32
+        kernel32.SetConsoleMode(kernel32.GetStdHandle(-11), 7)
+    except Exception:
+        pass
 
 # Fractions of the screen rather than pixels, so the same defaults work at any
 # resolution with this UI layout. Measured from a 1920x1080 capture.
@@ -121,8 +138,10 @@ def main() -> int:
         help="how different two pictures must be to count as new, 0-255 (default: 1.5)",
     )
     parser.add_argument("--calibrate", action="store_true", help="write one annotated screenshot and exit")
+    parser.add_argument("--beep", action="store_true", help="also beep on each frame, to browse without looking")
     args = parser.parse_args()
 
+    enable_colour()
     interval = 1.0 / args.fps
     session = datetime.now().strftime("%Y%m%d-%H%M%S")
 
@@ -143,9 +162,10 @@ def main() -> int:
         out_dir = args.out / session
         out_dir.mkdir(parents=True, exist_ok=True)
 
-        print(f"Watching monitor {args.monitor} ({monitor['width']}x{monitor['height']}) at {args.fps:g} fps")
-        print(f"Writing to {out_dir.resolve()}")
-        print("Browse the guild panel now. Ctrl+C here when you are done.\n")
+        print(f"Monitor {args.monitor} ({monitor['width']}x{monitor['height']}) a {args.fps:g} fps")
+        print(f"Guardando en {out_dir.resolve()}")
+        print(f"\nNavega el gremio. Espera a ver {BOLD}SIGUIENTE{RESET} antes de cada paso.")
+        print("Ctrl+C aqui para terminar.\n")
 
         # Per region: the last picture seen, how long it has held still, and
         # every picture already written out.
@@ -153,14 +173,42 @@ def main() -> int:
         still_for: dict[str, int] = {r.name: 0 for r in regions}
         saved: dict[str, list[np.ndarray]] = {r.name: [] for r in regions}
         counts: dict[str, int] = {r.name: 0 for r in regions}
+        labels = {"list": "lista", "panel": "panel"}
+        ticks = 0
+        # Redirected to a file, the redrawn status line would pile up instead of
+        # overwriting itself, so only draw it for a real terminal.
+        live = sys.stdout.isatty()
+
+        def status() -> str:
+            if not live:
+                return ""
+            spin = SPINNER[(ticks // 3) % len(SPINNER)]
+            return f"{GREY}  {spin} mirando...   lista {counts['list']} / panel {counts['panel']}{RESET}"
+
+        def announce(line: str) -> None:
+            """Replace the live status line with an event, then redraw it."""
+            sys.stdout.write(("\r\033[K" if live else "") + line + "\n" + status())
+            sys.stdout.flush()
+            if args.beep:
+                try:
+                    import winsound
+
+                    winsound.Beep(880, 60)
+                except Exception:
+                    pass
+
+        sys.stdout.write(status())
+        sys.stdout.flush()
 
         try:
             while True:
                 started = time.monotonic()
+                ticks += 1
 
                 for region in regions:
                     image = grab(sct, region)
                     sig = signature(image)
+                    name = labels[region.name]
 
                     previous = last_seen.get(region.name)
                     last_seen[region.name] = sig
@@ -170,29 +218,36 @@ def main() -> int:
                         continue
 
                     still_for[region.name] += 1
-                    # Save on the exact frame it settles, not on every frame after.
+                    # Act on the exact frame it settles, not on every frame after.
                     if still_for[region.name] != args.settle:
                         continue
 
+                    stamp = datetime.now().strftime("%H:%M:%S")
+
+                    # Say so out loud when nothing was written, otherwise a
+                    # revisited screen looks like the tool has stopped working.
                     if any(not differs(sig, seen, args.tolerance) for seen in saved[region.name]):
+                        announce(f"{GREY}  {stamp}  {name:5s}  ya lo tenia{RESET}      {BOLD}SIGUIENTE{RESET}")
                         continue
 
                     saved[region.name].append(sig)
                     counts[region.name] += 1
                     image.save(out_dir / f"{region.name}-{counts[region.name]:04d}.png")
-                    print(
-                        f"\r  list: {counts['list']:4d}   panel: {counts['panel']:4d}",
-                        end="",
-                        flush=True,
+                    announce(
+                        f"  {stamp}  {name:5s}  {GREEN}#{counts[region.name]:03d} guardado{RESET}"
+                        f"  {BOLD}SIGUIENTE{RESET}"
                     )
 
+                if live:
+                    sys.stdout.write("\r" + status())
+                    sys.stdout.flush()
                 time.sleep(max(0.0, interval - (time.monotonic() - started)))
 
         except KeyboardInterrupt:
             total = sum(counts.values())
-            print(f"\n\nStopped. {total} frames in {out_dir.resolve()}")
-            print(f"  member list: {counts['list']}")
-            print(f"  detail panel: {counts['panel']}")
+            print(("\r\033[K" if live else "") + f"\n{total} fotogramas en {out_dir.resolve()}")
+            print(f"  lista: {counts['list']}")
+            print(f"  panel: {counts['panel']}")
             return 0
 
 
