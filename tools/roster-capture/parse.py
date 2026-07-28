@@ -237,6 +237,25 @@ POPUP_BESIDE_PROFILE = (-0.14, 0.30)
 # which picking the largest text does not: an all-caps name like GIANNAA has no
 # descenders and measures shorter than the sect beneath it.
 POPUP_ROLES = ("DPS", "Tank", "Healer")
+
+# The popup covers only part of the member list, so the list's own furniture is
+# still on screen around it. A column heading accepted as a name hands one
+# member's account number to whoever the detail panel happened to be showing,
+# which is worse than reading no name at all.
+LIST_CHROME = (
+    "Member Name",
+    "Positions",
+    "Level",
+    "Online Status",
+    "Week Activity",
+    "Realm Clear",
+    "This Week's Hero's",
+    "Search member by Name",
+    "Members",
+    "Apprentice",
+    "Offline",
+    "Online",
+)
 NAME_ABOVE_ROLE = (0.03, 0.12)
 NAME_ABOVE_PROFILE = 0.45
 # The popup grows extra action buttons -- request to join a team, invite to
@@ -294,9 +313,17 @@ def read_popup(readings: list[Reading], width: int, height: int) -> dict | None:
     return {"nameAsRead": name, "uid": uid, "onlineId": online_id}
 
 
+def is_list_chrome(text: str) -> bool:
+    return any(similarity(text, label) > 0.8 for label in LIST_CHROME)
+
+
 def read_popup_name(inside: list[Reading], anchor: Reading, height: float) -> str | None:
     """The line above the combat role, or failing that the biggest above the buttons."""
-    usable = [r for r in inside if len(r.text.strip()) > 1 and not r.text.strip().isdigit()]
+    usable = [
+        r
+        for r in inside
+        if len(r.text.strip()) > 1 and not r.text.strip().isdigit() and not is_list_chrome(r.text)
+    ]
 
     role = next(
         (
