@@ -54,3 +54,9 @@ and you can stop and resume across several sessions.
 
 Capture at the game's native resolution, and prefer borderless or windowed
 fullscreen so the console stays reachable on a second monitor.
+
+## Si tu terminal no acepta `&&`
+
+Windows PowerShell 5.1 no admite `&&` como separador. Usa `;`, o el lanzador
+`capture.bat`, que se situa solo en esta carpeta y funciona desde cualquier
+shell y tambien haciendo doble clic.
