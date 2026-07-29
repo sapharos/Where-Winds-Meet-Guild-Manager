@@ -67,6 +67,9 @@ const WARNING_MS = WARNINGS[0].at;
 const JUNGLE_EVERY = 5 * MINUTE;
 const BOSS_AT = [6 * MINUTE, 16 * MINUTE];
 
+/** A guild war lasts half an hour, and the server ends it at that. */
+export const WAR_LENGTH = 30 * MINUTE;
+
 interface Countdown {
   key: string;
   label: string;
@@ -78,13 +81,12 @@ const clock = (ms: number) => {
   return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
 };
 
-function nextJungle(elapsed: number): Countdown {
+function nextJungle(elapsed: number): Countdown | null {
   const round = Math.floor(elapsed / JUNGLE_EVERY) + 1;
-  return {
-    key: `jungla-${round}`,
-    label: `Jungla ${round}`,
-    remaining: round * JUNGLE_EVERY - elapsed,
-  };
+  const at = round * JUNGLE_EVERY;
+  // Nothing is worth counting down to after the war has ended.
+  if (at > WAR_LENGTH) return null;
+  return { key: `jungla-${round}`, label: `Jungla ${round}`, remaining: at - elapsed };
 }
 
 function nextBoss(elapsed: number): Countdown | null {
@@ -176,7 +178,7 @@ const WarTimers: React.FC<Props> = ({ startedAt, offset, mayBeWarned }) => {
         }
       });
     }
-  }, [warnings, jungle.key, jungle.remaining, boss?.key, boss?.remaining]);
+  }, [warnings, jungle?.key, jungle?.remaining, boss?.key, boss?.remaining]);
 
   useEffect(() => () => window.clearTimeout(clearing.current), []);
 
@@ -223,8 +225,9 @@ const WarTimers: React.FC<Props> = ({ startedAt, offset, mayBeWarned }) => {
     }
   };
 
-  const Face: React.FC<{ event: Countdown | null; icon: string; colour: string }> = ({
+  const Face: React.FC<{ event: Countdown | null; name: string; icon: string; colour: string }> = ({
     event,
+    name,
     icon,
     colour,
   }) => {
@@ -240,7 +243,7 @@ const WarTimers: React.FC<Props> = ({ startedAt, offset, mayBeWarned }) => {
         <i className={`fa-solid ${icon} text-lg`} style={{ color: event ? colour : '#475569' }}></i>
         <div>
           <p className="text-[10px] uppercase tracking-wider text-slate-400">
-            {event ? event.label : 'Boss'}
+            {event ? event.label : name}
           </p>
           <p
             className="text-2xl font-bold tabular-nums leading-none"
@@ -280,10 +283,14 @@ const WarTimers: React.FC<Props> = ({ startedAt, offset, mayBeWarned }) => {
       <div>
         <p className="text-[10px] uppercase tracking-wider text-slate-500">En guerra</p>
         <p className="text-lg font-bold text-slate-200 tabular-nums leading-none">{clock(elapsed)}</p>
+        {/* Half an hour is the whole of it, so the end is a countdown too. */}
+        <p className="text-[10px] text-slate-500 tabular-nums mt-0.5">
+          termina en {clock(WAR_LENGTH - elapsed)}
+        </p>
       </div>
 
-      <Face event={jungle} icon="fa-leaf" colour="#a3e635" />
-      <Face event={boss} icon="fa-dragon" colour="#f87171" />
+      <Face event={jungle} name="Jungla" icon="fa-leaf" colour="#a3e635" />
+      <Face event={boss} name="Boss" icon="fa-dragon" colour="#f87171" />
 
       <div className="flex-1" />
 

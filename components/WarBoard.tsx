@@ -18,6 +18,7 @@ import { ROLE_ICONS } from '../constants';
 import { ROLE_NAMES, buildColours } from './PlayerCard';
 import StrategyPlanner from './StrategyPlanner';
 import WarTimers from './WarTimers';
+import WarHistory from './WarHistory';
 
 const ROLE_KEYS: Record<Role, 'tank' | 'healer' | 'dps'> = {
   [Role.TANK]: 'tank',
@@ -83,6 +84,7 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
   const [roleFilter, setRoleFilter] = useState<'' | Role>('');
   const [markFilter, setMarkFilter] = useState<'' | WarSide | 'none'>('');
   const [planning, setPlanning] = useState(false);
+  const [history, setHistory] = useState(false);
 
   // What the board holds right now, for handlers that fire faster than a render.
   const latest = useRef<Deployment[]>([]);
@@ -328,6 +330,14 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
                 </option>
               ))}
             </select>
+            <button
+              onClick={() => setHistory(true)}
+              title="Guerras libradas, resultados y aportes"
+              className="text-sm text-slate-400 hover:text-amber-500 border border-slate-800 hover:border-amber-700 rounded px-3 py-2 transition-all flex items-center gap-2"
+            >
+              <i className="fa-solid fa-scroll"></i>
+              Historial
+            </button>
             <button
               onClick={() => setPlanning(true)}
               title="Crear y editar estrategias"
@@ -761,6 +771,8 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
         </section>
         )}
       </div>
+
+      {history && <WarHistory canEdit={canEdit} onClose={() => setHistory(false)} />}
 
       {planning && (
         <StrategyPlanner

@@ -319,3 +319,21 @@ CREATE INDEX IF NOT EXISTS war_participants_player_idx ON war_participants (play
 -- What they were sent to do and what they brought, frozen with the rest.
 ALTER TABLE war_participants ADD COLUMN IF NOT EXISTS unit_ids JSONB NOT NULL DEFAULT '[]'::jsonb;
 ALTER TABLE war_participants ADD COLUMN IF NOT EXISTS build_id TEXT;
+
+-- What they did: { damage, healing, kills, deaths, ... }. Open-ended because
+-- the results screen reports more than anyone thought to name in advance, and a
+-- column per figure would mean a migration every time the game adds one.
+ALTER TABLE war_participants ADD COLUMN IF NOT EXISTS stats JSONB NOT NULL DEFAULT '{}'::jsonb;
+
+-- The results screens, pasted in after the fight. More than one because the
+-- game shows them a page at a time, and kept whole so they can be read again
+-- when the reading turns out to be wrong.
+CREATE TABLE IF NOT EXISTS war_images (
+  id          TEXT PRIMARY KEY,
+  war_id      TEXT NOT NULL REFERENCES wars(id) ON DELETE CASCADE,
+  image       TEXT NOT NULL,
+  caption     TEXT,
+  uploaded_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS war_images_war_idx ON war_images (war_id, uploaded_at);

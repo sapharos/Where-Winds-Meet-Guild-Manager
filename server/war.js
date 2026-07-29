@@ -159,13 +159,138 @@ export async function clearSide(side) {
 
 /* ------------------------------------------------------------------ wars */
 
+/** A guild war lasts half an hour. Nothing about it outlives that. */
+export const WAR_MINUTES = 30;
+
 export async function currentWar() {
+  // Closed by the clock rather than by remembering to. Whoever opens the war
+  // room next is the one who notices, and the end time is the war's own thirty
+  // minutes, not the moment somebody happened to look.
+  const done = await pool.query(
+    `UPDATE wars SET ended_at = started_at + make_interval(mins => $2::int)
+      WHERE guild_id = $1 AND ended_at IS NULL
+        AND started_at + make_interval(mins => $2::int) <= now()
+      RETURNING id`,
+    [GUILD_ID, WAR_MINUTES],
+  );
+  if (done.rowCount) {
+    await pool.query(`DELETE FROM app_settings WHERE key = ANY($1)`, [SIDES.map(lockKey)]);
+  }
+
   const { rows } = await pool.query(
     `SELECT id, name, started_at AS "startedAt" FROM wars
       WHERE guild_id = $1 AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1`,
     [GUILD_ID],
   );
   return rows[0] ?? null;
+}
+
+/* --------------------------------------------------- what a war left behind */
+
+export async function listWars() {
+  const { rows } = await pool.query(
+    `SELECT w.id, w.name, w.started_at AS "startedAt", w.ended_at AS "endedAt",
+            w.outcome, w.notes,
+            (SELECT count(*)::int FROM war_participants p WHERE p.war_id = w.id) AS "participants",
+            (SELECT count(*)::int FROM war_images i WHERE i.war_id = w.id) AS "images"
+       FROM wars w WHERE w.guild_id = $1 ORDER BY w.started_at DESC LIMIT 100`,
+    [GUILD_ID],
+  );
+  return rows;
+}
+
+export async function warDetail(id) {
+  const war = await pool.query(
+    `SELECT id, name, started_at AS "startedAt", ended_at AS "endedAt", outcome, notes, plans
+       FROM wars WHERE id = $1 AND guild_id = $2`,
+    [id, GUILD_ID],
+  );
+  if (!war.rows.length) throw Object.assign(new Error('esa guerra no existe'), { status: 404 });
+
+  // The name is joined rather than frozen: somebody who renamed themselves is
+  // still the same person, and the record is read to find out what they did.
+  const participants = await pool.query(
+    `SELECT p.player_id AS "playerId", COALESCE(m.name, p.player_id) AS name,
+            p.side, p.lane, p.unit_ids AS "unitIds", p.build_id AS "buildId",
+            p.contribution, p.stats
+       FROM war_participants p
+       LEFT JOIN players m ON m.guild_id = $2 AND m.id = p.player_id
+      WHERE p.war_id = $1
+      ORDER BY p.side, p.lane, name`,
+    [id, GUILD_ID],
+  );
+
+  const images = await pool.query(
+    `SELECT id, image, caption, uploaded_at AS "uploadedAt"
+       FROM war_images WHERE war_id = $1 ORDER BY uploaded_at`,
+    [id],
+  );
+
+  return { ...war.rows[0], participants: participants.rows, images: images.rows };
+}
+
+export async function addWarImage(warId, image, caption) {
+  if (typeof image !== 'string' || !image.startsWith('data:image/')) {
+    throw Object.assign(new Error('eso no es una imagen'), { status: 400 });
+  }
+  const { rows } = await pool.query(`SELECT 1 FROM wars WHERE id = $1 AND guild_id = $2`, [
+    warId,
+    GUILD_ID,
+  ]);
+  if (!rows.length) throw Object.assign(new Error('esa guerra no existe'), { status: 404 });
+
+  const id = randomUUID();
+  await pool.query(
+    `INSERT INTO war_images (id, war_id, image, caption) VALUES ($1, $2, $3, $4)`,
+    [id, warId, image, caption ?? null],
+  );
+  return { id };
+}
+
+export async function removeWarImage(warId, imageId) {
+  await pool.query(
+    `DELETE FROM war_images i USING wars w
+      WHERE i.id = $1 AND i.war_id = $2 AND w.id = i.war_id AND w.guild_id = $3`,
+    [imageId, warId, GUILD_ID],
+  );
+  return { ok: true };
+}
+
+const FIGURES = ['damage', 'healing', 'kills', 'deaths', 'assists', 'taken'];
+
+/** Record what one member did. Absent figures are left as they were. */
+export async function setContribution(warId, playerId, body) {
+  const { rows } = await pool.query(
+    `SELECT stats FROM war_participants p
+       JOIN wars w ON w.id = p.war_id AND w.guild_id = $3
+      WHERE p.war_id = $1 AND p.player_id = $2`,
+    [warId, playerId, GUILD_ID],
+  );
+  if (!rows.length) throw Object.assign(new Error('no participo en esa guerra'), { status: 404 });
+
+  const stats = { ...(rows[0].stats ?? {}) };
+  for (const figure of FIGURES) {
+    if (!(figure in (body?.stats ?? {}))) continue;
+    const value = body.stats[figure];
+    if (value === null || value === '') delete stats[figure];
+    else stats[figure] = Math.max(0, Math.round(Number(value) || 0));
+  }
+
+  await pool.query(
+    `UPDATE war_participants
+        SET stats = $1::jsonb,
+            contribution = COALESCE($2, contribution)
+      WHERE war_id = $3 AND player_id = $4`,
+    [
+      JSON.stringify(stats),
+      body?.contribution === undefined || body.contribution === null
+        ? null
+        : Math.max(0, Math.round(Number(body.contribution) || 0)),
+      warId,
+      playerId,
+    ],
+  );
+  return { stats };
 }
 
 /**

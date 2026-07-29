@@ -20,6 +20,11 @@ import {
   setLock,
   startWar,
   endWar,
+  listWars,
+  warDetail,
+  addWarImage,
+  removeWarImage,
+  setContribution,
 } from './war.js';
 import {
   discordEnabled,
@@ -516,6 +521,28 @@ app.post('/api/war/wars', requireAuth, requirePermission('war.edit'), asHandler(
 
 app.post('/api/war/wars/:id/end', requireAuth, requirePermission('war.edit'), asHandler(async (req, res) => {
   res.json(await endWar(req.params.id));
+}));
+
+// The record a war leaves behind. Readable by the guild -- everyone wants to
+// know how the war went, and members want to find their own part in it.
+app.get('/api/war/wars', requireAuth, asHandler(async (_req, res) => {
+  res.json(await listWars());
+}));
+
+app.get('/api/war/wars/:id', requireAuth, asHandler(async (req, res) => {
+  res.json(await warDetail(req.params.id));
+}));
+
+app.post('/api/war/wars/:id/images', requireAuth, requirePermission('war.edit'), asHandler(async (req, res) => {
+  res.json(await addWarImage(req.params.id, req.body?.image, req.body?.caption));
+}));
+
+app.delete('/api/war/wars/:id/images/:imageId', requireAuth, requirePermission('war.edit'), asHandler(async (req, res) => {
+  res.json(await removeWarImage(req.params.id, req.params.imageId));
+}));
+
+app.patch('/api/war/wars/:id/participants/:playerId', requireAuth, requirePermission('war.edit'), asHandler(async (req, res) => {
+  res.json(await setContribution(req.params.id, req.params.playerId, req.body));
 }));
 
 app.put('/api/war/strategies', requireAuth, requirePermission('war.edit'), asHandler(async (req, res) => {
