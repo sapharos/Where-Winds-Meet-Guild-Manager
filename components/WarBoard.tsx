@@ -17,6 +17,7 @@ import {
 import { ROLE_ICONS } from '../constants';
 import { ROLE_NAMES, buildColours } from './PlayerCard';
 import StrategyPlanner from './StrategyPlanner';
+import WarTimers from './WarTimers';
 
 const ROLE_KEYS: Record<Role, 'tank' | 'healer' | 'dps'> = {
   [Role.TANK]: 'tank',
@@ -34,6 +35,7 @@ interface WarBoardState {
   active: Record<WarSide, string | null>;
   locked: Record<WarSide, boolean>;
   current: { id: string; name: string; startedAt: string } | null;
+  now?: string;
 }
 
 interface Props {
@@ -74,6 +76,8 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
   const [inForce, setInForce] = useState<Record<WarSide, string | null>>({ attack: null, defense: null });
   const [locked, setLocked] = useState<Record<WarSide, boolean>>({ attack: false, defense: false });
   const [war, setWar] = useState<{ id: string; name: string; startedAt: string } | null>(null);
+  // Server time minus ours, so the war clocks agree between screens.
+  const [offset, setOffset] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState<'' | Role>('');
@@ -95,6 +99,7 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
       setInForce(board.active);
       setLocked(board.locked);
       setWar(board.current);
+      if (board.now) setOffset(Date.parse(board.now) - Date.now());
     }
   };
 
@@ -285,6 +290,9 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
 
   return (
     <div className="space-y-4">
+      {/* Above the two boards, because both halves fight to the same clock. */}
+      {war && <WarTimers startedAt={war.startedAt} offset={offset} mayBeWarned={canEdit} />}
+
       <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-4">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="flex bg-slate-950 p-1 rounded-lg border border-slate-800">

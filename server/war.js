@@ -298,7 +298,10 @@ export async function getBoard() {
     active[side] = value(activeKey(side));
     locked[side] = value(lockKey(side)) === 'true';
   }
-  return { active, locked, current: await currentWar() };
+  // The clock comes with it: the war timers count from when the war started,
+  // and everyone has to be counting the same seconds. A browser whose clock is
+  // a minute out would otherwise call the boss a minute early, for itself only.
+  return { active, locked, current: await currentWar(), now: new Date().toISOString() };
 }
 
 /**
