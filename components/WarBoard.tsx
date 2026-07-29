@@ -46,7 +46,11 @@ interface Props {
  */
 const wash = (build: PlayerBuild | undefined, sets: WeaponSet[]) => {
   const { from, to } = buildColours(build, sets);
-  return { background: `linear-gradient(90deg, ${from}40 0%, ${to}40 100%), #0b1120` };
+  // Each colour holds its own end before the blend, as on the roster card: a
+  // plain ramp reaches the second weapon only at the last column of pixels.
+  return {
+    background: `linear-gradient(90deg, ${from}40 0%, ${from}40 22%, ${to}40 78%, ${to}40 100%), #0b1120`,
+  };
 };
 
 /**

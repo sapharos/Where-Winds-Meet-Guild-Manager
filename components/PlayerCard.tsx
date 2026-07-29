@@ -78,16 +78,30 @@ const PlayerCard: React.FC<PlayerCardProps> = ({
             ? 'border-amber-400 shadow-[0_0_0_1px_rgba(251,191,36,0.35)]'
             : 'border-slate-800'
       } ${className}`}
-      style={{ background: `linear-gradient(90deg, ${from}59 0%, ${to}59 100%)` }}
+      style={{
+        // Each colour holds its own third before the blend starts. A plain
+        // 0%-to-100% ramp reaches the second weapon's colour only at the last
+        // column of pixels, so a card read as its first weapon and little else.
+        // Over an opaque base so it looks the same wherever the card sits.
+        background: `linear-gradient(90deg, ${from}66 0%, ${from}66 22%, ${to}66 78%, ${to}66 100%), #0b1120`,
+      }}
     >
-      {/* A solid edge as well as the wash: a tint alone is easy to miss against
-          a dark card. It carries the primary weapon's colour, which is also
-          where the wash starts, so the card reads left to right. */}
+      {/* Solid edges as well as the wash: a tint alone is easy to miss against
+          a dark card. Left is the primary weapon, right the secondary, so the
+          card reads left to right -- and the right edge only appears when there
+          is a second colour to report. */}
       <span
         aria-hidden
         className="absolute left-0 top-0 bottom-0 w-1 rounded-l-lg"
         style={{ backgroundColor: from }}
       />
+      {to !== from && (
+        <span
+          aria-hidden
+          className="absolute right-0 top-0 bottom-0 w-1 rounded-r-lg"
+          style={{ backgroundColor: to }}
+        />
+      )}
 
       <div className="flex justify-between items-start pl-2">
         <div className="flex items-center gap-3 min-w-0">
