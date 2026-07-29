@@ -83,6 +83,15 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
     { id: string; name: string; startedAt: string; matchType: WarMatchType } | null
   >(null);
   const [starting, setStarting] = useState(false);
+  // Who is being dragged, and which lane is under the cursor. The lane is kept
+  // so the target can light up: a drop with no feedback beforehand is a guess.
+  const [dragging, setDragging] = useState<string | null>(null);
+  const [over, setOver] = useState<WarLane | null>(null);
+  // The same id, written the instant the drag begins. The state above exists to
+  // redraw the board; this exists to be correct. A drag can raise dragstart and
+  // dragenter before React has re-rendered, and a handler reading the state
+  // would still see nobody being dragged and quietly do nothing.
+  const dragged = useRef<string | null>(null);
   // Server time minus ours, so the war clocks agree between screens.
   const [offset, setOffset] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -210,6 +219,53 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
       setError(err instanceof Error ? err.message : 'No se pudo mover');
     }
   };
+
+  /**
+   * Whether this lane will take the person currently being dragged.
+   *
+   * Refused when the lane is already full, unless they are being dragged within
+   * it -- moving somebody inside a lane they already occupy takes no new place.
+   */
+  const accepts = (lane: WarLane, playerId: string | null) => {
+    if (!playerId) return false;
+    const here = inLane(lane).some((p) => p.id === playerId);
+    if (here) return true;
+    if (inLane(lane).length >= LANE_CAPACITY) return false;
+    // Somebody coming off the bench needs a place in the war, not just the lane.
+    return placed.has(playerId) || !full;
+  };
+
+  const drop = (lane: WarLane) => {
+    const playerId = dragged.current;
+    dragged.current = null;
+    setDragging(null);
+    setOver(null);
+    if (!accepts(lane, playerId) || !playerId) return;
+    // Already there: nothing to ask the server for.
+    if (inLane(lane).some((p) => p.id === playerId)) return;
+    void move(playerId, lane);
+  };
+
+  /** Marks a card as the thing being dragged, for cards inside lanes and out. */
+  const grip = (playerId: string) =>
+    arranging
+      ? {
+          draggable: true,
+          onDragStart: (event: React.DragEvent) => {
+            dragged.current = playerId;
+            setDragging(playerId);
+            event.dataTransfer.effectAllowed = 'move';
+            // Some browsers refuse to start a drag with nothing attached.
+            event.dataTransfer.setData('text/plain', playerId);
+          },
+          onDragEnd: () => {
+            dragged.current = null;
+            setDragging(null);
+            setOver(null);
+          },
+          className: dragging === playerId ? 'opacity-40' : 'cursor-grab',
+        }
+      : {};
 
   /**
    * Add somebody to a unit, or take them out of one.
@@ -520,11 +576,35 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
           const counts = { tank: 0, healer: 0, dps: 0 };
           for (const m of members) for (const r of rolesOf(m)) counts[ROLE_KEYS[r]]++;
 
+          const welcome = over === lane.id && accepts(lane.id, dragging);
+          const refuses = over === lane.id && !accepts(lane.id, dragging);
+
           return (
             <section
               key={lane.id}
-              className="rounded-xl border p-4"
-              style={{ borderColor: `${lane.colour}66`, background: `${lane.colour}0f` }}
+              onDragOver={(event) => {
+                // Without this the browser never fires a drop at all.
+                if (dragged.current) event.preventDefault();
+              }}
+              onDragEnter={() => dragged.current && setOver(lane.id)}
+              onDragLeave={(event) => {
+                // Ignore crossings between the lane's own children.
+                if (!event.currentTarget.contains(event.relatedTarget as Node)) {
+                  setOver((current) => (current === lane.id ? null : current));
+                }
+              }}
+              onDrop={(event) => {
+                event.preventDefault();
+                drop(lane.id);
+              }}
+              className={`rounded-xl border p-4 transition-all ${
+                welcome ? 'ring-2 ring-offset-2 ring-offset-slate-950' : ''
+              } ${refuses ? 'opacity-60' : ''}`}
+              style={{
+                borderColor: welcome ? lane.colour : `${lane.colour}66`,
+                background: `${lane.colour}${welcome ? '26' : '0f'}`,
+                ...(welcome ? ({ '--tw-ring-color': lane.colour } as React.CSSProperties) : null),
+              }}
             >
               <div className="flex items-center justify-between mb-1">
                 <h3 className="cinzel font-bold text-lg" style={{ color: lane.colour }}>
@@ -565,10 +645,12 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
                   const first = strategy?.units.find((u) => held.includes(u.id));
                   const build = buildOf(p);
                   const mine = owned.get(p.id) ?? [];
+                  const { className: gripClass, ...gripProps } = grip(p.id);
                   return (
                     <div
                       key={p.id}
-                      className="border border-slate-800 rounded p-2"
+                      {...gripProps}
+                      className={`border border-slate-800 rounded p-2 transition-opacity ${gripClass ?? ''}`}
                       style={{
                         ...wash(build, weaponSets),
                         ...(first ? { borderColor: `${first.color}66` } : null),
@@ -587,13 +669,29 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
                           </p>
                         </div>
                         {arranging && (
-                          <button
-                            onClick={() => move(p.id, null)}
-                            title="Quitar de la línea"
-                            className="text-slate-600 hover:text-red-400 shrink-0 transition-all"
-                          >
-                            <i className="fa-solid fa-xmark"></i>
-                          </button>
+                          <div className="flex items-center gap-1 shrink-0">
+                            {/* The other two lanes, for touch screens and for
+                                anyone who would rather click than drag. */}
+                            {WAR_LANES.filter((other) => other.id !== lane.id).map((other) => (
+                              <button
+                                key={other.id}
+                                onClick={() => move(p.id, other.id)}
+                                disabled={inLane(other.id).length >= LANE_CAPACITY}
+                                title={`Mover a ${other.label}`}
+                                className="w-4 h-4 rounded-sm border text-[9px] font-bold leading-none flex items-center justify-center transition-all disabled:opacity-25"
+                                style={{ borderColor: `${other.colour}80`, color: other.colour }}
+                              >
+                                {other.label.replace('Línea ', '').charAt(0)}
+                              </button>
+                            ))}
+                            <button
+                              onClick={() => move(p.id, null)}
+                              title="Quitar de la línea"
+                              className="text-slate-600 hover:text-red-400 transition-all ml-0.5"
+                            >
+                              <i className="fa-solid fa-xmark"></i>
+                            </button>
+                          </div>
                         )}
                       </div>
 
@@ -710,10 +808,15 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
           <div className="space-y-1.5 max-h-[520px] overflow-y-auto custom-scrollbar pr-1">
             {bench.map((p) => {
               const busy = elsewhere.get(p.id);
+              // Somebody already fighting the other half cannot be dragged in.
+              const { className: gripClass, ...gripProps } = busy ? {} : grip(p.id);
               return (
               <div
                 key={p.id}
-                className={`border border-slate-800 rounded p-2 ${busy ? 'opacity-45' : ''}`}
+                {...gripProps}
+                className={`border border-slate-800 rounded p-2 transition-opacity ${
+                  busy ? 'opacity-45' : (gripClass ?? '')
+                }`}
                 style={wash(buildOf(p), weaponSets)}
               >
                 <div className="flex items-center gap-1.5 min-w-0">
