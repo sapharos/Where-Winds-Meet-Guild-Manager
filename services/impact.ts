@@ -14,9 +14,12 @@
  * bringing a hybrid, and the reason not to average.
  */
 
+import type { WarSide } from '../types';
+
 export interface Contribution {
   playerId: string;
   name: string;
+  side: WarSide;
   stats: Record<string, number | undefined>;
 }
 
@@ -39,15 +42,23 @@ export const WEIGHTS: { key: string; label: string; weight: number }[] = [
   { key: 'deaths', label: 'Muertes', weight: -0.3 },
 ];
 
-/** The axes, derived from what the results screen reports. */
-function axes(stats: Record<string, number | undefined>): Record<string, number> {
+/**
+ * The axes, derived from what the results screen reports.
+ *
+ * Siege damage is zeroed for defence on purpose: breaking down gates is an
+ * attack-side objective, and defence has no way to produce this figure at all.
+ * Forcing it to zero here (rather than trusting the stat to happen to be zero)
+ * also keeps a mis-tagged deployment from leaking siege credit into a side
+ * that structurally cannot earn it.
+ */
+function axes(stats: Record<string, number | undefined>, side: WarSide): Record<string, number> {
   const value = (key: string) => Math.max(0, stats[key] ?? 0);
   return {
     damage: value('damage'),
     healing: value('healing'),
     // An assist is what a healer's kill looks like, so they count as one thing.
     takedowns: value('kills') + value('assists'),
-    siege: value('siege'),
+    siege: side === 'attack' ? value('siege') : 0,
     taken: value('taken'),
     coin: value('coin'),
     deaths: value('deaths'),
@@ -70,11 +81,18 @@ export interface Impact {
  * enemy or a lopsided line-up move every figure at once. What survives that is
  * how much of the guild's effort went through one person, and that is the
  * question worth asking.
+ *
+ * The total-to-100 conversion is relative to one's own side, not the whole
+ * war. Siege is the reason: it is only ever earned on attack, so a defender
+ * measured against an attacker's siege-boosted total would have a ceiling
+ * below 100 for a mechanic they were never able to touch, no matter how well
+ * they played everything else. Comparing within a side removes that ceiling
+ * without changing anything for the six axes both sides can actually contest.
  */
 export function impactOf(rows: Contribution[]): Impact[] {
   if (!rows.length) return [];
 
-  const measured = rows.map((row) => ({ row, axis: axes(row.stats) }));
+  const measured = rows.map((row) => ({ row, axis: axes(row.stats, row.side) }));
 
   const best: Record<string, number> = {};
   for (const { key } of WEIGHTS) {
@@ -93,14 +111,20 @@ export function impactOf(rows: Contribution[]): Impact[] {
     return { row, parts, total };
   });
 
-  const top = Math.max(...raw.map((r) => r.total), 0);
+  const topOf: Record<WarSide, number> = {
+    attack: Math.max(...raw.filter((r) => r.row.side === 'attack').map((r) => r.total), 0),
+    defense: Math.max(...raw.filter((r) => r.row.side === 'defense').map((r) => r.total), 0),
+  };
 
   return raw
-    .map(({ row, parts, total }) => ({
-      playerId: row.playerId,
-      name: row.name,
-      score: top > 0 ? Math.round((total / top) * 100) : 0,
-      parts,
-    }))
+    .map(({ row, parts, total }) => {
+      const top = topOf[row.side];
+      return {
+        playerId: row.playerId,
+        name: row.name,
+        score: top > 0 ? Math.round((total / top) * 100) : 0,
+        parts,
+      };
+    })
     .sort((a, b) => b.score - a.score);
 }
