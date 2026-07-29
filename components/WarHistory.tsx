@@ -1,17 +1,20 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../services/authService';
-import { impactOf } from '../services/impact';
+import { impactOf, impactShade } from '../services/impact';
 import {
   WAR_MATCH_TYPE_LABELS,
   WAR_OUTCOME_LABELS,
   WAR_SIDE_LABELS,
   WarLane,
+  PlayerBuild,
   WarMatchType,
   WarOutcome,
   WarSide,
+  WeaponSet,
 } from '../types';
 import ResultsReader from './ResultsReader';
 import FigureCell from './FigureCell';
+import { SetBadge } from './BuildEditor';
 
 interface WarRow {
   id: string;
@@ -29,6 +32,8 @@ interface Participant {
   name: string;
   side: WarSide;
   lane: WarLane;
+  /** The build the war froze for them, if one was chosen before it started. */
+  buildId: string | null;
   contribution: number | null;
   stats: Record<string, number>;
 }
@@ -84,6 +89,9 @@ async function shrink(file: Blob): Promise<string> {
 
 interface Props {
   canEdit: boolean;
+  /** Every build in the guild, to resolve what each member carried that war. */
+  builds: PlayerBuild[];
+  weaponSets: WeaponSet[];
   onClose: () => void;
   /**
    * Something changed here that the board behind is also showing. Deleting the
@@ -98,12 +106,12 @@ interface Props {
  * What the wars left behind: who was there, what they did, and the screens the
  * game showed at the end.
  */
-const WarHistory: React.FC<Props> = ({ canEdit, onClose, onChanged }) => {
+const WarHistory: React.FC<Props> = ({ canEdit, builds, weaponSets, onClose, onChanged }) => {
   const [wars, setWars] = useState<WarRow[] | null>(null);
   const [chosen, setChosen] = useState<string | null>(null);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [message, setMessage] = useState<{ text: string; ok: boolean } | null>(null);
-  const [zoom, setZoom] = useState<string | null>(null);
+  const [zoom, setZoom] = useState<number | null>(null);
   const [reading, setReading] = useState(false);
   // Impact first, because a results table nobody ordered is read top to bottom
   // looking for who mattered, and that is the column that answers it.
@@ -112,10 +120,7 @@ const WarHistory: React.FC<Props> = ({ canEdit, onClose, onChanged }) => {
 
   useEffect(() => {
     api<WarRow[]>('/war/wars')
-      .then((rows) => {
-        setWars(rows);
-        setChosen((current) => current ?? rows[0]?.id ?? null);
-      })
+      .then(setWars)
       .catch(() => setWars([]));
   }, []);
 
@@ -159,11 +164,48 @@ const WarHistory: React.FC<Props> = ({ canEdit, onClose, onChanged }) => {
     return () => window.removeEventListener('paste', onPaste);
   }, [canEdit, chosen]);
 
+  // Arrow keys, because a carousel that only answers to the mouse makes you
+  // reach for it once per page while reading five of them.
+  useEffect(() => {
+    if (zoom === null || !detail) return;
+    const total = detail.images.length;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'ArrowLeft') setZoom((at) => ((at ?? 0) - 1 + total) % total);
+      if (event.key === 'ArrowRight') setZoom((at) => ((at ?? 0) + 1) % total);
+      if (event.key === 'Escape') setZoom(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [zoom, detail]);
+
   const removeImage = async (imageId: string) => {
     if (!chosen || !window.confirm('¿Borrar esta imagen?')) return;
     await api(`/war/wars/${chosen}/images/${imageId}`, { method: 'DELETE' }).catch(() => undefined);
     await load(chosen);
   };
+
+  /**
+   * The weapon sets a member fought with, from the build the war recorded for
+   * them -- or the one they usually play, if the war never named one.
+   *
+   * Distinct sets rather than one icon per weapon: a build of four weapons is
+   * two pairs, and showing the same crest twice says nothing extra.
+   */
+  const setsCarried = useMemo(() => {
+    const byId = new Map<string, PlayerBuild>(builds.map((b) => [b.id, b]));
+    const primary = new Map<string, PlayerBuild>();
+    for (const b of builds) if (b.isPrimary || !primary.has(b.playerId)) primary.set(b.playerId, b);
+
+    return (playerId: string, buildId: string | null): WeaponSet[] => {
+      const build = (buildId ? byId.get(buildId) : undefined) ?? primary.get(playerId);
+      const found = new Map<string, WeaponSet>();
+      for (const weapon of build?.weapons ?? []) {
+        const set = weaponSets.find((s) => s.weapons.includes(weapon));
+        if (set) found.set(set.id, set);
+      }
+      return [...found.values()];
+    };
+  }, [builds, weaponSets]);
 
   // Recomputed as figures are typed, so a correction shows its effect at once.
   const scores = useMemo(
@@ -245,7 +287,7 @@ const WarHistory: React.FC<Props> = ({ canEdit, onClose, onChanged }) => {
       const left = (wars ?? []).filter((w) => w.id !== chosen);
       setWars(left);
       setDetail(null);
-      setChosen(left[0]?.id ?? null);
+      setChosen(null);
       setMessage({ text: 'Guerra borrada.', ok: true });
       onChanged();
     } catch (err) {
@@ -311,44 +353,56 @@ const WarHistory: React.FC<Props> = ({ canEdit, onClose, onChanged }) => {
             <p className="text-sm text-slate-500">Todavía no se ha librado ninguna guerra.</p>
           )}
 
-          {wars && wars.length > 0 && (
-            <div className="flex gap-2 flex-wrap">
+          {/* The list until one is picked. A war brings thirty rows and five
+              screens with it, and opening the newest for you buries the rest. */}
+          {!chosen && wars && wars.length > 0 && (
+            <div className="flex flex-col gap-2">
               {wars.map((w) => (
                 <button
                   key={w.id}
                   onClick={() => setChosen(w.id)}
-                  className={`text-left rounded-lg border px-3 py-2 transition-all ${
-                    chosen === w.id
-                      ? 'border-amber-500 bg-amber-500/10'
-                      : 'border-slate-800 hover:border-slate-700'
-                  }`}
+                  className="text-left rounded-lg border border-slate-800 hover:border-amber-700 hover:bg-slate-800/40 px-4 py-3 transition-all flex items-center gap-4"
                 >
-                  <div className="flex items-center gap-2">
-                    <p className={`text-sm font-bold ${chosen === w.id ? 'text-amber-400' : 'text-slate-200'}`}>
-                      {w.name}
-                    </p>
-                    <span className="text-[9px] uppercase tracking-wider text-slate-500 border border-slate-700 rounded px-1 py-0.5">
-                      {WAR_MATCH_TYPE_LABELS[w.matchType]}
-                    </span>
-                    {w.outcome && (
-                      <span
-                        className={`text-[9px] uppercase tracking-wider font-bold rounded px-1 py-0.5 border ${
-                          w.outcome === 'win'
-                            ? 'border-emerald-700 text-emerald-400 bg-emerald-500/10'
-                            : 'border-red-800 text-red-400 bg-red-500/10'
-                        }`}
-                      >
-                        {WAR_OUTCOME_LABELS[w.outcome]}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="text-sm font-bold text-slate-200">{w.name}</p>
+                      <span className="text-[9px] uppercase tracking-wider text-slate-500 border border-slate-700 rounded px-1 py-0.5">
+                        {WAR_MATCH_TYPE_LABELS[w.matchType]}
                       </span>
-                    )}
+                      {w.outcome && (
+                        <span
+                          className={`text-[9px] uppercase tracking-wider font-bold rounded px-1 py-0.5 border ${
+                            w.outcome === 'win'
+                              ? 'border-emerald-700 text-emerald-400 bg-emerald-500/10'
+                              : 'border-red-800 text-red-400 bg-red-500/10'
+                          }`}
+                        >
+                          {WAR_OUTCOME_LABELS[w.outcome]}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      {when(w.startedAt)} · {minutes(w.startedAt, w.endedAt)} · {w.participants} en campo
+                      {w.images > 0 && ` · ${w.images} capturas`}
+                    </p>
                   </div>
-                  <p className="text-[10px] text-slate-500">
-                    {when(w.startedAt)} · {minutes(w.startedAt, w.endedAt)} · {w.participants} en campo
-                    {w.images > 0 && ` · ${w.images} img`}
-                  </p>
+                  <i className="fa-solid fa-chevron-right text-slate-600 text-xs shrink-0"></i>
                 </button>
               ))}
             </div>
+          )}
+
+          {chosen && (
+            <button
+              onClick={() => {
+                setChosen(null);
+                setDetail(null);
+              }}
+              className="text-xs text-slate-500 hover:text-amber-500 transition-all flex items-center gap-2"
+            >
+              <i className="fa-solid fa-arrow-left"></i>
+              Volver al listado
+            </button>
           )}
 
           {detail && (
@@ -469,12 +523,12 @@ const WarHistory: React.FC<Props> = ({ canEdit, onClose, onChanged }) => {
                   </p>
                 ) : (
                   <div className="grid sm:grid-cols-3 gap-3">
-                    {detail.images.map((img) => (
+                    {detail.images.map((img, at) => (
                       <div key={img.id} className="relative group">
                         <img
                           src={img.image}
                           alt="Resultados"
-                          onClick={() => setZoom(img.image)}
+                          onClick={() => setZoom(at)}
                           className="w-full rounded border border-slate-800 cursor-zoom-in"
                         />
                         {canEdit && (
@@ -530,11 +584,23 @@ const WarHistory: React.FC<Props> = ({ canEdit, onClose, onChanged }) => {
                     <tbody>
                       {ordered.map((p) => (
                         <tr key={p.playerId} className="border-t border-slate-800/70">
-                          <td className="py-1 pr-3 text-slate-200">{p.name}</td>
+                          <td className="py-1 pr-3 text-slate-200">
+                            <span className="flex items-center gap-1.5">
+                              <span className="flex items-center gap-1 w-9 shrink-0">
+                                {setsCarried(p.playerId, p.buildId).map((set) => (
+                                  <SetBadge key={set.id} set={set} size={14} />
+                                ))}
+                              </span>
+                              {p.name}
+                            </span>
+                          </td>
                           <td className="py-1 pr-3 text-[11px] text-slate-500">
                             {WAR_SIDE_LABELS[p.side]}
                           </td>
-                          <td className="py-1 pr-3 text-right font-bold tabular-nums text-amber-400">
+                          <td
+                            className="py-1 pr-3 text-right font-bold tabular-nums"
+                            style={{ color: impactShade(scores.get(p.playerId) ?? 0) }}
+                          >
                             {scores.get(p.playerId) ?? 0}
                           </td>
                           {FIGURES.map((f) => (
@@ -577,12 +643,45 @@ const WarHistory: React.FC<Props> = ({ canEdit, onClose, onChanged }) => {
         />
       )}
 
-      {zoom && (
+      {/* The screens are pages of one table, so they are read one after
+          another rather than opened and closed one at a time. */}
+      {zoom !== null && detail && detail.images[zoom] && (
         <div
-          className="fixed inset-0 z-[90] bg-black/90 flex items-center justify-center p-6 cursor-zoom-out"
+          className="fixed inset-0 z-[90] bg-black/90 flex items-center justify-center"
           onClick={() => setZoom(null)}
         >
-          <img src={zoom} alt="Resultados" className="max-w-full max-h-full rounded" />
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setZoom((at) => ((at ?? 0) - 1 + detail.images.length) % detail.images.length);
+            }}
+            title="Anterior"
+            className="absolute left-4 w-12 h-12 rounded-full bg-slate-900/80 border border-slate-700 text-slate-300 hover:text-amber-400 hover:border-amber-700 transition-all"
+          >
+            <i className="fa-solid fa-chevron-left"></i>
+          </button>
+
+          <img
+            src={detail.images[zoom].image}
+            alt={`Resultados ${zoom + 1} de ${detail.images.length}`}
+            onClick={(e) => e.stopPropagation()}
+            className="max-w-[90vw] max-h-[85vh] rounded"
+          />
+
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setZoom((at) => ((at ?? 0) + 1) % detail.images.length);
+            }}
+            title="Siguiente"
+            className="absolute right-4 w-12 h-12 rounded-full bg-slate-900/80 border border-slate-700 text-slate-300 hover:text-amber-400 hover:border-amber-700 transition-all"
+          >
+            <i className="fa-solid fa-chevron-right"></i>
+          </button>
+
+          <span className="absolute bottom-6 text-sm text-slate-400 tabular-nums bg-slate-900/80 border border-slate-800 rounded-full px-4 py-1">
+            {zoom + 1} / {detail.images.length}
+          </span>
         </div>
       )}
     </div>

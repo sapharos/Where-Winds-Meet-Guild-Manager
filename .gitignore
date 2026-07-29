@@ -29,3 +29,4 @@ dist-ssr
 
 # Test artefacts (cookie jars, scratch responses)
 *.jar
+.claude/

@@ -65,6 +65,16 @@ function axes(stats: Record<string, number | undefined>, side: WarSide): Record<
   };
 }
 
+/**
+ * The colour a score is shown in, wherever it is shown.
+ *
+ * Banded rather than a gradient, so the same figure looks the same everywhere
+ * and a glance down a column separates the night's best from the rest without
+ * anyone reading the numbers.
+ */
+export const impactShade = (score: number): string =>
+  score >= 85 ? '#fbbf24' : score >= 60 ? '#a3e635' : score >= 35 ? '#60a5fa' : '#94a3b8';
+
 export interface Impact {
   playerId: string;
   name: string;

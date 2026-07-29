@@ -9,7 +9,7 @@ import {
   WarSide,
 } from '../types';
 import { FIGURES } from './WarHistory';
-import { Impact, WEIGHTS, impactOf } from '../services/impact';
+import { Impact, WEIGHTS, impactOf, impactShade } from '../services/impact';
 
 interface Participation {
   playerId: string;
@@ -30,10 +30,6 @@ interface War {
 
 const when = (iso: string) =>
   new Date(iso).toLocaleDateString('es', { day: 'numeric', month: 'short', year: 'numeric' });
-
-/** Colour by how far up the war somebody finished, not by a fixed threshold. */
-const shade = (score: number) =>
-  score >= 85 ? '#fbbf24' : score >= 60 ? '#a3e635' : score >= 35 ? '#60a5fa' : '#94a3b8';
 
 interface Props {
   playerId: string;
@@ -100,13 +96,13 @@ const MyWars: React.FC<Props> = ({ playerId }) => {
                 <div
                   className="w-14 h-14 rounded-lg border flex flex-col items-center justify-center shrink-0"
                   style={{
-                    borderColor: `${shade(mine?.score ?? 0)}80`,
-                    background: `${shade(mine?.score ?? 0)}15`,
+                    borderColor: `${impactShade(mine?.score ?? 0)}80`,
+                    background: `${impactShade(mine?.score ?? 0)}15`,
                   }}
                 >
                   <span
                     className="text-xl font-bold tabular-nums leading-none"
-                    style={{ color: shade(mine?.score ?? 0) }}
+                    style={{ color: impactShade(mine?.score ?? 0) }}
                   >
                     {mine?.score ?? 0}
                   </span>
@@ -158,7 +154,7 @@ const MyWars: React.FC<Props> = ({ playerId }) => {
                               className="h-full rounded"
                               style={{
                                 width: `${Math.min(100, (mine.parts[axis.key] ?? 0) * 100)}%`,
-                                backgroundColor: shade(mine.score),
+                                backgroundColor: impactShade(mine.score),
                               }}
                             />
                           </div>
@@ -217,7 +213,7 @@ const Table: React.FC<{ war: War; ranked: Impact[]; playerId: string }> = ({
                 </td>
                 <td
                   className="py-1 pr-3 text-right font-bold tabular-nums"
-                  style={{ color: shade(entry.score) }}
+                  style={{ color: impactShade(entry.score) }}
                 >
                   {entry.score}
                 </td>
