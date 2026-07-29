@@ -40,6 +40,10 @@ interface Props {
 const MyWars: React.FC<Props> = ({ playerId }) => {
   const [wars, setWars] = useState<War[] | null>(null);
   const [open, setOpen] = useState<string | null>(null);
+  // A failed request used to be shown as an empty record, which reads as "you
+  // fought nothing" -- a statement about the member rather than about the
+  // server. It hid a broken query here for a while.
+  const [failed, setFailed] = useState<string | null>(null);
 
   useEffect(() => {
     api<War[]>(`/players/${playerId}/wars`)
@@ -47,10 +51,10 @@ const MyWars: React.FC<Props> = ({ playerId }) => {
         setWars(rows);
         setOpen(rows[0]?.id ?? null);
       })
-      .catch(() => setWars([]));
+      .catch((err) => setFailed(err instanceof Error ? err.message : 'No se pudo cargar'));
   }, [playerId]);
 
-  if (!wars) return null;
+  if (!wars && !failed) return null;
 
   return (
     <section className="bg-slate-900/60 border border-slate-800 rounded-xl p-6">
@@ -61,12 +65,19 @@ const MyWars: React.FC<Props> = ({ playerId }) => {
         </span>
       </div>
 
-      {wars.length === 0 && (
+      {failed && (
+        <div className="text-sm rounded-lg px-4 py-2 flex items-center gap-3 border bg-red-950/60 border-red-900 text-red-200">
+          <i className="fa-solid fa-triangle-exclamation"></i>
+          No se pudo cargar tu historial: {failed}
+        </div>
+      )}
+
+      {wars?.length === 0 && (
         <p className="text-sm text-slate-500">Todavía no has participado en ninguna guerra.</p>
       )}
 
       <div className="space-y-3">
-        {wars.map((war) => {
+        {(wars ?? []).map((war) => {
           const ranked = impactOf(war.participants);
           const mine = ranked.find((r) => r.playerId === playerId);
           const place = ranked.findIndex((r) => r.playerId === playerId) + 1;

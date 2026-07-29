@@ -254,7 +254,10 @@ export async function warsFor(playerId) {
           SELECT 1 FROM war_participants mine
            WHERE mine.war_id = w.id AND mine.player_id = $1
         )
-      ORDER BY w.started_at DESC, name`,
+      -- Ordered by the member's name, spelled out rather than by the alias:
+      -- "name" alone is ambiguous here, since the war has one too, and Postgres
+      -- refuses the whole query rather than guessing.
+      ORDER BY w.started_at DESC, COALESCE(m.name, p.player_id)`,
     [playerId, GUILD_ID],
   );
 
