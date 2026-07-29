@@ -31,6 +31,13 @@ services:
       # in the app; changing these does nothing.
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      # Signing in with Discord. Leave these empty and the button is simply not
+      # offered; the password form keeps working either way.
+      DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID:-}
+      DISCORD_CLIENT_SECRET: ${DISCORD_CLIENT_SECRET:-}
+      # The address members reach the app at, which is where Discord sends them
+      # back. Must match the redirect URI registered with Discord exactly.
+      PUBLIC_URL: ${PUBLIC_URL:-}
     restart: unless-stopped
 
 # The API talks to a PostgreSQL that lives outside this stack. Attach the

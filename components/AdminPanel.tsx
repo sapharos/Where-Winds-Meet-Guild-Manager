@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { authService } from '../services/authService';
+import { authService, api } from '../services/authService';
 import WeaponSets from './WeaponSets';
 import { AuthUser, ManagedUser, PERMISSION_LABELS, PermissionCatalog, UserRole, ROLE_LABELS } from '../types';
 
@@ -27,6 +27,9 @@ const AdminPanel: React.FC<Props> = ({ currentUser, canManageUsers, canManagePer
   const [newUsername, setNewUsername] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [newRole, setNewRole] = useState<UserRole>('member');
+  const [requests, setRequests] = useState<
+    { id: string; discordUsername: string; claimedUid: string; playerName: string | null }[]
+  >([]);
 
   const report = (text: string, ok = true) => setMessage({ text, ok });
 
@@ -36,7 +39,10 @@ const AdminPanel: React.FC<Props> = ({ currentUser, canManageUsers, canManagePer
       setCatalog(cat);
       setMatrix(cat.matrix);
       setDirty(false);
-      if (canManageUsers) setUsers(await authService.listUsers());
+      if (canManageUsers) {
+        setUsers(await authService.listUsers());
+        setRequests(await api('/registrations').catch(() => []));
+      }
     } catch (err) {
       report(err instanceof Error ? err.message : 'Could not load settings', false);
     }
@@ -91,6 +97,19 @@ const AdminPanel: React.FC<Props> = ({ currentUser, canManageUsers, canManagePer
       report('Usuario actualizado.');
     } catch (err) {
       report(err instanceof Error ? err.message : 'Could not update user', false);
+    }
+  };
+
+  const decideRequest = async (id: string, approve: boolean, role: UserRole = 'member') => {
+    try {
+      await api(`/registrations/${id}/${approve ? 'approve' : 'reject'}`, {
+        method: 'POST',
+        body: JSON.stringify(approve ? { role } : {}),
+      });
+      report(approve ? 'Acceso concedido.' : 'Solicitud rechazada.');
+      await load();
+    } catch (err) {
+      report(err instanceof Error ? err.message : 'No se pudo procesar', false);
     }
   };
 
@@ -203,6 +222,52 @@ const AdminPanel: React.FC<Props> = ({ currentUser, canManageUsers, canManagePer
           </table>
         </div>
       </section>
+
+      {canManageUsers && requests.length > 0 && (
+        <section className="bg-slate-900/60 border border-amber-800/60 rounded-xl p-6">
+          <h2 className="cinzel text-2xl font-bold text-amber-500 mb-1">
+            Solicitudes de acceso
+            <span className="ml-3 text-sm font-normal text-slate-500">{requests.length} pendientes</span>
+          </h2>
+          <p className="text-xs text-slate-500 mb-5">
+            Alguien entró con Discord y dice ser este miembro. El UID está a la vista de todo el gremio dentro
+            del juego, así que comprueba que la persona de Discord y el personaje son quienes dicen ser.
+          </p>
+
+          <div className="space-y-2">
+            {requests.map((r) => (
+              <div
+                key={r.id}
+                className="flex items-center justify-between gap-3 flex-wrap bg-slate-950 border border-slate-800 rounded-lg p-3"
+              >
+                <div className="text-sm">
+                  <span className="text-[#8ea1ff] font-semibold">
+                    <i className="fa-brands fa-discord mr-1.5"></i>
+                    {r.discordUsername}
+                  </span>
+                  <span className="text-slate-600 mx-2">reclama ser</span>
+                  <span className="text-slate-100 font-semibold">{r.playerName ?? '(miembro desconocido)'}</span>
+                  <span className="text-slate-600 font-mono text-xs ml-2">UID {r.claimedUid}</span>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => decideRequest(r.id, false)}
+                    className="text-slate-400 hover:text-red-400 text-xs py-1.5 px-3 rounded border border-slate-800 transition-all"
+                  >
+                    Rechazar
+                  </button>
+                  <button
+                    onClick={() => decideRequest(r.id, true)}
+                    className="bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold py-1.5 px-3 rounded transition-all"
+                  >
+                    Aprobar como miembro
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       <WeaponSets canEdit={canManageBuilds} />
 

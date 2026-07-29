@@ -30,6 +30,9 @@ async function loadSecret() {
 
 export const hashPassword = (plain) => bcrypt.hash(plain, BCRYPT_ROUNDS);
 
+// The Discord flow signs its own short-lived cookies with the same key.
+export const sessionSecret = () => secret;
+
 export async function initAuth() {
   secret = await loadSecret();
   await seedPermissions();

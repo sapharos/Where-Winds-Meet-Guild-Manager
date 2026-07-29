@@ -7,8 +7,20 @@ import { matchEntries, commitScan, historyFor, scanSummary } from './scans.js';
 import { listBuilds, saveBuilds, mayEditBuilds } from './builds.js';
 import { listWeaponSets, saveWeaponSets, seedWeaponSets } from './weapons.js';
 import {
+  discordEnabled,
+  beginDiscord,
+  finishDiscord,
+  readPending,
+  clearPending,
+  requestRegistration,
+  listRegistrations,
+  approveRegistration,
+  rejectRegistration,
+} from './discord.js';
+import {
   initAuth,
   hashPassword,
+  sessionSecret,
   verifyLogin,
   issueCookie,
   clearCookie,
@@ -77,6 +89,57 @@ app.post('/api/auth/change-password', requireAuth, asHandler(async (req, res) =>
     await hashPassword(newPassword),
     req.user.id,
   ]);
+  res.json({ ok: true });
+}));
+
+/* ---------------------------------------------------------------- discord */
+
+// Lets the sign-in screen offer the Discord button only when it would work.
+app.get('/api/auth/config', (_req, res) => res.json({ discord: discordEnabled() }));
+
+app.get('/api/auth/discord/start', asHandler(async (_req, res) => {
+  if (!discordEnabled()) return res.status(503).json({ error: 'Discord no esta configurado' });
+  beginDiscord(res);
+}));
+
+app.get('/api/auth/discord/callback', asHandler(async (req, res) => {
+  if (!discordEnabled()) return res.status(503).json({ error: 'Discord no esta configurado' });
+
+  const result = await finishDiscord(req, res, sessionSecret());
+  if (result.user) {
+    issueCookie(res, result.user);
+    clearPending(res);
+    return res.redirect('/');
+  }
+  // Recognised by Discord, unknown here: send them to claim a roster entry.
+  res.redirect('/?registro=1');
+}));
+
+// What the claim screen needs to greet them and to know a claim is possible.
+app.get('/api/auth/discord/pending', asHandler(async (req, res) => {
+  const pending = readPending(req, sessionSecret());
+  if (!pending) return res.status(404).json({ error: 'no hay un registro en curso' });
+  res.json(pending);
+}));
+
+app.post('/api/auth/discord/claim', asHandler(async (req, res) => {
+  const pending = readPending(req, sessionSecret());
+  if (!pending) return res.status(440).json({ error: 'el registro caduco; vuelve a empezar' });
+  res.json(await requestRegistration(pending, req.body?.uid));
+}));
+
+app.get('/api/registrations', requireAuth, requirePermission('users.manage'), asHandler(async (_req, res) => {
+  res.json(await listRegistrations());
+}));
+
+app.post('/api/registrations/:id/approve', requireAuth, requirePermission('users.manage'), asHandler(async (req, res) => {
+  const role = req.body?.role;
+  if (role !== undefined && !ROLES.includes(role)) return res.status(400).json({ error: 'unknown role' });
+  res.json(await approveRegistration(req.params.id, role ?? 'member'));
+}));
+
+app.post('/api/registrations/:id/reject', requireAuth, requirePermission('users.manage'), asHandler(async (req, res) => {
+  await rejectRegistration(req.params.id);
   res.json({ ok: true });
 }));
 

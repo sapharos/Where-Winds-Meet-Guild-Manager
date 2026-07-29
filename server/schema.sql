@@ -21,6 +21,28 @@ CREATE TABLE IF NOT EXISTS users (
 
 ALTER TABLE users ADD COLUMN IF NOT EXISTS disabled BOOLEAN NOT NULL DEFAULT false;
 
+-- Signing in with Discord instead of a password. The id is Discord's own and
+-- never changes, unlike the username, which is why the id is what identifies.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS discord_id       TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS discord_username TEXT;
+
+CREATE UNIQUE INDEX IF NOT EXISTS users_discord_idx
+  ON users (guild_id, discord_id) WHERE discord_id IS NOT NULL;
+
+-- Somebody asking to be given a roster entry. Account numbers are visible to
+-- every member in game, so claiming one proves nothing on its own -- a leader
+-- decides. Until then this row is the whole of the request: no account exists.
+CREATE TABLE IF NOT EXISTS registration_requests (
+  id               TEXT PRIMARY KEY,
+  guild_id         TEXT NOT NULL REFERENCES guilds(id) ON DELETE CASCADE,
+  discord_id       TEXT NOT NULL,
+  discord_username TEXT NOT NULL,
+  claimed_uid      TEXT NOT NULL,
+  player_id        TEXT,
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (guild_id, discord_id)
+);
+
 -- Which permissions each role holds. A row is a grant; no row is a denial.
 -- Editable at runtime, which is why this is data rather than a constant.
 CREATE TABLE IF NOT EXISTS role_permissions (

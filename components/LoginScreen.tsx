@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { api } from '../services/authService';
 
 interface Props {
   onLogin: (username: string, password: string) => Promise<void>;
@@ -9,6 +10,13 @@ const LoginScreen: React.FC<Props> = ({ onLogin }) => {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [discord, setDiscord] = useState(false);
+
+  useEffect(() => {
+    api<{ discord: boolean }>('/auth/config')
+      .then((c) => setDiscord(c.discord))
+      .catch(() => setDiscord(false));
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -83,6 +91,26 @@ const LoginScreen: React.FC<Props> = ({ onLogin }) => {
             {busy ? <i className="fa-solid fa-circle-notch fa-spin"></i> : <i className="fa-solid fa-right-to-bracket"></i>}
             Entrar
           </button>
+
+          {discord && (
+            <>
+              <div className="flex items-center gap-3 pt-1">
+                <span className="h-px flex-1 bg-slate-800" />
+                <span className="text-[10px] uppercase tracking-widest text-slate-600">o</span>
+                <span className="h-px flex-1 bg-slate-800" />
+              </div>
+              <a
+                href="/api/auth/discord/start"
+                className="w-full bg-[#5865F2] hover:bg-[#4752c4] text-white font-bold py-2 px-4 rounded transition-all flex items-center justify-center gap-2"
+              >
+                <i className="fa-brands fa-discord"></i>
+                Entrar con Discord
+              </a>
+              <p className="text-[10px] text-slate-600 text-center">
+                ¿Primera vez? Entra con Discord y te pediremos tu UID del juego.
+              </p>
+            </>
+          )}
         </form>
       </div>
     </div>

@@ -9,6 +9,7 @@ import MemberManager from './components/MemberManager';
 import WarPlanner from './components/WarPlanner';
 import CollaborationPanel from './components/CollaborationPanel';
 import LoginScreen from './components/LoginScreen';
+import DiscordClaim from './components/DiscordClaim';
 import AdminPanel from './components/AdminPanel';
 import ScanImport from './components/ScanImport';
 import MemberHistory from './components/MemberHistory';
@@ -371,6 +372,11 @@ const App: React.FC = () => {
   }
 
   if (!session) {
+    // Discord sends them back here with this marker when it recognised them but
+    // this guild has no account for them yet.
+    if (new URLSearchParams(window.location.search).has('registro')) {
+      return <DiscordClaim onDone={() => { window.location.search = ''; }} />;
+    }
     return <LoginScreen onLogin={handleLogin} />;
   }
 
