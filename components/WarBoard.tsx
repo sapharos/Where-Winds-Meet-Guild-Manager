@@ -37,10 +37,16 @@ interface Props {
   canEdit: boolean;
 }
 
-/** The colours of a build, as a left-to-right wash behind a card. */
+/**
+ * The colours of a build, as a left-to-right wash behind a card.
+ *
+ * Painted over an opaque base rather than left translucent: a lane has its own
+ * colour, and a see-through card sitting on it came out tinted by the lane
+ * instead of by the build, which is the one thing the wash is there to say.
+ */
 const wash = (build: PlayerBuild | undefined, sets: WeaponSet[]) => {
   const { from, to } = buildColours(build, sets);
-  return { background: `linear-gradient(90deg, ${from}26 0%, ${to}26 100%)` };
+  return { background: `linear-gradient(90deg, ${from}40 0%, ${to}40 100%), #0b1120` };
 };
 
 /**
