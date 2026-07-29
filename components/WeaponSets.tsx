@@ -1,37 +1,71 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { api } from '../services/authService';
 import { WeaponSet } from '../types';
 import { SetBadge } from './BuildEditor';
+import { ICON_GROUPS } from './iconCatalog';
 
-// Uploaded pictures are stored inline in the database, so they are shrunk here
-// first: a set badge is never shown large, and a full-size screenshot would
-// bloat every request that lists the catalogue.
-const ICON_PX = 48;
+/** Picks an icon by eye. Names alone mean nothing until you see the glyph. */
+const IconPicker: React.FC<{
+  value?: string | null;
+  onPick: (icon: string) => void;
+  onClose: () => void;
+}> = ({ value, onPick, onClose }) => {
+  const [search, setSearch] = useState('');
+  const needle = search.trim().toLowerCase();
 
-async function toSmallIcon(file: File): Promise<string> {
-  const bitmap = await createImageBitmap(file);
-  const canvas = document.createElement('canvas');
-  canvas.width = ICON_PX;
-  canvas.height = ICON_PX;
+  const groups = ICON_GROUPS.map((g) => ({
+    ...g,
+    icons: needle
+      ? g.icons.filter((i) => i.includes(needle) || g.group.toLowerCase().includes(needle))
+      : g.icons,
+  })).filter((g) => g.icons.length);
 
-  const ctx = canvas.getContext('2d');
-  if (!ctx) throw new Error('No se pudo procesar la imagen');
+  return (
+    <div className="fixed inset-0 z-[70] bg-black/70 backdrop-blur-sm flex items-start justify-center p-6 overflow-y-auto">
+      <div className="bg-slate-900 border border-slate-800 rounded-xl w-full max-w-2xl my-8">
+        <div className="flex items-center justify-between p-5 border-b border-slate-800 gap-4">
+          <h3 className="cinzel text-xl font-bold text-amber-500">Elegir icono</h3>
+          <input
+            type="text"
+            autoFocus
+            value={search}
+            placeholder="Buscar..."
+            onChange={(e) => setSearch(e.target.value)}
+            className="flex-1 max-w-xs bg-slate-950 border border-slate-800 rounded p-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
+          />
+          <button onClick={onClose} className="p-2 text-slate-400 hover:text-amber-500 transition-all">
+            <i className="fa-solid fa-xmark text-xl"></i>
+          </button>
+        </div>
 
-  // Cover: crop to a square from the middle rather than squashing the picture.
-  const side = Math.min(bitmap.width, bitmap.height);
-  ctx.drawImage(
-    bitmap,
-    (bitmap.width - side) / 2,
-    (bitmap.height - side) / 2,
-    side,
-    side,
-    0,
-    0,
-    ICON_PX,
-    ICON_PX,
+        <div className="p-5 space-y-5">
+          {groups.map((group) => (
+            <div key={group.group}>
+              <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-2">{group.group}</p>
+              <div className="flex flex-wrap gap-1.5">
+                {group.icons.map((icon) => (
+                  <button
+                    key={icon}
+                    title={icon}
+                    onClick={() => onPick(icon)}
+                    className={`w-10 h-10 rounded border flex items-center justify-center transition-all ${
+                      value === icon
+                        ? 'border-amber-500 text-amber-400 bg-amber-500/10'
+                        : 'border-slate-800 text-slate-400 hover:text-amber-500 hover:border-slate-600'
+                    }`}
+                  >
+                    <i className={`fa-solid ${icon}`}></i>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+          {!groups.length && <p className="text-sm text-slate-500">Ningún icono coincide.</p>}
+        </div>
+      </div>
+    </div>
   );
-  return canvas.toDataURL('image/png');
-}
+};
 
 const blank = (): WeaponSet => ({
   id: `set-${Date.now()}`,
@@ -45,8 +79,7 @@ const WeaponSets: React.FC<{ canEdit: boolean }> = ({ canEdit }) => {
   const [sets, setSets] = useState<WeaponSet[] | null>(null);
   const [message, setMessage] = useState<{ text: string; ok: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
-  const uploadFor = useRef<string | null>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
+  const [picking, setPicking] = useState<string | null>(null);
 
   useEffect(() => {
     api<WeaponSet[]>('/weapon-sets')
@@ -66,16 +99,6 @@ const WeaponSets: React.FC<{ canEdit: boolean }> = ({ canEdit }) => {
       [list[at], list[to]] = [list[to], list[at]];
       return list;
     });
-
-  const pickIcon = async (file: File) => {
-    const id = uploadFor.current;
-    if (!id) return;
-    try {
-      update(id, { icon: await toSmallIcon(file) });
-    } catch (err) {
-      setMessage({ text: err instanceof Error ? err.message : 'No se pudo leer la imagen', ok: false });
-    }
-  };
 
   const save = async () => {
     if (!sets) return;
@@ -152,23 +175,11 @@ const WeaponSets: React.FC<{ canEdit: boolean }> = ({ canEdit }) => {
 
               {canEdit && (
                 <>
-                  <input
-                    type="text"
-                    value={set.icon?.startsWith('data:') ? '' : (set.icon ?? '')}
-                    placeholder="fa-shield-halved"
-                    title="Clase de Font Awesome, o sube una imagen"
-                    onChange={(e) => update(set.id, { icon: e.target.value || null })}
-                    className="w-36 bg-slate-900 border border-slate-800 rounded p-2 text-xs font-mono outline-none focus:ring-1 focus:ring-amber-500"
-                  />
                   <button
-                    onClick={() => {
-                      uploadFor.current = set.id;
-                      fileRef.current?.click();
-                    }}
-                    title="Subir una imagen como icono"
-                    className="p-2 text-slate-400 hover:text-amber-500 transition-all"
+                    onClick={() => setPicking(set.id)}
+                    className="text-xs py-2 px-3 rounded border border-slate-800 text-slate-400 hover:text-amber-500 hover:border-slate-600 transition-all"
                   >
-                    <i className="fa-solid fa-image"></i>
+                    Elegir icono
                   </button>
                   <button
                     onClick={() => move(set.id, -1)}
@@ -221,17 +232,16 @@ const WeaponSets: React.FC<{ canEdit: boolean }> = ({ canEdit }) => {
         </button>
       )}
 
-      <input
-        type="file"
-        ref={fileRef}
-        className="hidden"
-        accept="image/*"
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (file) void pickIcon(file);
-          e.target.value = '';
-        }}
-      />
+      {picking && (
+        <IconPicker
+          value={sets?.find((s) => s.id === picking)?.icon ?? null}
+          onPick={(icon) => {
+            update(picking, { icon });
+            setPicking(null);
+          }}
+          onClose={() => setPicking(null)}
+        />
+      )}
     </section>
   );
 };
