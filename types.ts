@@ -32,6 +32,11 @@ export const WAR_LANES: { id: WarLane; label: string; colour: string }[] = [
 
 export const LANE_CAPACITY = 10;
 
+// Attack and defence are two halves of one war and share the same thirty
+// people: ten to a lane is still the limit, but filling one board empties the
+// other. The server enforces this too.
+export const WAR_CAPACITY = 30;
+
 export interface Deployment {
   side: WarSide;
   lane: WarLane;

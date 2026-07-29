@@ -6,6 +6,7 @@ import {
   Player,
   PlayerBuild,
   Role,
+  WAR_CAPACITY,
   WAR_LANES,
   WAR_SIDE_LABELS,
   WarLane,
@@ -103,6 +104,7 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
     here.filter((d) => d.lane === lane).map((d) => byId.get(d.playerId)).filter(Boolean) as Player[];
 
   const placed = new Set(here.map((d) => d.playerId));
+  const full = deployments.length >= WAR_CAPACITY;
   const unitOf = new Map(here.map((d) => [d.playerId, d.unitId ?? null]));
   // Where somebody stands on the other board: nobody fights both halves, so
   // this is what makes them unavailable here.
@@ -227,8 +229,17 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
               <i className="fa-solid fa-chess"></i>
               Estrategias
             </button>
-            <span className="text-sm text-slate-500">
-              {here.length} / {LANE_CAPACITY * WAR_LANES.length} desplegados
+            {/* The whole war, not this board: filling one side is what leaves
+                the other short, and that has to be visible from either. */}
+            <span
+              className={`text-sm ${full ? 'text-amber-400 font-bold' : 'text-slate-500'}`}
+              title={`${here.length} en ${WAR_SIDE_LABELS[side]}, ${deployments.length - here.length} en ${
+                WAR_SIDE_LABELS[side === 'attack' ? 'defense' : 'attack']
+              }`}
+            >
+              {full && <i className="fa-solid fa-triangle-exclamation mr-1.5"></i>}
+              {deployments.length} / {WAR_CAPACITY} desplegados
+              <span className="text-slate-600"> ({here.length} aquí)</span>
             </span>
             {canEdit && here.length > 0 && (
               <button onClick={clear} className="text-xs text-slate-500 hover:text-red-400 px-2 py-2 transition-all">
@@ -538,8 +549,12 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
                         <button
                           key={lane.id}
                           onClick={() => move(p.id, lane.id)}
-                          disabled={inLane(lane.id).length >= LANE_CAPACITY}
-                          title={`Enviar a ${lane.label}`}
+                          disabled={full || inLane(lane.id).length >= LANE_CAPACITY}
+                          title={
+                            full
+                              ? `La guerra ya tiene ${WAR_CAPACITY} desplegados entre ambos bandos`
+                              : `Enviar a ${lane.label}`
+                          }
                           className="flex-1 text-[10px] py-1 rounded border transition-all disabled:opacity-30"
                           style={{ borderColor: `${lane.colour}80`, color: lane.colour }}
                         >

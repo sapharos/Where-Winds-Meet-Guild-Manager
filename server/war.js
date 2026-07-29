@@ -4,6 +4,9 @@ import { pool, GUILD_ID } from './db.js';
 export const SIDES = ['attack', 'defense'];
 export const LANES = ['left', 'center', 'right'];
 export const LANE_CAPACITY = 10;
+// The guild fields thirty people in a war, and attack and defence share them.
+// Ten to a lane still holds, but the two boards draw on one pool.
+export const WAR_CAPACITY = 30;
 
 const valid = (side, lane) => SIDES.includes(side) && LANES.includes(lane);
 
@@ -77,6 +80,20 @@ export async function place(side, lane, playerId) {
   if (clash.rows.length) {
     throw Object.assign(
       new Error(`ya esta desplegado en ${other === 'attack' ? 'Ataque' : 'Defensa'}`),
+      { status: 409 },
+    );
+  }
+
+  // The war has a size, and the two boards spend from the same allowance: what
+  // attack takes, defence cannot. Counted across both sides, and excluding this
+  // member so that moving somebody already on the board is never refused.
+  const total = await pool.query(
+    `SELECT count(*)::int AS held FROM war_deployments WHERE guild_id = $1 AND player_id <> $2`,
+    [GUILD_ID, playerId],
+  );
+  if (total.rows[0].held >= WAR_CAPACITY) {
+    throw Object.assign(
+      new Error(`la guerra ya tiene ${WAR_CAPACITY} desplegados entre ataque y defensa`),
       { status: 409 },
     );
   }
