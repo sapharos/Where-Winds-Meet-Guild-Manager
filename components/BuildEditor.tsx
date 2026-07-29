@@ -198,6 +198,33 @@ const BuildEditor: React.FC<Props> = ({ player, canEdit, onClose, onSaved }) => 
                       <span className="text-[10px] text-slate-700 italic">{set.name}</span>
                     </div>
                   ))}
+                  {(() => {
+                    // Weapons the catalogue no longer contains -- usually because
+                    // it was renamed after the build was saved. Shown so they can
+                    // be dropped, instead of quietly costing the build its colour.
+                    const known = new Set(sets.flatMap((s) => s.weapons));
+                    const lost = build.weapons.filter((w) => !known.has(w));
+                    if (!lost.length) return null;
+                    return (
+                      <div className="flex items-center gap-2 flex-wrap pt-1">
+                        <span className="text-[10px] text-amber-500">
+                          <i className="fa-solid fa-triangle-exclamation mr-1"></i>
+                          ya no están en ningún conjunto:
+                        </span>
+                        {lost.map((weapon) => (
+                          <button
+                            key={weapon}
+                            disabled={!canEdit}
+                            title="Quitar de la build"
+                            onClick={() => update(build.id, { weapons: toggle(build.weapons, weapon) })}
+                            className="text-[11px] px-2 py-1 rounded border border-amber-800/70 text-amber-500/90 line-through"
+                          >
+                            {weapon}
+                          </button>
+                        ))}
+                      </div>
+                    );
+                  })()}
                   {!sets.length && (
                     <p className="text-xs text-slate-600">
                       No hay conjuntos de armas definidos. Se crean en Administración.

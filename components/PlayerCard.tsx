@@ -13,14 +13,27 @@ export const ROLE_NAMES: Record<Role, string> = {
 // colour: the roster should show at a glance who has not been described yet.
 const UNSET = '#475569';
 
-/** The colours of a build's first two weapons, from the sets they belong to. */
-export function buildColours(build: PlayerBuild | undefined, sets: WeaponSet[]): [string, string] {
+/**
+ * The colours of a build's first two weapons, from the sets they belong to.
+ *
+ * Also reports when a build names weapons that no set contains any more, which
+ * happens after the catalogue is renamed: the build keeps working but loses its
+ * colours, and silently showing grey would look like nobody had a build.
+ */
+export function buildColours(
+  build: PlayerBuild | undefined,
+  sets: WeaponSet[],
+): { from: string; to: string; orphaned: boolean } {
   const colourOf = (weapon?: string) =>
     weapon ? sets.find((s) => s.weapons.includes(weapon))?.color : undefined;
 
-  const first = colourOf(build?.weapons[0]) ?? UNSET;
-  const second = colourOf(build?.weapons[1]) ?? first;
-  return [first, second];
+  const first = colourOf(build?.weapons[0]);
+  const second = colourOf(build?.weapons[1]);
+  return {
+    from: first ?? UNSET,
+    to: second ?? first ?? UNSET,
+    orphaned: Boolean(build?.weapons.length) && !first && !second,
+  };
 }
 
 interface PlayerCardProps {
@@ -51,16 +64,24 @@ const PlayerCard: React.FC<PlayerCardProps> = ({
   ranks = [],
 }) => {
   const rank = ranks.find((r) => r.id === player.rankId);
-  const [from, to] = buildColours(build, weaponSets);
+  const { from, to, orphaned } = buildColours(build, weaponSets);
 
   return (
     <div
       className={`relative p-3 rounded-lg border transition-all ${
         player.isStarter ? 'border-amber-400 shadow-[0_0_0_1px_rgba(251,191,36,0.35)]' : 'border-slate-800'
       } ${className}`}
-      style={{ background: `linear-gradient(135deg, ${from}26 0%, ${to}26 100%)` }}
+      style={{ background: `linear-gradient(135deg, ${from}59 0%, ${to}59 100%)` }}
     >
-      <div className="flex justify-between items-start">
+      {/* A solid edge as well as the wash: a tint alone is easy to miss against
+          a dark card, and the point is to read the build without looking. */}
+      <span
+        aria-hidden
+        className="absolute left-0 top-0 bottom-0 w-1 rounded-l-lg"
+        style={{ background: `linear-gradient(180deg, ${from} 0%, ${to} 100%)` }}
+      />
+
+      <div className="flex justify-between items-start pl-2">
         <div className="flex items-center gap-3 min-w-0">
           <div className={`w-8 h-8 rounded flex items-center justify-center border shrink-0 ${ROLE_COLORS[player.role]}`}>
             {ROLE_ICONS[player.role]}
@@ -98,6 +119,15 @@ const PlayerCard: React.FC<PlayerCardProps> = ({
                 {build && (
                   <span className="text-[9px] text-slate-400 truncate max-w-[140px]" title={build.weapons.join(' · ')}>
                     {build.name}
+                  </span>
+                )}
+                {orphaned && (
+                  <span
+                    className="text-[9px] text-amber-500"
+                    title={`Estas armas ya no existen en ningún conjunto: ${build?.weapons.join(', ')}`}
+                  >
+                    <i className="fa-solid fa-triangle-exclamation mr-1"></i>
+                    armas sin conjunto
                   </span>
                 )}
               </div>
