@@ -242,9 +242,12 @@ export async function warDetail(id) {
  */
 export async function warsFor(playerId) {
   const { rows } = await pool.query(
-    `SELECT w.id, w.name, w.started_at AS "startedAt", w.ended_at AS "endedAt",
-            w.match_type AS "matchType",
-            p.player_id AS "playerId", COALESCE(m.name, p.player_id) AS name,
+    // A war has a name and so does a member, and this row carries both. They
+    // are spelled apart on purpose: called the same thing, the driver keeps
+    // whichever came last and the war silently takes a member's name.
+    `SELECT w.id, w.name AS "warName", w.started_at AS "startedAt",
+            w.ended_at AS "endedAt", w.match_type AS "matchType",
+            p.player_id AS "playerId", COALESCE(m.name, p.player_id) AS "playerName",
             p.side, p.lane, p.stats
        FROM wars w
        JOIN war_participants p ON p.war_id = w.id
@@ -254,10 +257,7 @@ export async function warsFor(playerId) {
           SELECT 1 FROM war_participants mine
            WHERE mine.war_id = w.id AND mine.player_id = $1
         )
-      -- Ordered by the member's name, spelled out rather than by the alias:
-      -- "name" alone is ambiguous here, since the war has one too, and Postgres
-      -- refuses the whole query rather than guessing.
-      ORDER BY w.started_at DESC, COALESCE(m.name, p.player_id)`,
+      ORDER BY w.started_at DESC, "playerName"`,
     [playerId, GUILD_ID],
   );
 
@@ -267,7 +267,7 @@ export async function warsFor(playerId) {
     if (!war) {
       war = {
         id: row.id,
-        name: row.name,
+        name: row.warName,
         startedAt: row.startedAt,
         endedAt: row.endedAt,
         matchType: row.matchType,
@@ -277,7 +277,7 @@ export async function warsFor(playerId) {
     }
     war.participants.push({
       playerId: row.playerId,
-      name: row.name,
+      name: row.playerName,
       side: row.side,
       lane: row.lane,
       stats: row.stats ?? {},
