@@ -190,6 +190,48 @@ function cleanUnits(raw) {
   }));
 }
 
+/* --------------------------------------------------- the plan in force */
+
+// Which strategy each side is being arranged against. Kept on the server and
+// not in the browser: two officers arranging the two halves are working from
+// one plan, and a member's tactical units are only legible under the strategy
+// that names them -- a selection that lived in one tab would make everyone
+// else's assignments look like they had vanished.
+const activeKey = (side) => `war_strategy:${GUILD_ID}:${side}`;
+
+export async function getActiveStrategies() {
+  const { rows } = await pool.query(`SELECT key, value FROM app_settings WHERE key = ANY($1)`, [
+    SIDES.map(activeKey),
+  ]);
+  const active = {};
+  for (const side of SIDES) {
+    active[side] = rows.find((r) => r.key === activeKey(side))?.value ?? null;
+  }
+  return active;
+}
+
+export async function setActiveStrategy(side, id) {
+  if (!SIDES.includes(side)) throw Object.assign(new Error('unknown side'), { status: 400 });
+
+  if (!id) {
+    await pool.query(`DELETE FROM app_settings WHERE key = $1`, [activeKey(side)]);
+    return { active: null };
+  }
+
+  const { rows } = await pool.query(
+    `SELECT 1 FROM war_strategies WHERE id = $1 AND guild_id = $2 AND side = $3`,
+    [id, GUILD_ID, side],
+  );
+  if (!rows.length) throw Object.assign(new Error('esa estrategia no existe'), { status: 404 });
+
+  await pool.query(
+    `INSERT INTO app_settings (key, value) VALUES ($1, $2)
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+    [activeKey(side), id],
+  );
+  return { active: id };
+}
+
 export async function listStrategies() {
   const { rows } = await pool.query(
     `SELECT id, side, name, composition, units, notes FROM war_strategies
@@ -230,7 +272,13 @@ export async function deleteStrategy(id) {
     `DELETE FROM war_strategies WHERE id = $1 AND guild_id = $2 RETURNING side`,
     [id, GUILD_ID],
   );
-  if (rows.length) await pruneUnits(rows[0].side);
+  if (!rows.length) return;
+  await pruneUnits(rows[0].side);
+  // A side cannot be arranged against a plan that no longer exists.
+  await pool.query(`DELETE FROM app_settings WHERE key = $1 AND value = $2`, [
+    activeKey(rows[0].side),
+    id,
+  ]);
 }
 
 /**

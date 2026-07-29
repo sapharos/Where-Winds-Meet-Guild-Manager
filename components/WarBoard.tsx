@@ -65,7 +65,7 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
   const [side, setSide] = useState<WarSide>('attack');
   const [deployments, setDeployments] = useState<Deployment[]>([]);
   const [strategies, setStrategies] = useState<WarStrategy[]>([]);
-  const [chosen, setChosen] = useState<string>('');
+  const [inForce, setInForce] = useState<Record<WarSide, string | null>>({ attack: null, defense: null });
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState<'' | Role>('');
@@ -82,6 +82,25 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
     const plans = await api<WarStrategy[]>('/war/strategies').catch(() => []);
     // Strategies written before units existed come back without them.
     setStrategies(plans.map((s) => ({ ...s, units: s.units ?? [] })));
+    setInForce(
+      await api<Record<WarSide, string | null>>('/war/active').catch(() => ({
+        attack: null,
+        defense: null,
+      })),
+    );
+  };
+
+  // Choosing the plan is a change to the war, not to this browser: it is what
+  // makes everyone's tactical units visible, so it is saved for the guild.
+  const choose = async (id: string) => {
+    const before = inForce;
+    setInForce({ ...inForce, [side]: id || null });
+    try {
+      await api(`/war/active/${side}`, { method: 'PUT', body: JSON.stringify({ strategy: id || null }) });
+    } catch (err) {
+      setInForce(before);
+      setError(err instanceof Error ? err.message : 'No se pudo fijar la estrategia');
+    }
   };
 
   useEffect(() => {
@@ -153,7 +172,7 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
     )
     .sort((a, b) => rank(b) - rank(a) || a.name.localeCompare(b.name));
 
-  const strategy = strategies.find((s) => s.id === chosen && s.side === side);
+  const strategy = strategies.find((s) => s.id === inForce[side] && s.side === side);
 
   const move = async (playerId: string, lane: WarLane | null) => {
     setError(null);
@@ -245,9 +264,10 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
 
           <div className="flex items-center gap-2 flex-wrap">
             <select
-              value={chosen}
-              onChange={(e) => setChosen(e.target.value)}
-              className="bg-slate-950 border border-slate-800 rounded p-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
+              value={inForce[side] ?? ''}
+              disabled={!canEdit}
+              onChange={(e) => choose(e.target.value)}
+              className="bg-slate-950 border border-slate-800 rounded p-2 text-sm outline-none focus:ring-1 focus:ring-amber-500 disabled:text-slate-500"
             >
               <option value="">Sin estrategia de referencia</option>
               {strategies.filter((s) => s.side === side).map((s) => (

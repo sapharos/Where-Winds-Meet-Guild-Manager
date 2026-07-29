@@ -15,6 +15,8 @@ import {
   listStrategies,
   saveStrategy,
   deleteStrategy,
+  getActiveStrategies,
+  setActiveStrategy,
 } from './war.js';
 import {
   discordEnabled,
@@ -478,6 +480,14 @@ app.put('/api/war/deployments/:side/:playerId/build', requireAuth, requirePermis
 
 app.get('/api/war/strategies', requireAuth, asHandler(async (_req, res) => {
   res.json(await listStrategies());
+}));
+
+app.get('/api/war/active', requireAuth, asHandler(async (_req, res) => {
+  res.json(await getActiveStrategies());
+}));
+
+app.put('/api/war/active/:side', requireAuth, requirePermission('war.edit'), asHandler(async (req, res) => {
+  res.json(await setActiveStrategy(req.params.side, req.body?.strategy ?? null));
 }));
 
 app.put('/api/war/strategies', requireAuth, requirePermission('war.edit'), asHandler(async (req, res) => {
