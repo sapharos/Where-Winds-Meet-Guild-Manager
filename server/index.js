@@ -7,6 +7,14 @@ import { matchEntries, commitScan, historyFor, scanSummary } from './scans.js';
 import { listBuilds, saveBuilds, mayEditBuilds } from './builds.js';
 import { listWeaponSets, saveWeaponSets, seedWeaponSets } from './weapons.js';
 import {
+  getDeployments,
+  place,
+  clearSide,
+  listStrategies,
+  saveStrategy,
+  deleteStrategy,
+} from './war.js';
+import {
   discordEnabled,
   beginDiscord,
   finishDiscord,
@@ -437,6 +445,35 @@ app.patch('/api/players/:id/flags', requireAuth, requirePermission('roster.edit'
     ],
   );
   if (!rows.length) return res.status(404).json({ error: 'no such member' });
+  res.json({ ok: true });
+}));
+
+/* ------------------------------------------------------------- guild war */
+
+app.get('/api/war/deployments', requireAuth, asHandler(async (_req, res) => {
+  res.json(await getDeployments());
+}));
+
+// One member at a time rather than the whole board, so two officers arranging
+// different lanes at once do not overwrite each other.
+app.put('/api/war/deployments/:side/:playerId', requireAuth, requirePermission('war.edit'), asHandler(async (req, res) => {
+  res.json(await place(req.params.side, req.body?.lane ?? null, req.params.playerId));
+}));
+
+app.delete('/api/war/deployments/:side', requireAuth, requirePermission('war.edit'), asHandler(async (req, res) => {
+  res.json(await clearSide(req.params.side));
+}));
+
+app.get('/api/war/strategies', requireAuth, asHandler(async (_req, res) => {
+  res.json(await listStrategies());
+}));
+
+app.put('/api/war/strategies', requireAuth, requirePermission('war.edit'), asHandler(async (req, res) => {
+  res.json(await saveStrategy(req.body?.strategy));
+}));
+
+app.delete('/api/war/strategies/:id', requireAuth, requirePermission('war.edit'), asHandler(async (req, res) => {
+  await deleteStrategy(req.params.id);
   res.json({ ok: true });
 }));
 

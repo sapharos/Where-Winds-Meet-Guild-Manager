@@ -21,6 +21,32 @@ export const LANE_NAMES: Record<Lane, string> = {
   [Lane.UNASSIGNED]: 'Sin asignar',
 };
 
+// The battlefield as the guild fights it: three lanes, each side fielding ten.
+export type WarLane = 'left' | 'center' | 'right';
+
+export const WAR_LANES: { id: WarLane; label: string; colour: string }[] = [
+  { id: 'left', label: 'Línea Izquierda', colour: '#eab308' },
+  { id: 'center', label: 'Línea Central', colour: '#ef4444' },
+  { id: 'right', label: 'Línea Derecha', colour: '#3b82f6' },
+];
+
+export const LANE_CAPACITY = 10;
+
+export interface Deployment {
+  side: WarSide;
+  lane: WarLane;
+  playerId: string;
+}
+
+export interface WarStrategy {
+  id: string;
+  side: WarSide;
+  name: string;
+  // Per lane, how many of each role the lane is meant to hold.
+  composition: Record<WarLane, { tank: number; healer: number; dps: number }>;
+  notes?: string | null;
+}
+
 export enum Platform {
   PC = 'PC',
   PS5 = 'PS5',

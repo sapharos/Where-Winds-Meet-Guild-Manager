@@ -213,3 +213,67 @@ CREATE INDEX IF NOT EXISTS player_scans_history_idx ON player_scans (guild_id, p
 CREATE INDEX IF NOT EXISTS players_guild_idx      ON players (guild_id);
 CREATE INDEX IF NOT EXISTS ranks_guild_idx        ON ranks (guild_id);
 CREATE INDEX IF NOT EXISTS war_sessions_guild_idx ON war_sessions (guild_id);
+
+-- Guild war, in three parts that build on each other.
+--
+-- A deployment is the standing line-up: who goes where, kept separately for
+-- attack and defence because the same person is rarely wanted in both.
+-- A strategy is a named target composition -- how many tanks, healers and dps
+-- each lane should hold -- which is what makes rebalancing possible when half
+-- the guild is missing. A war freezes a deployment at the moment it starts, so
+-- the history says who actually fought rather than who is on the list today.
+
+CREATE TABLE IF NOT EXISTS war_deployments (
+  guild_id  TEXT NOT NULL REFERENCES guilds(id) ON DELETE CASCADE,
+  side      TEXT NOT NULL,
+  lane      TEXT NOT NULL,
+  player_id TEXT NOT NULL,
+  position  INTEGER NOT NULL DEFAULT 0,
+  -- One lane per side per member: being in two places at once is not a plan.
+  PRIMARY KEY (guild_id, side, player_id),
+  FOREIGN KEY (guild_id, player_id) REFERENCES players (guild_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS war_deployments_lane_idx ON war_deployments (guild_id, side, lane);
+
+CREATE TABLE IF NOT EXISTS war_strategies (
+  id          TEXT PRIMARY KEY,
+  guild_id    TEXT NOT NULL REFERENCES guilds(id) ON DELETE CASCADE,
+  side        TEXT NOT NULL,
+  name        TEXT NOT NULL,
+  -- { left: { tank, healer, dps }, center: {...}, right: {...} }
+  composition JSONB NOT NULL DEFAULT '{}'::jsonb,
+  notes       TEXT,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS war_strategies_side_idx ON war_strategies (guild_id, side);
+
+CREATE TABLE IF NOT EXISTS wars (
+  id         TEXT PRIMARY KEY,
+  guild_id   TEXT NOT NULL REFERENCES guilds(id) ON DELETE CASCADE,
+  name       TEXT NOT NULL,
+  started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  ended_at   TIMESTAMPTZ,
+  outcome    TEXT,
+  notes      TEXT,
+  -- The results screenshot, kept until it has been read. Small enough to sit
+  -- inline, and this deployment has no file storage on purpose.
+  result_image TEXT
+);
+
+CREATE INDEX IF NOT EXISTS wars_recent_idx ON wars (guild_id, started_at DESC);
+
+-- Who fought, where, and what they contributed. Written when a war starts,
+-- from the deployment as it stood, and never rewritten afterwards: the point
+-- of a record is that it says what happened, not what the plan is now.
+CREATE TABLE IF NOT EXISTS war_participants (
+  war_id       TEXT NOT NULL REFERENCES wars(id) ON DELETE CASCADE,
+  player_id    TEXT NOT NULL,
+  side         TEXT NOT NULL,
+  lane         TEXT NOT NULL,
+  contribution INTEGER,
+  PRIMARY KEY (war_id, player_id)
+);
+
+CREATE INDEX IF NOT EXISTS war_participants_player_idx ON war_participants (player_id);
