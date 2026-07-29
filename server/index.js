@@ -340,9 +340,21 @@ app.put('/api/permissions', requireAuth, requirePermission('permissions.manage')
 app.get('/api/state', requireAuth, asHandler(async (_req, res) => {
   const [players, ranks, sessions] = await Promise.all([
     pool.query(
-      `SELECT id, name, role, level, sect, platform, status, rank_id AS "rankId", notes,
-              game_uid AS "gameUid", online_id AS "onlineId", is_starter AS "isStarter", war_side AS "warSide", is_active AS "isActive"
-         FROM players WHERE guild_id = $1 ORDER BY name`,
+      // Martial mastery is scanned, not typed, so it comes from the last sweep
+      // that actually read it -- a sweep that missed the field for somebody
+      // should leave their old figure standing rather than blank it.
+      `SELECT p.id, p.name, p.role, p.level, p.sect, p.platform, p.status,
+              p.rank_id AS "rankId", p.notes, p.game_uid AS "gameUid",
+              p.online_id AS "onlineId", p.is_starter AS "isStarter",
+              p.war_side AS "warSide", p.is_active AS "isActive",
+              s.martial_mastery AS "martialMastery"
+         FROM players p
+         LEFT JOIN LATERAL (
+           SELECT martial_mastery FROM player_scans
+            WHERE guild_id = p.guild_id AND player_id = p.id AND martial_mastery IS NOT NULL
+            ORDER BY scanned_at DESC LIMIT 1
+         ) s ON true
+        WHERE p.guild_id = $1 ORDER BY p.name`,
       [GUILD_ID],
     ),
     pool.query(`SELECT id, name, color FROM ranks WHERE guild_id = $1`, [GUILD_ID]),
@@ -361,6 +373,7 @@ app.get('/api/state', requireAuth, asHandler(async (_req, res) => {
       notes: p.notes ?? undefined,
       gameUid: p.gameUid ?? undefined,
       onlineId: p.onlineId ?? undefined,
+      martialMastery: p.martialMastery ?? undefined,
     })),
     ranks: ranks.rows,
     sessions: sessions.rows.map((s) => ({ ...s, date: s.date.toISOString() })),

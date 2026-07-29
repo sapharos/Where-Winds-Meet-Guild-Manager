@@ -159,6 +159,9 @@ export interface Player {
   isStarter?: boolean;
   warSide?: WarSide | null;
   isActive?: boolean;
+  // Read from the last sweep that captured it. Scanned, never typed, which is
+  // why the roster editor neither shows it nor sends it back.
+  martialMastery?: number;
 }
 
 // Which half of a guild war someone is fielded in. Undecided is a real state:

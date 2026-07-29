@@ -111,6 +111,14 @@ const PlayerCard: React.FC<PlayerCardProps> = ({
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <h4 className="font-bold text-slate-100 leading-tight truncate max-w-[140px]">{player.name}</h4>
+              {player.martialMastery !== undefined && (
+                <span
+                  className="text-[11px] text-amber-400/90 tabular-nums shrink-0"
+                  title="Maestría marcial, del último escaneo"
+                >
+                  ({player.martialMastery.toLocaleString('es')})
+                </span>
+              )}
               {player.platform && (
                 <span className="text-slate-500 text-[10px]" title={player.platform}>
                   {PLATFORM_ICONS[player.platform]}

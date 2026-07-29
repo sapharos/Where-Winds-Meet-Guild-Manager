@@ -84,6 +84,7 @@ const MemberManager: React.FC<MemberManagerProps> = ({
   const [startersOnly, setStartersOnly] = useState(false);
   const [sideFilter, setSideFilter] = useState<'' | WarSide>('');
   const [showGone, setShowGone] = useState(false);
+  const [order, setOrder] = useState<'lineup' | 'mastery' | 'name'>('lineup');
 
   // The build shown on a card is the primary one; the rest describe how else
   // someone can play, which belongs in the build editor rather than here.
@@ -159,10 +160,25 @@ const MemberManager: React.FC<MemberManagerProps> = ({
       if (sideFilter && p.warSide !== sideFilter) return false;
       return true;
     })
-    // Whoever is being fielded comes first: on war day the roster is read to
-    // check the line-up, not to browse the whole guild.
-    .sort((a, b) => Number(Boolean(b.isStarter)) - Number(Boolean(a.isStarter)) || a.name.localeCompare(b.name));
-  }, [players, search, roleFilter, weaponFilter, weaponsOf, startersOnly, sideFilter, showGone, primaryOf]);
+    .sort((a, b) => {
+      // Sorted by mastery, somebody never scanned goes last rather than first:
+      // a missing figure is not a zero, and the list is being read to find who
+      // is strongest.
+      if (order === 'mastery') {
+        const mine = a.martialMastery ?? -1;
+        const theirs = b.martialMastery ?? -1;
+        if (mine !== theirs) return theirs - mine;
+        return a.name.localeCompare(b.name);
+      }
+      // Whoever is being fielded comes first: on war day the roster is read to
+      // check the line-up, not to browse the whole guild.
+      if (order === 'lineup') {
+        const gap = Number(Boolean(b.isStarter)) - Number(Boolean(a.isStarter));
+        if (gap) return gap;
+      }
+      return a.name.localeCompare(b.name);
+    });
+  }, [players, search, roleFilter, weaponFilter, weaponsOf, startersOnly, sideFilter, showGone, order, primaryOf]);
 
   const openNew = () => {
     setEditing(null);
@@ -229,7 +245,7 @@ const MemberManager: React.FC<MemberManagerProps> = ({
           )}
         </div>
 
-        <div className="grid sm:grid-cols-2 lg:grid-cols-6 gap-3">
+        <div className="grid sm:grid-cols-2 lg:grid-cols-7 gap-3">
           <div className="relative">
             <i className="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-600 text-xs"></i>
             <input
@@ -337,6 +353,17 @@ const MemberManager: React.FC<MemberManagerProps> = ({
                 {WAR_SIDE_LABELS[side]}
               </option>
             ))}
+          </select>
+
+          <select
+            value={order}
+            onChange={(e) => setOrder(e.target.value as 'lineup' | 'mastery' | 'name')}
+            title="Orden de la lista"
+            className="bg-slate-950 border border-slate-800 rounded p-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
+          >
+            <option value="lineup">Titulares primero</option>
+            <option value="mastery">Maestría marcial ↓</option>
+            <option value="name">Nombre</option>
           </select>
 
           <button
