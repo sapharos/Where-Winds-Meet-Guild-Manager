@@ -162,6 +162,9 @@ export async function clearSide(side) {
 /** A guild war lasts half an hour. Nothing about it outlives that. */
 export const WAR_MINUTES = 30;
 
+/** Liga, ranked, or a challenge arranged against one particular guild. */
+export const MATCH_TYPES = ['league', 'ranked', 'custom'];
+
 export async function currentWar() {
   // Closed by the clock rather than by remembering to. Whoever opens the war
   // room next is the one who notices, and the end time is the war's own thirty
@@ -178,7 +181,7 @@ export async function currentWar() {
   }
 
   const { rows } = await pool.query(
-    `SELECT id, name, started_at AS "startedAt" FROM wars
+    `SELECT id, name, started_at AS "startedAt", match_type AS "matchType" FROM wars
       WHERE guild_id = $1 AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1`,
     [GUILD_ID],
   );
@@ -190,7 +193,7 @@ export async function currentWar() {
 export async function listWars() {
   const { rows } = await pool.query(
     `SELECT w.id, w.name, w.started_at AS "startedAt", w.ended_at AS "endedAt",
-            w.outcome, w.notes,
+            w.outcome, w.notes, w.match_type AS "matchType",
             (SELECT count(*)::int FROM war_participants p WHERE p.war_id = w.id) AS "participants",
             (SELECT count(*)::int FROM war_images i WHERE i.war_id = w.id) AS "images"
        FROM wars w WHERE w.guild_id = $1 ORDER BY w.started_at DESC LIMIT 100`,
@@ -201,7 +204,8 @@ export async function listWars() {
 
 export async function warDetail(id) {
   const war = await pool.query(
-    `SELECT id, name, started_at AS "startedAt", ended_at AS "endedAt", outcome, notes, plans
+    `SELECT id, name, started_at AS "startedAt", ended_at AS "endedAt", outcome, notes, plans,
+            match_type AS "matchType"
        FROM wars WHERE id = $1 AND guild_id = $2`,
     [id, GUILD_ID],
   );
@@ -239,6 +243,7 @@ export async function warDetail(id) {
 export async function warsFor(playerId) {
   const { rows } = await pool.query(
     `SELECT w.id, w.name, w.started_at AS "startedAt", w.ended_at AS "endedAt",
+            w.match_type AS "matchType",
             p.player_id AS "playerId", COALESCE(m.name, p.player_id) AS name,
             p.side, p.lane, p.stats
        FROM wars w
@@ -262,6 +267,7 @@ export async function warsFor(playerId) {
         name: row.name,
         startedAt: row.startedAt,
         endedAt: row.endedAt,
+        matchType: row.matchType,
         participants: [],
       };
       wars.set(row.id, war);
@@ -349,7 +355,12 @@ export async function setContribution(warId, playerId, body) {
  * rearranged for next week and the record of a war must not follow it. Both
  * sides have to be settled first -- half a line-up is not a line-up.
  */
-export async function startWar(name) {
+export async function startWar(name, matchType) {
+  if (!MATCH_TYPES.includes(matchType)) {
+    throw Object.assign(new Error('elige que tipo de partida fue: liga, ranked o personalizada'), {
+      status: 400,
+    });
+  }
   if (await currentWar()) {
     throw Object.assign(new Error('ya hay una guerra en curso'), { status: 409 });
   }
@@ -379,8 +390,8 @@ export async function startWar(name) {
   try {
     await client.query('BEGIN');
     await client.query(
-      `INSERT INTO wars (id, guild_id, name, plans) VALUES ($1, $2, $3, $4)`,
-      [id, GUILD_ID, String(name ?? '').trim() || 'Guerra de gremio', JSON.stringify(plans)],
+      `INSERT INTO wars (id, guild_id, name, plans, match_type) VALUES ($1, $2, $3, $4, $5)`,
+      [id, GUILD_ID, String(name ?? '').trim() || 'Guerra de gremio', JSON.stringify(plans), matchType],
     );
     for (const d of deployed) {
       await client.query(
@@ -410,6 +421,27 @@ export async function endWar(id) {
 
   await pool.query(`DELETE FROM app_settings WHERE key = ANY($1)`, [SIDES.map(lockKey)]);
   return { ended: id };
+}
+
+/**
+ * Correct the name or the match type after the fact.
+ *
+ * Decided in the rush of starting a war, so it is the one thing about the
+ * record most likely to be picked wrong or typed in a hurry.
+ */
+export async function updateWar(id, { name, matchType } = {}) {
+  if (matchType !== undefined && !MATCH_TYPES.includes(matchType)) {
+    throw Object.assign(new Error('tipo de partida invalido'), { status: 400 });
+  }
+  const { rowCount } = await pool.query(
+    `UPDATE wars SET
+        name = COALESCE($1, name),
+        match_type = COALESCE($2, match_type)
+      WHERE id = $3 AND guild_id = $4`,
+    [name === undefined ? null : String(name).trim() || null, matchType ?? null, id, GUILD_ID],
+  );
+  if (!rowCount) throw Object.assign(new Error('esa guerra no existe'), { status: 404 });
+  return { ok: true };
 }
 
 /* ------------------------------------------------------------ strategies */

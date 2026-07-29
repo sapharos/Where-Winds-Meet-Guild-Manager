@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../services/authService';
 import { impactOf } from '../services/impact';
-import { WAR_SIDE_LABELS, WarLane, WarSide } from '../types';
+import { WAR_MATCH_TYPE_LABELS, WAR_SIDE_LABELS, WarLane, WarMatchType, WarSide } from '../types';
 import ResultsReader from './ResultsReader';
 
 interface WarRow {
@@ -10,6 +10,7 @@ interface WarRow {
   startedAt: string;
   endedAt: string | null;
   outcome: string | null;
+  matchType: WarMatchType;
   participants: number;
   images: number;
 }
@@ -151,6 +152,18 @@ const WarHistory: React.FC<Props> = ({ canEdit, onClose }) => {
     [detail],
   );
 
+  // Decided in a hurry when the war started, so it is the one field most
+  // likely to need a correction afterwards. Updates the list in place rather
+  // than reloading, so picking a new type does not scroll the reader away.
+  const setMatchType = async (matchType: WarMatchType) => {
+    if (!chosen) return;
+    setDetail((prev) => (prev ? { ...prev, matchType } : prev));
+    setWars((prev) => (prev ?? []).map((w) => (w.id === chosen ? { ...w, matchType } : w)));
+    await api(`/war/wars/${chosen}`, { method: 'PATCH', body: JSON.stringify({ matchType }) }).catch(
+      (err) => setMessage({ text: err instanceof Error ? err.message : 'No se pudo guardar', ok: false }),
+    );
+  };
+
   const setFigure = async (playerId: string, key: string, raw: string) => {
     if (!chosen) return;
     const value = raw.trim() === '' ? null : Number(raw.replace(/\./g, ''));
@@ -222,9 +235,14 @@ const WarHistory: React.FC<Props> = ({ canEdit, onClose }) => {
                       : 'border-slate-800 hover:border-slate-700'
                   }`}
                 >
-                  <p className={`text-sm font-bold ${chosen === w.id ? 'text-amber-400' : 'text-slate-200'}`}>
-                    {w.name}
-                  </p>
+                  <div className="flex items-center gap-2">
+                    <p className={`text-sm font-bold ${chosen === w.id ? 'text-amber-400' : 'text-slate-200'}`}>
+                      {w.name}
+                    </p>
+                    <span className="text-[9px] uppercase tracking-wider text-slate-500 border border-slate-700 rounded px-1 py-0.5">
+                      {WAR_MATCH_TYPE_LABELS[w.matchType]}
+                    </span>
+                  </div>
                   <p className="text-[10px] text-slate-500">
                     {when(w.startedAt)} · {minutes(w.startedAt, w.endedAt)} · {w.participants} en campo
                     {w.images > 0 && ` · ${w.images} img`}
@@ -236,6 +254,25 @@ const WarHistory: React.FC<Props> = ({ canEdit, onClose }) => {
 
           {detail && (
             <>
+              {canEdit && (
+                <div className="flex items-center gap-2 -mt-1">
+                  <span className="text-[10px] uppercase tracking-wider text-slate-500">
+                    Tipo de partida
+                  </span>
+                  <select
+                    value={detail.matchType}
+                    onChange={(e) => setMatchType(e.target.value as WarMatchType)}
+                    className="bg-slate-950 border border-slate-800 rounded px-2 py-1 text-xs outline-none focus:ring-1 focus:ring-amber-500"
+                  >
+                    {(Object.keys(WAR_MATCH_TYPE_LABELS) as WarMatchType[]).map((type) => (
+                      <option key={type} value={type}>
+                        {WAR_MATCH_TYPE_LABELS[type]}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               <section>
                 <div className="flex items-center justify-between gap-3 flex-wrap mb-2">
                   <h3 className="text-sm font-bold text-slate-300">

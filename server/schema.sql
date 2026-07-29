@@ -305,6 +305,12 @@ CREATE INDEX IF NOT EXISTS wars_recent_idx ON wars (guild_id, started_at DESC);
 -- what happened must not change with it.
 ALTER TABLE wars ADD COLUMN IF NOT EXISTS plans JSONB NOT NULL DEFAULT '{}'::jsonb;
 
+-- Liga, ranked o un reto concertado contra un gremio concreto. Decidido al
+-- iniciar la guerra, que es cuando quien la organiza ya lo sabe. Validado en
+-- el servidor (MATCH_TYPES en war.js) en vez de con una restricción aquí,
+-- igual que side y lane.
+ALTER TABLE wars ADD COLUMN IF NOT EXISTS match_type TEXT NOT NULL DEFAULT 'custom';
+
 CREATE TABLE IF NOT EXISTS war_participants (
   war_id       TEXT NOT NULL REFERENCES wars(id) ON DELETE CASCADE,
   player_id    TEXT NOT NULL,

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../services/authService';
-import { WAR_SIDE_LABELS, WarSide } from '../types';
+import { WAR_MATCH_TYPE_LABELS, WAR_SIDE_LABELS, WarMatchType, WarSide } from '../types';
 import { FIGURES } from './WarHistory';
 import { Impact, WEIGHTS, impactOf } from '../services/impact';
 
@@ -16,6 +16,7 @@ interface War {
   name: string;
   startedAt: string;
   endedAt: string | null;
+  matchType: WarMatchType;
   participants: Participation[];
 }
 
@@ -94,7 +95,12 @@ const MyWars: React.FC<Props> = ({ playerId }) => {
                 </div>
 
                 <div className="min-w-0 flex-1">
-                  <p className="font-bold text-slate-100 truncate">{war.name}</p>
+                  <div className="flex items-center gap-2">
+                    <p className="font-bold text-slate-100 truncate">{war.name}</p>
+                    <span className="text-[9px] uppercase tracking-wider text-slate-500 border border-slate-700 rounded px-1 py-0.5 shrink-0">
+                      {WAR_MATCH_TYPE_LABELS[war.matchType]}
+                    </span>
+                  </div>
                   <p className="text-[11px] text-slate-500">
                     {when(war.startedAt)} · {place}.º de {ranked.length}
                   </p>

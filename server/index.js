@@ -20,6 +20,7 @@ import {
   setLock,
   startWar,
   endWar,
+  updateWar,
   listWars,
   warDetail,
   warsFor,
@@ -517,11 +518,15 @@ app.put('/api/war/lock/:side', requireAuth, requirePermission('war.edit'), asHan
 }));
 
 app.post('/api/war/wars', requireAuth, requirePermission('war.edit'), asHandler(async (req, res) => {
-  res.json(await startWar(req.body?.name));
+  res.json(await startWar(req.body?.name, req.body?.matchType));
 }));
 
 app.post('/api/war/wars/:id/end', requireAuth, requirePermission('war.edit'), asHandler(async (req, res) => {
   res.json(await endWar(req.params.id));
+}));
+
+app.patch('/api/war/wars/:id', requireAuth, requirePermission('war.edit'), asHandler(async (req, res) => {
+  res.json(await updateWar(req.params.id, { name: req.body?.name, matchType: req.body?.matchType }));
 }));
 
 // The record a war leaves behind. Readable by the guild -- everyone wants to

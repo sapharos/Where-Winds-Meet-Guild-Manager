@@ -173,6 +173,16 @@ export const WAR_SIDE_LABELS: Record<WarSide, string> = {
   defense: 'Defensa',
 };
 
+// Liga, ranked o un reto concertado contra un gremio concreto. Decidido al
+// iniciar la guerra, que es cuando quien la organiza ya lo sabe.
+export type WarMatchType = 'league' | 'ranked' | 'custom';
+
+export const WAR_MATCH_TYPE_LABELS: Record<WarMatchType, string> = {
+  league: 'Liga',
+  ranked: 'Ranked',
+  custom: 'Personalizada (reto)',
+};
+
 export interface WarAssignment {
   playerId: string;
   lane: Lane;

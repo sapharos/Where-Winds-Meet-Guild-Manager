@@ -8,8 +8,10 @@ import {
   Role,
   WAR_CAPACITY,
   WAR_LANES,
+  WAR_MATCH_TYPE_LABELS,
   WAR_SIDE_LABELS,
   WarLane,
+  WarMatchType,
   WarSide,
   WarStrategy,
   WeaponSet,
@@ -19,6 +21,7 @@ import { ROLE_NAMES, buildColours } from './PlayerCard';
 import StrategyPlanner from './StrategyPlanner';
 import WarTimers from './WarTimers';
 import WarHistory from './WarHistory';
+import StartWarModal from './StartWarModal';
 
 const ROLE_KEYS: Record<Role, 'tank' | 'healer' | 'dps'> = {
   [Role.TANK]: 'tank',
@@ -35,7 +38,7 @@ const ROLE_TEXT: Record<Role, string> = {
 interface WarBoardState {
   active: Record<WarSide, string | null>;
   locked: Record<WarSide, boolean>;
-  current: { id: string; name: string; startedAt: string } | null;
+  current: { id: string; name: string; startedAt: string; matchType: WarMatchType } | null;
   now?: string;
 }
 
@@ -76,7 +79,10 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
   const [strategies, setStrategies] = useState<WarStrategy[]>([]);
   const [inForce, setInForce] = useState<Record<WarSide, string | null>>({ attack: null, defense: null });
   const [locked, setLocked] = useState<Record<WarSide, boolean>>({ attack: false, defense: false });
-  const [war, setWar] = useState<{ id: string; name: string; startedAt: string } | null>(null);
+  const [war, setWar] = useState<
+    { id: string; name: string; startedAt: string; matchType: WarMatchType } | null
+  >(null);
+  const [starting, setStarting] = useState(false);
   // Server time minus ours, so the war clocks agree between screens.
   const [offset, setOffset] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -261,16 +267,11 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
     }
   };
 
-  const begin = async () => {
-    const name = window.prompt('Nombre de la guerra', `Guerra ${new Date().toLocaleDateString('es')}`);
-    if (name === null) return;
+  const begin = async (name: string, matchType: WarMatchType) => {
+    await api('/war/wars', { method: 'POST', body: JSON.stringify({ name, matchType }) });
+    setStarting(false);
     setError(null);
-    try {
-      await api('/war/wars', { method: 'POST', body: JSON.stringify({ name }) });
-      await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo iniciar la guerra');
-    }
+    await load();
   };
 
   const finish = async () => {
@@ -406,7 +407,11 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
               <>
                 <span className="text-sm text-amber-400 font-bold flex items-center gap-2">
                   <i className="fa-solid fa-fire"></i>
-                  {war.name} en curso
+                  {war.name}
+                  <span className="text-[10px] font-normal uppercase tracking-wider text-amber-500/70 border border-amber-800/60 rounded px-1.5 py-0.5">
+                    {WAR_MATCH_TYPE_LABELS[war.matchType]}
+                  </span>
+                  en curso
                 </span>
                 <button
                   onClick={finish}
@@ -417,7 +422,7 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
               </>
             ) : (
               <button
-                onClick={begin}
+                onClick={() => setStarting(true)}
                 disabled={!locked.attack || !locked.defense}
                 title={
                   locked.attack && locked.defense
@@ -773,6 +778,8 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
       </div>
 
       {history && <WarHistory canEdit={canEdit} onClose={() => setHistory(false)} />}
+
+      {starting && <StartWarModal onClose={() => setStarting(false)} onStart={begin} />}
 
       {planning && (
         <StrategyPlanner
