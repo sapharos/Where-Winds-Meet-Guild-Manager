@@ -149,8 +149,11 @@ export async function saveMatrix(incoming) {
 
 export async function verifyLogin(username, password) {
   const { rows } = await pool.query(
-    `SELECT id, username, password_hash, role, disabled, player_id AS "playerId" FROM users
-      WHERE guild_id = $1 AND lower(username) = lower($2)`,
+    `SELECT u.id, u.username, u.password_hash, u.role, u.disabled, u.player_id AS "playerId",
+            COALESCE(p.is_active, true) AS "memberActive"
+       FROM users u
+       LEFT JOIN players p ON p.guild_id = u.guild_id AND p.id = u.player_id
+      WHERE u.guild_id = $1 AND lower(u.username) = lower($2)`,
     [GUILD_ID, username],
   );
   const user = rows[0];
@@ -160,7 +163,9 @@ export async function verifyLogin(username, password) {
   const hash = user ? user.password_hash : '$2a$12$invalidinvalidinvalidinvalidinvalidinvalidinvalidinvalidinv';
   const ok = await bcrypt.compare(password, hash);
 
-  if (!user || !ok || user.disabled) return null;
+  // Leaving the guild ends access here too. Accounts with no roster entry --
+  // the one the guild was set up with, for instance -- are unaffected.
+  if (!user || !ok || user.disabled || !user.memberActive) return null;
   return { id: user.id, username: user.username, role: user.role, playerId: user.playerId };
 }
 
@@ -188,11 +193,17 @@ export async function requireAuth(req, res, next) {
 
     const claims = jwt.verify(token, secret);
     const { rows } = await pool.query(
-      `SELECT id, username, role, disabled, player_id AS "playerId" FROM users WHERE id = $1 AND guild_id = $2`,
+      `SELECT u.id, u.username, u.role, u.disabled, u.player_id AS "playerId",
+              COALESCE(p.is_active, true) AS "memberActive"
+         FROM users u
+         LEFT JOIN players p ON p.guild_id = u.guild_id AND p.id = u.player_id
+        WHERE u.id = $1 AND u.guild_id = $2`,
       [claims.sub, GUILD_ID],
     );
     const user = rows[0];
-    if (!user || user.disabled) {
+    // Checked per request, so deactivating somebody ends the session they
+    // already have rather than only the next one.
+    if (!user || user.disabled || !user.memberActive) {
       clearCookie(res);
       return res.status(401).json({ error: 'not signed in' });
     }

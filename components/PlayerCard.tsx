@@ -46,6 +46,7 @@ interface PlayerCardProps {
   onShowBuilds?: (p: Player) => void;
   onToggleStarter?: (p: Player) => void;
   onCycleSide?: (p: Player) => void;
+  onToggleActive?: (p: Player) => void;
   className?: string;
   compact?: boolean;
   ranks?: GuildRank[];
@@ -61,17 +62,23 @@ const PlayerCard: React.FC<PlayerCardProps> = ({
   onShowBuilds,
   onToggleStarter,
   onCycleSide,
+  onToggleActive,
   className = '',
   compact = false,
   ranks = [],
 }) => {
   const rank = ranks.find((r) => r.id === player.rankId);
   const { from, to, orphaned } = buildColours(build, weaponSets);
+  const gone = player.isActive === false;
 
   return (
     <div
       className={`relative p-3 rounded-lg border transition-all ${
-        player.isStarter ? 'border-amber-400 shadow-[0_0_0_1px_rgba(251,191,36,0.35)]' : 'border-slate-800'
+        gone
+          ? 'border-slate-800 opacity-50 grayscale'
+          : player.isStarter
+            ? 'border-amber-400 shadow-[0_0_0_1px_rgba(251,191,36,0.35)]'
+            : 'border-slate-800'
       } ${className}`}
       style={{ background: `linear-gradient(90deg, ${from}59 0%, ${to}59 100%)` }}
     >
@@ -124,6 +131,11 @@ const PlayerCard: React.FC<PlayerCardProps> = ({
                     {build.name}
                   </span>
                 )}
+                {gone && (
+                  <span className="text-[8px] px-1.5 py-0.5 rounded border border-slate-600 text-slate-400 uppercase font-bold tracking-tighter">
+                    fuera del gremio
+                  </span>
+                )}
                 {player.warSide && (
                   <span
                     className={`text-[8px] px-1.5 py-0.5 rounded border uppercase font-bold tracking-tighter ${
@@ -161,7 +173,18 @@ const PlayerCard: React.FC<PlayerCardProps> = ({
         </div>
 
         <div className="flex gap-2 shrink-0">
-          {onToggleStarter && (
+          {onToggleActive && (
+            <button
+              onClick={() => onToggleActive(player)}
+              title={gone ? 'Readmitir en el gremio' : 'Marcar como fuera del gremio'}
+              className={`transition-colors ${
+                gone ? 'text-emerald-500 hover:text-emerald-400' : 'text-slate-600 hover:text-red-400'
+              }`}
+            >
+              <i className={`fa-solid ${gone ? 'fa-user-check' : 'fa-user-slash'}`}></i>
+            </button>
+          )}
+          {onToggleStarter && !gone && (
             <button
               onClick={() => onToggleStarter(player)}
               title={player.isStarter ? 'Quitar de titulares' : 'Marcar como titular'}
@@ -172,7 +195,7 @@ const PlayerCard: React.FC<PlayerCardProps> = ({
               <i className={`${player.isStarter ? 'fa-solid' : 'fa-regular'} fa-star`}></i>
             </button>
           )}
-          {onCycleSide && (
+          {onCycleSide && !gone && (
             <button
               onClick={() => onCycleSide(player)}
               title={

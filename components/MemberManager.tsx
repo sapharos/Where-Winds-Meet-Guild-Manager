@@ -18,6 +18,7 @@ interface MemberManagerProps {
   onShowBuilds?: (p: Player) => void;
   onToggleStarter?: (p: Player) => void;
   onCycleSide?: (p: Player) => void;
+  onToggleActive?: (p: Player) => void;
   canManageRanks?: boolean;
 }
 
@@ -47,6 +48,7 @@ const MemberManager: React.FC<MemberManagerProps> = ({
   onShowBuilds,
   onToggleStarter,
   onCycleSide,
+  onToggleActive,
   canManageRanks = false,
 }) => {
   const [editing, setEditing] = useState<Player | null>(null);
@@ -62,6 +64,7 @@ const MemberManager: React.FC<MemberManagerProps> = ({
   const [buildFilter, setBuildFilter] = useState('');
   const [startersOnly, setStartersOnly] = useState(false);
   const [sideFilter, setSideFilter] = useState<'' | WarSide>('');
+  const [showGone, setShowGone] = useState(false);
 
   // The build shown on a card is the primary one; the rest describe how else
   // someone can play, which belongs in the build editor rather than here.
@@ -82,6 +85,9 @@ const MemberManager: React.FC<MemberManagerProps> = ({
     const needle = search.trim().toLowerCase();
     return players.filter((p) => {
       if (needle && !p.name.toLowerCase().includes(needle)) return false;
+      // People who left stay in the database for their history, but the roster
+      // is about who is here, so they are out of the way unless asked for.
+      if (!showGone && p.isActive === false) return false;
       if (startersOnly && !p.isStarter) return false;
 
       const build = primaryOf.get(p.id);
@@ -98,7 +104,7 @@ const MemberManager: React.FC<MemberManagerProps> = ({
     // Whoever is being fielded comes first: on war day the roster is read to
     // check the line-up, not to browse the whole guild.
     .sort((a, b) => Number(Boolean(b.isStarter)) - Number(Boolean(a.isStarter)) || a.name.localeCompare(b.name));
-  }, [players, search, roleFilter, buildFilter, startersOnly, sideFilter, primaryOf]);
+  }, [players, search, roleFilter, buildFilter, startersOnly, sideFilter, showGone, primaryOf]);
 
   const openNew = () => {
     setEditing(null);
@@ -139,7 +145,9 @@ const MemberManager: React.FC<MemberManagerProps> = ({
     setNewRankName('');
   };
 
-  const starters = players.filter((p) => p.isStarter).length;
+  const active = players.filter((p) => p.isActive !== false);
+  const gone = players.length - active.length;
+  const starters = active.filter((p) => p.isStarter).length;
 
   return (
     <div className="space-y-5">
@@ -148,7 +156,7 @@ const MemberManager: React.FC<MemberManagerProps> = ({
           <h2 className="cinzel text-2xl font-bold text-amber-500">
             Roster del gremio
             <span className="ml-3 text-sm font-normal text-slate-500">
-              {visible.length} de {players.length}
+              {visible.length} de {active.length}
               {starters > 0 && <span className="text-amber-500/80"> · {starters} titulares</span>}
             </span>
           </h2>
@@ -163,7 +171,7 @@ const MemberManager: React.FC<MemberManagerProps> = ({
           )}
         </div>
 
-        <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-3">
+        <div className="grid sm:grid-cols-2 lg:grid-cols-6 gap-3">
           <div className="relative">
             <i className="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-600 text-xs"></i>
             <input
@@ -215,6 +223,19 @@ const MemberManager: React.FC<MemberManagerProps> = ({
           </select>
 
           <button
+            onClick={() => setShowGone((v) => !v)}
+            title={gone ? `${gone} fuera del gremio` : 'Nadie marcado como fuera del gremio'}
+            className={`rounded p-2 text-sm border transition-all flex items-center justify-center gap-2 ${
+              showGone
+                ? 'border-slate-500 text-slate-300 bg-slate-800/60'
+                : 'border-slate-800 text-slate-500 hover:text-slate-300'
+            }`}
+          >
+            <i className="fa-solid fa-user-slash"></i>
+            Ver bajas{gone > 0 ? ` (${gone})` : ''}
+          </button>
+
+          <button
             onClick={() => setStartersOnly((v) => !v)}
             className={`rounded p-2 text-sm border transition-all flex items-center justify-center gap-2 ${
               startersOnly
@@ -247,6 +268,7 @@ const MemberManager: React.FC<MemberManagerProps> = ({
               onShowBuilds={onShowBuilds}
               onToggleStarter={isViewer ? undefined : onToggleStarter}
               onCycleSide={isViewer ? undefined : onCycleSide}
+              onToggleActive={isViewer ? undefined : onToggleActive}
             />
           ))}
         </div>

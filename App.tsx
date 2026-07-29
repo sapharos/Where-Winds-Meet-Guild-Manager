@@ -319,13 +319,22 @@ const App: React.FC = () => {
     if (e.target) e.target.value = '';
   };
 
-  const setFlags = (p: Player, flags: { isStarter?: boolean; warSide?: WarSide | null }) => {
+  const setFlags = (p: Player, flags: { isStarter?: boolean; warSide?: WarSide | null; isActive?: boolean }) => {
     if (rosterLocked) return;
     setPlayers((prev) => prev.map((x) => (x.id === p.id ? { ...x, ...flags } : x)));
     persist(api(`/players/${p.id}/flags`, { method: 'PATCH', body: JSON.stringify(flags) }));
   };
 
   const handleToggleStarter = (p: Player) => setFlags(p, { isStarter: !p.isStarter });
+
+  const handleToggleActive = (p: Player) => {
+    const leaving = p.isActive !== false;
+    if (leaving && !window.confirm(
+      `¿Marcar a ${p.name} como fuera del gremio? Perderá el acceso a la web, pero su historial se conserva por si vuelve.`,
+    )) return;
+    // Leaving takes them out of the line-up too, which the server also enforces.
+    setFlags(p, leaving ? { isActive: false, isStarter: false } : { isActive: true });
+  };
 
   // Undecided is a state worth returning to, so the button cycles through it
   // rather than only swapping between the two sides.
@@ -563,6 +572,7 @@ const App: React.FC = () => {
             onShowBuilds={setBuildsFor}
             onToggleStarter={handleToggleStarter}
             onCycleSide={handleCycleSide}
+            onToggleActive={handleToggleActive}
             builds={builds}
             weaponSets={weaponSets}
             canManageRanks={!ranksLocked}

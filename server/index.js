@@ -326,7 +326,7 @@ app.get('/api/state', requireAuth, asHandler(async (_req, res) => {
   const [players, ranks, sessions] = await Promise.all([
     pool.query(
       `SELECT id, name, role, level, sect, platform, status, rank_id AS "rankId", notes,
-              game_uid AS "gameUid", online_id AS "onlineId", is_starter AS "isStarter", war_side AS "warSide"
+              game_uid AS "gameUid", online_id AS "onlineId", is_starter AS "isStarter", war_side AS "warSide", is_active AS "isActive"
          FROM players WHERE guild_id = $1 ORDER BY name`,
       [GUILD_ID],
     ),
@@ -412,7 +412,7 @@ app.get('/api/players/:id/scans', requireAuth, asHandler(async (req, res) => {
 const WAR_SIDES = ['attack', 'defense'];
 
 app.patch('/api/players/:id/flags', requireAuth, requirePermission('roster.edit'), asHandler(async (req, res) => {
-  const { isStarter, warSide } = req.body ?? {};
+  const { isStarter, warSide, isActive } = req.body ?? {};
   if (warSide !== undefined && warSide !== null && !WAR_SIDES.includes(warSide)) {
     return res.status(400).json({ error: 'warSide must be attack, defense or null' });
   }
@@ -420,13 +420,18 @@ app.patch('/api/players/:id/flags', requireAuth, requirePermission('roster.edit'
   const { rows } = await pool.query(
     `UPDATE players
         SET is_starter = COALESCE($1, is_starter),
-            war_side   = CASE WHEN $2::boolean THEN $3 ELSE war_side END
-      WHERE guild_id = $4 AND id = $5
+            war_side   = CASE WHEN $2::boolean THEN $3 ELSE war_side END,
+            is_active  = COALESCE($4, is_active),
+            -- Somebody who has left is not being fielded on Saturday.
+            is_starter = CASE WHEN $4::boolean IS false THEN false
+                              ELSE COALESCE($1, is_starter) END
+      WHERE guild_id = $5 AND id = $6
       RETURNING id`,
     [
       isStarter === undefined ? null : Boolean(isStarter),
       warSide !== undefined,
       warSide ?? null,
+      isActive === undefined ? null : Boolean(isActive),
       GUILD_ID,
       req.params.id,
     ],

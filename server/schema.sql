@@ -123,6 +123,11 @@ ALTER TABLE players ADD COLUMN IF NOT EXISTS is_starter BOOLEAN NOT NULL DEFAULT
 -- undecided. A leader's call, like the two above, and never read from a sweep.
 ALTER TABLE players ADD COLUMN IF NOT EXISTS war_side TEXT;
 
+-- Whether they are still in the guild. Someone who leaves is deactivated
+-- rather than deleted: their scan history is what says whether taking them
+-- back is a good idea, and deleting the row would take it with them.
+ALTER TABLE players ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true;
+
 CREATE UNIQUE INDEX IF NOT EXISTS players_game_uid_idx
   ON players (guild_id, game_uid) WHERE game_uid IS NOT NULL;
 

@@ -92,6 +92,7 @@ export interface Player {
   notes?: string;
   isStarter?: boolean;
   warSide?: WarSide | null;
+  isActive?: boolean;
 }
 
 // Which half of a guild war someone is fielded in. Undecided is a real state:

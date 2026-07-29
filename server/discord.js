@@ -77,11 +77,17 @@ export async function finishDiscord(req, res, secret) {
 
   const profile = await exchange(String(code));
   const { rows } = await pool.query(
-    `SELECT id, username, role, disabled, player_id AS "playerId"
-       FROM users WHERE guild_id = $1 AND discord_id = $2`,
+    `SELECT u.id, u.username, u.role, u.disabled, u.player_id AS "playerId",
+            COALESCE(p.is_active, true) AS "memberActive"
+       FROM users u
+       LEFT JOIN players p ON p.guild_id = u.guild_id AND p.id = u.player_id
+      WHERE u.guild_id = $1 AND u.discord_id = $2`,
     [GUILD_ID, profile.id],
   );
 
+  if (rows[0] && !rows[0].memberActive) {
+    throw Object.assign(new Error('ese miembro ya no esta en el gremio'), { status: 403 });
+  }
   if (rows[0] && !rows[0].disabled) {
     // Keep the display name current: people rename themselves on Discord.
     await pool.query(`UPDATE users SET discord_username = $1 WHERE id = $2`, [profile.username, rows[0].id]);
