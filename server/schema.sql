@@ -300,6 +300,11 @@ CREATE INDEX IF NOT EXISTS wars_recent_idx ON wars (guild_id, started_at DESC);
 -- Who fought, where, and what they contributed. Written when a war starts,
 -- from the deployment as it stood, and never rewritten afterwards: the point
 -- of a record is that it says what happened, not what the plan is now.
+-- The plans both sides were arranged against, copied whole rather than
+-- referenced: a strategy goes on being edited after the war, and a record of
+-- what happened must not change with it.
+ALTER TABLE wars ADD COLUMN IF NOT EXISTS plans JSONB NOT NULL DEFAULT '{}'::jsonb;
+
 CREATE TABLE IF NOT EXISTS war_participants (
   war_id       TEXT NOT NULL REFERENCES wars(id) ON DELETE CASCADE,
   player_id    TEXT NOT NULL,
@@ -310,3 +315,7 @@ CREATE TABLE IF NOT EXISTS war_participants (
 );
 
 CREATE INDEX IF NOT EXISTS war_participants_player_idx ON war_participants (player_id);
+
+-- What they were sent to do and what they brought, frozen with the rest.
+ALTER TABLE war_participants ADD COLUMN IF NOT EXISTS unit_ids JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE war_participants ADD COLUMN IF NOT EXISTS build_id TEXT;

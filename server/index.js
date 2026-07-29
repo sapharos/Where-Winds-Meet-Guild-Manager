@@ -15,8 +15,11 @@ import {
   listStrategies,
   saveStrategy,
   deleteStrategy,
-  getActiveStrategies,
+  getBoard,
   setActiveStrategy,
+  setLock,
+  startWar,
+  endWar,
 } from './war.js';
 import {
   discordEnabled,
@@ -482,12 +485,24 @@ app.get('/api/war/strategies', requireAuth, asHandler(async (_req, res) => {
   res.json(await listStrategies());
 }));
 
-app.get('/api/war/active', requireAuth, asHandler(async (_req, res) => {
-  res.json(await getActiveStrategies());
+app.get('/api/war/board', requireAuth, asHandler(async (_req, res) => {
+  res.json(await getBoard());
 }));
 
 app.put('/api/war/active/:side', requireAuth, requirePermission('war.edit'), asHandler(async (req, res) => {
   res.json(await setActiveStrategy(req.params.side, req.body?.strategy ?? null));
+}));
+
+app.put('/api/war/lock/:side', requireAuth, requirePermission('war.edit'), asHandler(async (req, res) => {
+  res.json(await setLock(req.params.side, req.body?.locked === true));
+}));
+
+app.post('/api/war/wars', requireAuth, requirePermission('war.edit'), asHandler(async (req, res) => {
+  res.json(await startWar(req.body?.name));
+}));
+
+app.post('/api/war/wars/:id/end', requireAuth, requirePermission('war.edit'), asHandler(async (req, res) => {
+  res.json(await endWar(req.params.id));
 }));
 
 app.put('/api/war/strategies', requireAuth, requirePermission('war.edit'), asHandler(async (req, res) => {

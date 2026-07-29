@@ -30,6 +30,7 @@ export async function getDeployments() {
  */
 export async function setUnits(side, playerId, unitIds) {
   if (!SIDES.includes(side)) throw Object.assign(new Error('unknown side'), { status: 400 });
+  await assertOpen(side);
 
   const wanted = Array.isArray(unitIds) ? unitIds : [];
   const clean = [...new Set(wanted.filter((id) => typeof id === 'string' && id))].slice(0, 24);
@@ -52,6 +53,7 @@ export async function setUnits(side, playerId, unitIds) {
  */
 export async function place(side, lane, playerId) {
   if (!SIDES.includes(side)) throw Object.assign(new Error('unknown side'), { status: 400 });
+  await assertOpen(side);
 
   if (lane === null) {
     await pool.query(`DELETE FROM war_deployments WHERE guild_id = $1 AND side = $2 AND player_id = $3`, [
@@ -129,6 +131,7 @@ export async function place(side, lane, playerId) {
  */
 export async function setBuild(side, playerId, buildId) {
   if (!SIDES.includes(side)) throw Object.assign(new Error('unknown side'), { status: 400 });
+  await assertOpen(side);
 
   if (buildId) {
     const { rows } = await pool.query(
@@ -149,8 +152,90 @@ export async function setBuild(side, playerId, buildId) {
 
 export async function clearSide(side) {
   if (!SIDES.includes(side)) throw Object.assign(new Error('unknown side'), { status: 400 });
+  await assertOpen(side);
   await pool.query(`DELETE FROM war_deployments WHERE guild_id = $1 AND side = $2`, [GUILD_ID, side]);
   return { cleared: side };
+}
+
+/* ------------------------------------------------------------------ wars */
+
+export async function currentWar() {
+  const { rows } = await pool.query(
+    `SELECT id, name, started_at AS "startedAt" FROM wars
+      WHERE guild_id = $1 AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1`,
+    [GUILD_ID],
+  );
+  return rows[0] ?? null;
+}
+
+/**
+ * Begin a war: take down who stands where, and under what plan.
+ *
+ * A copy rather than a reference to the board, because the board goes on being
+ * rearranged for next week and the record of a war must not follow it. Both
+ * sides have to be settled first -- half a line-up is not a line-up.
+ */
+export async function startWar(name) {
+  if (await currentWar()) {
+    throw Object.assign(new Error('ya hay una guerra en curso'), { status: 409 });
+  }
+  for (const side of SIDES) {
+    if (!(await isLocked(side))) {
+      throw Object.assign(
+        new Error('bloquea las dos formaciones antes de iniciar la guerra'),
+        { status: 409 },
+      );
+    }
+  }
+
+  const deployed = await getDeployments();
+  if (!deployed.length) {
+    throw Object.assign(new Error('no hay nadie desplegado'), { status: 409 });
+  }
+
+  const strategies = await listStrategies();
+  const { active } = await getBoard();
+  const plans = {};
+  for (const side of SIDES) {
+    plans[side] = strategies.find((s) => s.id === active[side]) ?? null;
+  }
+
+  const id = randomUUID();
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      `INSERT INTO wars (id, guild_id, name, plans) VALUES ($1, $2, $3, $4)`,
+      [id, GUILD_ID, String(name ?? '').trim() || 'Guerra de gremio', JSON.stringify(plans)],
+    );
+    for (const d of deployed) {
+      await client.query(
+        `INSERT INTO war_participants (war_id, player_id, side, lane, unit_ids, build_id)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [id, d.playerId, d.side, d.lane, JSON.stringify(d.unitIds ?? []), d.buildId ?? null],
+      );
+    }
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+
+  return { id, participants: deployed.length };
+}
+
+/** Close the war and open both boards again for the next one. */
+export async function endWar(id) {
+  const { rowCount } = await pool.query(
+    `UPDATE wars SET ended_at = now() WHERE id = $1 AND guild_id = $2 AND ended_at IS NULL`,
+    [id, GUILD_ID],
+  );
+  if (!rowCount) throw Object.assign(new Error('esa guerra no esta en curso'), { status: 404 });
+
+  await pool.query(`DELETE FROM app_settings WHERE key = ANY($1)`, [SIDES.map(lockKey)]);
+  return { ended: id };
 }
 
 /* ------------------------------------------------------------ strategies */
@@ -198,20 +283,63 @@ function cleanUnits(raw) {
 // that names them -- a selection that lived in one tab would make everyone
 // else's assignments look like they had vanished.
 const activeKey = (side) => `war_strategy:${GUILD_ID}:${side}`;
+const lockKey = (side) => `war_locked:${GUILD_ID}:${side}`;
 
-export async function getActiveStrategies() {
+/** The plan in force and whether each side is settled, for the whole war. */
+export async function getBoard() {
   const { rows } = await pool.query(`SELECT key, value FROM app_settings WHERE key = ANY($1)`, [
-    SIDES.map(activeKey),
+    [...SIDES.map(activeKey), ...SIDES.map(lockKey)],
   ]);
+  const value = (key) => rows.find((r) => r.key === key)?.value ?? null;
+
   const active = {};
+  const locked = {};
   for (const side of SIDES) {
-    active[side] = rows.find((r) => r.key === activeKey(side))?.value ?? null;
+    active[side] = value(activeKey(side));
+    locked[side] = value(lockKey(side)) === 'true';
   }
-  return active;
+  return { active, locked, current: await currentWar() };
+}
+
+/**
+ * Settle a side, or open it again.
+ *
+ * A locked side is the line-up as it will be fielded, so the server stops
+ * accepting changes to it rather than trusting every screen to hide its own
+ * buttons: the point of settling is that it cannot drift afterwards.
+ */
+export async function setLock(side, locked) {
+  if (!SIDES.includes(side)) throw Object.assign(new Error('unknown side'), { status: 400 });
+
+  if (locked) {
+    await pool.query(
+      `INSERT INTO app_settings (key, value) VALUES ($1, 'true')
+       ON CONFLICT (key) DO UPDATE SET value = 'true'`,
+      [lockKey(side)],
+    );
+  } else {
+    if (await currentWar()) {
+      throw Object.assign(new Error('hay una guerra en curso: finalizala primero'), { status: 409 });
+    }
+    await pool.query(`DELETE FROM app_settings WHERE key = $1`, [lockKey(side)]);
+  }
+  return { locked: Boolean(locked) };
+}
+
+async function isLocked(side) {
+  const { rows } = await pool.query(`SELECT value FROM app_settings WHERE key = $1`, [lockKey(side)]);
+  return rows[0]?.value === 'true';
+}
+
+async function assertOpen(side) {
+  if (await isLocked(side)) {
+    throw Object.assign(new Error('esa formacion esta bloqueada'), { status: 409 });
+  }
 }
 
 export async function setActiveStrategy(side, id) {
   if (!SIDES.includes(side)) throw Object.assign(new Error('unknown side'), { status: 400 });
+  await assertOpen(side);
 
   if (!id) {
     await pool.query(`DELETE FROM app_settings WHERE key = $1`, [activeKey(side)]);

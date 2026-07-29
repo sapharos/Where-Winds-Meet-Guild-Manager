@@ -30,6 +30,12 @@ const ROLE_TEXT: Record<Role, string> = {
   [Role.DPS]: 'text-red-400',
 };
 
+interface WarBoardState {
+  active: Record<WarSide, string | null>;
+  locked: Record<WarSide, boolean>;
+  current: { id: string; name: string; startedAt: string } | null;
+}
+
 interface Props {
   players: Player[];
   builds: PlayerBuild[];
@@ -66,6 +72,8 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
   const [deployments, setDeployments] = useState<Deployment[]>([]);
   const [strategies, setStrategies] = useState<WarStrategy[]>([]);
   const [inForce, setInForce] = useState<Record<WarSide, string | null>>({ attack: null, defense: null });
+  const [locked, setLocked] = useState<Record<WarSide, boolean>>({ attack: false, defense: false });
+  const [war, setWar] = useState<{ id: string; name: string; startedAt: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState<'' | Role>('');
@@ -82,12 +90,12 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
     const plans = await api<WarStrategy[]>('/war/strategies').catch(() => []);
     // Strategies written before units existed come back without them.
     setStrategies(plans.map((s) => ({ ...s, units: s.units ?? [] })));
-    setInForce(
-      await api<Record<WarSide, string | null>>('/war/active').catch(() => ({
-        attack: null,
-        defense: null,
-      })),
-    );
+    const board = await api<WarBoardState>('/war/board').catch(() => null);
+    if (board) {
+      setInForce(board.active);
+      setLocked(board.locked);
+      setWar(board.current);
+    }
   };
 
   // Choosing the plan is a change to the war, not to this browser: it is what
@@ -139,6 +147,9 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
 
   const placed = new Set(here.map((d) => d.playerId));
   const full = deployments.length >= WAR_CAPACITY;
+  // A settled side is read-only: this is the line-up as it will be fielded.
+  const shut = locked[side];
+  const arranging = canEdit && !shut;
   const unitsOf = new Map<string, string[]>(here.map((d) => [d.playerId, d.unitIds ?? []]));
   // Where somebody stands on the other board: nobody fights both halves, so
   // this is what makes them unavailable here.
@@ -233,6 +244,39 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
     }
   };
 
+  const setLockFor = async (value: boolean) => {
+    setError(null);
+    try {
+      await api(`/war/lock/${side}`, { method: 'PUT', body: JSON.stringify({ locked: value }) });
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo bloquear la formación');
+    }
+  };
+
+  const begin = async () => {
+    const name = window.prompt('Nombre de la guerra', `Guerra ${new Date().toLocaleDateString('es')}`);
+    if (name === null) return;
+    setError(null);
+    try {
+      await api('/war/wars', { method: 'POST', body: JSON.stringify({ name }) });
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo iniciar la guerra');
+    }
+  };
+
+  const finish = async () => {
+    if (!war || !window.confirm(`¿Finalizar «${war.name}»? Se abrirán las dos formaciones.`)) return;
+    setError(null);
+    try {
+      await api(`/war/wars/${war.id}/end`, { method: 'POST' });
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo finalizar la guerra');
+    }
+  };
+
   const clear = async () => {
     if (!window.confirm(`¿Vaciar todo el despliegue de ${WAR_SIDE_LABELS[side]}?`)) return;
     await api(`/war/deployments/${side}`, { method: 'DELETE' }).catch(() => undefined);
@@ -265,7 +309,7 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
           <div className="flex items-center gap-2 flex-wrap">
             <select
               value={inForce[side] ?? ''}
-              disabled={!canEdit}
+              disabled={!arranging}
               onChange={(e) => choose(e.target.value)}
               className="bg-slate-950 border border-slate-800 rounded p-2 text-sm outline-none focus:ring-1 focus:ring-amber-500 disabled:text-slate-500"
             >
@@ -296,13 +340,80 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
               {deployments.length} / {WAR_CAPACITY} desplegados
               <span className="text-slate-600"> ({here.length} aquí)</span>
             </span>
-            {canEdit && here.length > 0 && (
+            {arranging && here.length > 0 && (
               <button onClick={clear} className="text-xs text-slate-500 hover:text-red-400 px-2 py-2 transition-all">
                 Vaciar
               </button>
             )}
           </div>
         </div>
+
+        {/* Settling a side says "this is who goes". Both settled is what makes
+            starting a war possible, since half a line-up is not a line-up. */}
+        {canEdit && (
+          <div className="mt-3 pt-3 border-t border-slate-800 flex items-center gap-3 flex-wrap">
+            <button
+              onClick={() => setLockFor(!shut)}
+              disabled={Boolean(war)}
+              title={
+                war
+                  ? 'Hay una guerra en curso'
+                  : shut
+                    ? 'Volver a abrir esta formación para cambiarla'
+                    : 'Dar por cerrada esta formación'
+              }
+              className={`text-sm font-bold px-4 py-2 rounded border transition-all flex items-center gap-2 disabled:opacity-40 ${
+                shut
+                  ? 'border-amber-500 text-amber-400 bg-amber-500/10'
+                  : 'border-slate-800 text-slate-400 hover:text-amber-500 hover:border-amber-700'
+              }`}
+            >
+              <i className={`fa-solid ${shut ? 'fa-lock' : 'fa-lock-open'}`}></i>
+              {shut ? `${WAR_SIDE_LABELS[side]} bloqueado` : `Bloquear ${WAR_SIDE_LABELS[side]}`}
+            </button>
+
+            <span className="text-[11px] text-slate-500">
+              {(['attack', 'defense'] as WarSide[]).map((s) => (
+                <span key={s} className={locked[s] ? 'text-amber-500/80' : ''}>
+                  <i className={`fa-solid ${locked[s] ? 'fa-lock' : 'fa-lock-open'} mr-1`}></i>
+                  {WAR_SIDE_LABELS[s]}
+                  {s === 'attack' ? ' · ' : ''}
+                </span>
+              ))}
+            </span>
+
+            <div className="flex-1" />
+
+            {war ? (
+              <>
+                <span className="text-sm text-amber-400 font-bold flex items-center gap-2">
+                  <i className="fa-solid fa-fire"></i>
+                  {war.name} en curso
+                </span>
+                <button
+                  onClick={finish}
+                  className="text-sm font-bold px-4 py-2 rounded border border-slate-700 text-slate-300 hover:text-white transition-all"
+                >
+                  Finalizar guerra
+                </button>
+              </>
+            ) : (
+              <button
+                onClick={begin}
+                disabled={!locked.attack || !locked.defense}
+                title={
+                  locked.attack && locked.defense
+                    ? 'Congela quién está desplegado y dónde'
+                    : 'Bloquea las dos formaciones primero'
+                }
+                className="bg-red-700 hover:bg-red-600 disabled:bg-slate-800 disabled:text-slate-600 text-white text-sm font-bold py-2 px-5 rounded transition-all flex items-center gap-2"
+              >
+                <i className="fa-solid fa-flag"></i>
+                Iniciar guerra
+              </button>
+            )}
+          </div>
+        )}
 
         {error && (
           <div className="mt-3 text-sm rounded-lg px-4 py-2 flex items-center gap-3 border bg-red-950/60 border-red-900 text-red-200">
@@ -379,7 +490,7 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
         </div>
       )}
 
-      <div className="grid lg:grid-cols-4 gap-4">
+      <div className={`grid gap-4 ${shut ? 'lg:grid-cols-3' : 'lg:grid-cols-4'}`}>
         {WAR_LANES.map((lane) => {
           const members = inLane(lane.id);
           const target = strategy?.composition?.[lane.id];
@@ -452,7 +563,7 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
                             <span className="truncate">{build?.name ?? ROLE_NAMES[p.role]}</span>
                           </p>
                         </div>
-                        {canEdit && (
+                        {arranging && (
                           <button
                             onClick={() => move(p.id, null)}
                             title="Quitar de la línea"
@@ -465,7 +576,7 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
 
                       {/* Which build they should bring. Only worth asking of
                           somebody who has more than one to choose between. */}
-                      {canEdit && mine.length > 1 && (
+                      {arranging && mine.length > 1 && (
                         <select
                           value={buildIdOf.get(p.id) ?? ''}
                           onChange={(e) => useBuild(p.id, e.target.value || null)}
@@ -491,13 +602,13 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
                       {strategy && strategy.units.length > 0 && (
                         <div className="mt-1.5 flex flex-wrap gap-1">
                           {strategy.units
-                            .filter((u) => canEdit || held.includes(u.id))
+                            .filter((u) => arranging || held.includes(u.id))
                             .map((u) => {
                               const on = held.includes(u.id);
                               return (
                                 <button
                                   key={u.id}
-                                  disabled={!canEdit}
+                                  disabled={!arranging}
                                   onClick={() => toggleUnit(p.id, u.id)}
                                   title={on ? `Quitar de ${u.name}` : `Añadir a ${u.name}`}
                                   className={`text-[10px] px-1.5 py-0.5 rounded border flex items-center gap-1 max-w-full transition-all ${
@@ -527,6 +638,9 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
           );
         })}
 
+        {/* Nobody left to field once the side is settled, so the bench goes
+            away rather than sitting there offering what cannot be done. */}
+        {!shut && (
         <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
           <div className="flex items-center justify-between mb-3">
             <h3 className="cinzel font-bold text-lg text-slate-300">Disponibles</h3>
@@ -637,6 +751,7 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
             )}
           </div>
         </section>
+        )}
       </div>
 
       {planning && (
