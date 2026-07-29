@@ -40,6 +40,8 @@ const WarBoard: React.FC<Props> = ({ players, builds, canEdit }) => {
   const [strategies, setStrategies] = useState<WarStrategy[]>([]);
   const [chosen, setChosen] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [roleFilter, setRoleFilter] = useState<'' | Role>('');
 
   const load = async () => {
     setDeployments(await api<Deployment[]>('/war/deployments').catch(() => []));
@@ -69,7 +71,18 @@ const WarBoard: React.FC<Props> = ({ players, builds, canEdit }) => {
     here.filter((d) => d.lane === lane).map((d) => byId.get(d.playerId)).filter(Boolean) as Player[];
 
   const placed = new Set(here.map((d) => d.playerId));
-  const bench = active.filter((p) => !placed.has(p.id));
+
+  const needle = search.trim().toLowerCase();
+  const bench = active
+    .filter((p) => !placed.has(p.id))
+    .filter((p) => !needle || p.name.toLowerCase().includes(needle))
+    .filter((p) => !roleFilter || rolesOf(p).includes(roleFilter))
+    // Whoever is most likely to be picked rises: starters first, and within
+    // them the ones already earmarked for the side being arranged.
+    .sort((a, b) => {
+      const rank = (p: Player) => (p.isStarter ? 2 : 0) + (p.warSide === side ? 1 : 0);
+      return rank(b) - rank(a) || a.name.localeCompare(b.name);
+    });
 
   const strategy = strategies.find((s) => s.id === chosen && s.side === side);
 
@@ -230,10 +243,48 @@ const WarBoard: React.FC<Props> = ({ players, builds, canEdit }) => {
             <span className="text-sm text-slate-500 tabular-nums">{bench.length}</span>
           </div>
 
+          <div className="space-y-2 mb-3">
+            <div className="relative">
+              <i className="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-600 text-xs"></i>
+              <input
+                type="text"
+                value={search}
+                placeholder="Buscar por nombre..."
+                onChange={(e) => setSearch(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 rounded p-2 pl-8 text-sm outline-none focus:ring-1 focus:ring-amber-500"
+              />
+            </div>
+            <select
+              value={roleFilter}
+              onChange={(e) => setRoleFilter(e.target.value as '' | Role)}
+              className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
+            >
+              <option value="">Todos los roles</option>
+              {Object.values(Role).map((r) => (
+                <option key={r} value={r}>
+                  {ROLE_NAMES[r]}
+                </option>
+              ))}
+            </select>
+          </div>
+
           <div className="space-y-1.5 max-h-[520px] overflow-y-auto custom-scrollbar pr-1">
             {bench.map((p) => (
               <div key={p.id} className="bg-slate-950/70 border border-slate-800 rounded p-2">
-                <p className="text-sm text-slate-100 truncate">{p.name}</p>
+                <div className="flex items-center gap-1.5 min-w-0">
+                  {p.isStarter && (
+                    <i className="fa-solid fa-star text-amber-400 text-[10px] shrink-0" title="Titular"></i>
+                  )}
+                  {p.warSide && (
+                    <i
+                      className={`fa-solid text-[10px] shrink-0 ${
+                        p.warSide === 'attack' ? 'fa-khanda text-red-400' : 'fa-shield text-sky-400'
+                      }`}
+                      title={WAR_SIDE_LABELS[p.warSide]}
+                    ></i>
+                  )}
+                  <p className="text-sm text-slate-100 truncate">{p.name}</p>
+                </div>
                 <p className="text-[10px] text-slate-500 mb-1.5">
                   {rolesOf(p).map((r) => ROLE_NAMES[r]).join(' · ')}
                 </p>
@@ -255,7 +306,11 @@ const WarBoard: React.FC<Props> = ({ players, builds, canEdit }) => {
                 )}
               </div>
             ))}
-            {!bench.length && <p className="text-xs text-slate-600 italic py-3 text-center">Todos asignados</p>}
+            {!bench.length && (
+              <p className="text-xs text-slate-600 italic py-3 text-center">
+                {needle || roleFilter ? 'Nadie coincide con el filtro' : 'Todos asignados'}
+              </p>
+            )}
           </div>
         </section>
       </div>
