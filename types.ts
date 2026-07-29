@@ -90,6 +90,7 @@ export interface Player {
   status: MembershipStatus;
   rankId?: string; 
   notes?: string;
+  isStarter?: boolean;
 }
 
 export interface WarAssignment {

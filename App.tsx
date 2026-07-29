@@ -1,9 +1,9 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Peer } from 'peerjs';
-import { Player, GuildWarSession, Lane, TacticalGroup, MembershipStatus, GuildRank, PeerRole, SyncPacket, ROLE_LABELS } from './types';
+import { Player, GuildWarSession, Lane, TacticalGroup, MembershipStatus, GuildRank, PeerRole, SyncPacket, ROLE_LABELS, PlayerBuild, WeaponSet } from './types';
 import { storageService } from './services/storageService';
-import { authService, ApiError, Session } from './services/authService';
+import { authService, api, ApiError, Session } from './services/authService';
 import { DEFAULT_GROUPS } from './constants';
 import MemberManager from './components/MemberManager';
 import WarPlanner from './components/WarPlanner';
@@ -23,6 +23,8 @@ const App: React.FC = () => {
   const [players, setPlayers] = useState<Player[]>([]);
   const [sessions, setSessions] = useState<GuildWarSession[]>([]);
   const [ranks, setRanks] = useState<GuildRank[]>([]);
+  const [builds, setBuilds] = useState<PlayerBuild[]>([]);
+  const [weaponSets, setWeaponSets] = useState<WeaponSet[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -73,6 +75,16 @@ const App: React.FC = () => {
 
       setPlayers(loadedPlayers);
       setSessions(loadedSessions);
+
+      // Builds and their weapon sets paint the roster cards, so they load with
+      // everything else. A failure here must not hide the roster itself.
+      void Promise.all([
+        api<PlayerBuild[]>('/builds').catch(() => []),
+        api<WeaponSet[]>('/weapon-sets').catch(() => []),
+      ]).then(([loadedBuilds, loadedSets]) => {
+        setBuilds(loadedBuilds);
+        setWeaponSets(loadedSets);
+      });
 
       // The first visitor to an empty guild seeds the defaults, but only if
       // their role is allowed to write them -- a plain member signing in first
@@ -299,6 +311,15 @@ const App: React.FC = () => {
     if (e.target) e.target.value = '';
   };
 
+  const handleToggleStarter = (p: Player) => {
+    if (rosterLocked) return;
+    const next = !p.isStarter;
+    setPlayers((prev) => prev.map((x) => (x.id === p.id ? { ...x, isStarter: next } : x)));
+    persist(
+      api(`/players/${p.id}/starter`, { method: 'PATCH', body: JSON.stringify({ isStarter: next }) }),
+    );
+  };
+
   const handleLogin = async (username: string, password: string) => {
     setSession(await authService.login(username, password));
   };
@@ -501,6 +522,9 @@ const App: React.FC = () => {
             onDeleteRank={handleDeleteRank}
             onShowHistory={setHistoryFor}
             onShowBuilds={setBuildsFor}
+            onToggleStarter={handleToggleStarter}
+            builds={builds}
+            weaponSets={weaponSets}
             canManageRanks={!ranksLocked}
           />
         ) : (

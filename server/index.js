@@ -180,7 +180,7 @@ app.get('/api/state', requireAuth, asHandler(async (_req, res) => {
   const [players, ranks, sessions] = await Promise.all([
     pool.query(
       `SELECT id, name, role, level, sect, platform, status, rank_id AS "rankId", notes,
-              game_uid AS "gameUid", online_id AS "onlineId"
+              game_uid AS "gameUid", online_id AS "onlineId", is_starter AS "isStarter"
          FROM players WHERE guild_id = $1 ORDER BY name`,
       [GUILD_ID],
     ),
@@ -257,6 +257,17 @@ app.get('/api/scans', requireAuth, asHandler(async (_req, res) => {
 
 app.get('/api/players/:id/scans', requireAuth, asHandler(async (req, res) => {
   res.json(await historyFor(req.params.id));
+}));
+
+// A single flag, so it gets its own route rather than resending the roster --
+// which would also race with anyone else editing at the same moment.
+app.patch('/api/players/:id/starter', requireAuth, requirePermission('roster.edit'), asHandler(async (req, res) => {
+  const { rows } = await pool.query(
+    `UPDATE players SET is_starter = $1 WHERE guild_id = $2 AND id = $3 RETURNING id`,
+    [Boolean(req.body?.isStarter), GUILD_ID, req.params.id],
+  );
+  if (!rows.length) return res.status(404).json({ error: 'no such member' });
+  res.json({ ok: true });
 }));
 
 /* ---------------------------------------------------------- weapon sets */

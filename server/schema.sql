@@ -81,6 +81,10 @@ ALTER TABLE players ADD COLUMN IF NOT EXISTS online_id TEXT;
 -- yet can be classified properly later without rescanning.
 ALTER TABLE players ADD COLUMN IF NOT EXISTS game_position TEXT;
 
+-- Who is fielded on war day. A leader's decision, like rank: never read from a
+-- screenshot, and never cleared by a sweep.
+ALTER TABLE players ADD COLUMN IF NOT EXISTS is_starter BOOLEAN NOT NULL DEFAULT false;
+
 CREATE UNIQUE INDEX IF NOT EXISTS players_game_uid_idx
   ON players (guild_id, game_uid) WHERE game_uid IS NOT NULL;
 
