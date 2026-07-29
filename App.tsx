@@ -6,7 +6,6 @@ import { storageService } from './services/storageService';
 import { authService, api, ApiError, Session } from './services/authService';
 import { DEFAULT_GROUPS } from './constants';
 import MemberManager from './components/MemberManager';
-import WarPlanner from './components/WarPlanner';
 import WarBoard from './components/WarBoard';
 import CollaborationPanel from './components/CollaborationPanel';
 import LoginScreen from './components/LoginScreen';
@@ -21,7 +20,7 @@ const App: React.FC = () => {
   const [session, setSession] = useState<Session | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
   const [activeTab, setActiveTab] = useState<
-    'me' | 'roster' | 'war-room' | 'war-legacy' | 'scan' | 'admin'
+    'me' | 'roster' | 'war-room' | 'scan' | 'admin'
   >('roster');
   const [historyFor, setHistoryFor] = useState<Player | null>(null);
   const [buildsFor, setBuildsFor] = useState<Player | null>(null);
@@ -627,18 +626,7 @@ const App: React.FC = () => {
             canManageRanks={!ranksLocked}
           />
         ) : (
-          activeSession ? (
-            <WarPlanner
-              players={players}
-              isViewer={warLocked}
-              activeSession={{...activeSession, ranks} as any}
-              onUpdateSession={handleUpdateSession}
-            />
-          ) : (
-            <div className="flex items-center justify-center h-96">
-               <p className="text-slate-500">Preparando la interfaz táctica...</p>
-            </div>
-          )
+          <WarBoard players={players} builds={builds} canEdit={!warLocked} />
         )}
       </main>
 
