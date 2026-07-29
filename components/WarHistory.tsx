@@ -3,6 +3,7 @@ import { api } from '../services/authService';
 import { impactOf } from '../services/impact';
 import { WAR_MATCH_TYPE_LABELS, WAR_SIDE_LABELS, WarLane, WarMatchType, WarSide } from '../types';
 import ResultsReader from './ResultsReader';
+import FigureCell from './FigureCell';
 
 interface WarRow {
   id: string;
@@ -96,6 +97,9 @@ const WarHistory: React.FC<Props> = ({ canEdit, onClose, onChanged }) => {
   const [message, setMessage] = useState<{ text: string; ok: boolean } | null>(null);
   const [zoom, setZoom] = useState<string | null>(null);
   const [reading, setReading] = useState(false);
+  // Impact first, because a results table nobody ordered is read top to bottom
+  // looking for who mattered, and that is the column that answers it.
+  const [sort, setSort] = useState<{ key: string; desc: boolean }>({ key: 'impact', desc: true });
   const drop = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -160,6 +164,41 @@ const WarHistory: React.FC<Props> = ({ canEdit, onClose, onChanged }) => {
   );
 
   /**
+   * The rows in the order asked for.
+   *
+   * A missing figure sorts as if it were nothing rather than as zero: somebody
+   * whose row was never read should not be ranked above somebody who genuinely
+   * healed nothing, and the two look identical once you call them both 0.
+   */
+  const ordered = useMemo(() => {
+    const rows = [...(detail?.participants ?? [])];
+    const of = (p: Participant): string | number => {
+      if (sort.key === 'name') return p.name.toLowerCase();
+      if (sort.key === 'side') return p.side;
+      if (sort.key === 'impact') return scores.get(p.playerId) ?? 0;
+      return p.stats?.[sort.key] ?? -1;
+    };
+    return rows.sort((a, b) => {
+      const left = of(a);
+      const right = of(b);
+      const gap =
+        typeof left === 'string' && typeof right === 'string'
+          ? left.localeCompare(right)
+          : Number(left) - Number(right);
+      return (sort.desc ? -gap : gap) || a.name.localeCompare(b.name);
+    });
+  }, [detail, scores, sort]);
+
+  // Numbers open on their biggest, names on their first letter -- whichever way
+  // round the reader would have clicked twice to reach.
+  const sortBy = (key: string) =>
+    setSort((current) =>
+      current.key === key
+        ? { key, desc: !current.desc }
+        : { key, desc: key !== 'name' && key !== 'side' },
+    );
+
+  /**
    * Both are decided in the rush of starting a war, so both are the fields most
    * likely to need a correction afterwards. The list is patched in place rather
    * than reloaded, so a correction does not scroll the reader away from it.
@@ -202,9 +241,8 @@ const WarHistory: React.FC<Props> = ({ canEdit, onClose, onChanged }) => {
     }
   };
 
-  const setFigure = async (playerId: string, key: string, raw: string) => {
+  const setFigure = async (playerId: string, key: string, value: number | null) => {
     if (!chosen) return;
-    const value = raw.trim() === '' ? null : Number(raw.replace(/\./g, ''));
     setDetail((prev) =>
       prev
         ? {
@@ -416,18 +454,32 @@ const WarHistory: React.FC<Props> = ({ canEdit, onClose, onChanged }) => {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="text-[10px] uppercase tracking-wider text-slate-500 text-left">
-                        <th className="py-1 pr-3">Miembro</th>
-                        <th className="py-1 pr-3">Bando</th>
-                        <th className="py-1 pr-3 text-right">Impacto</th>
-                        {FIGURES.map((f) => (
-                          <th key={f.key} className="py-1 pr-3 text-right">
-                            {f.label}
+                        {[
+                          { key: 'name', label: 'Miembro', right: false },
+                          { key: 'side', label: 'Bando', right: false },
+                          { key: 'impact', label: 'Impacto', right: true },
+                          ...FIGURES.map((f) => ({ key: f.key, label: f.label, right: true })),
+                        ].map((column) => (
+                          <th
+                            key={column.key}
+                            onClick={() => sortBy(column.key)}
+                            title={`Ordenar por ${column.label}`}
+                            className={`py-1 pr-3 cursor-pointer select-none hover:text-slate-300 transition-colors ${
+                              column.right ? 'text-right' : ''
+                            } ${sort.key === column.key ? 'text-amber-500' : ''}`}
+                          >
+                            {column.label}
+                            {sort.key === column.key && (
+                              <i
+                                className={`fa-solid ${sort.desc ? 'fa-caret-down' : 'fa-caret-up'} ml-1`}
+                              ></i>
+                            )}
                           </th>
                         ))}
                       </tr>
                     </thead>
                     <tbody>
-                      {detail.participants.map((p) => (
+                      {ordered.map((p) => (
                         <tr key={p.playerId} className="border-t border-slate-800/70">
                           <td className="py-1 pr-3 text-slate-200">{p.name}</td>
                           <td className="py-1 pr-3 text-[11px] text-slate-500">
@@ -438,20 +490,11 @@ const WarHistory: React.FC<Props> = ({ canEdit, onClose, onChanged }) => {
                           </td>
                           {FIGURES.map((f) => (
                             <td key={f.key} className="py-1 pr-3 text-right">
-                              {canEdit ? (
-                                <input
-                                  type="text"
-                                  inputMode="numeric"
-                                  defaultValue={p.stats?.[f.key] ?? ''}
-                                  placeholder="—"
-                                  onBlur={(e) => setFigure(p.playerId, f.key, e.target.value)}
-                                  className="w-24 bg-slate-950 border border-slate-800 rounded px-2 py-1 text-right tabular-nums outline-none focus:ring-1 focus:ring-amber-500"
-                                />
-                              ) : (
-                                <span className="tabular-nums text-slate-300">
-                                  {p.stats?.[f.key]?.toLocaleString('es') ?? '—'}
-                                </span>
-                              )}
+                              <FigureCell
+                                value={p.stats?.[f.key]}
+                                readOnly={!canEdit}
+                                onChange={(value) => setFigure(p.playerId, f.key, value)}
+                              />
                             </td>
                           ))}
                         </tr>

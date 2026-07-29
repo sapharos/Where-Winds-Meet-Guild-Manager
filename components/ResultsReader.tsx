@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { FIGURES } from './WarHistory';
+import FigureCell from './FigureCell';
 
 /**
  * Reading the results screen.
@@ -528,21 +529,31 @@ const ResultsReader: React.FC<Props> = ({ images, participants, onClose, onApply
                             ))}
                           </select>
                         </td>
-                        {FIGURES.map((f) => {
-                          const doubtful = row.doubtful.includes(f.key);
-                          return (
-                            <td
-                              key={f.key}
-                              title={doubtful ? 'Esta columna venía pegada a la siguiente: compruébala' : undefined}
-                              className={`py-1 pr-3 text-right tabular-nums ${
-                                doubtful ? 'text-amber-400 font-bold' : 'text-slate-300'
-                              }`}
-                            >
-                              {doubtful && <i className="fa-solid fa-triangle-exclamation mr-1 text-[10px]"></i>}
-                              {row.figures[f.key]?.toLocaleString('es') ?? '—'}
-                            </td>
-                          );
-                        })}
+                        {FIGURES.map((f) => (
+                          <td key={f.key} className="py-1 pr-3 text-right">
+                            {/* Correctable here, before anything is written.
+                                Catching a misread now costs one double-click;
+                                catching it later means going and finding it. */}
+                            <FigureCell
+                              value={row.figures[f.key]}
+                              flagged={row.doubtful.includes(f.key)}
+                              onChange={(value) =>
+                                setRows((prev) =>
+                                  prev.map((r, i) =>
+                                    i === at
+                                      ? {
+                                          ...r,
+                                          figures: { ...r.figures, [f.key]: value ?? 0 },
+                                          // Corrected by hand, so no longer in doubt.
+                                          doubtful: r.doubtful.filter((key) => key !== f.key),
+                                        }
+                                      : r,
+                                  ),
+                                )
+                              }
+                            />
+                          </td>
+                        ))}
                       </tr>
                     ))}
                   </tbody>
