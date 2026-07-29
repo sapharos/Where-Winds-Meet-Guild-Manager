@@ -12,7 +12,6 @@ interface MemberManagerProps {
   isViewer?: boolean;
   onAdd: (p: Player) => void;
   onUpdate: (p: Player) => void;
-  onDelete: (id: string) => void;
   onAddRank: (r: GuildRank) => void;
   onDeleteRank: (id: string) => void;
   onShowHistory?: (p: Player) => void;
@@ -62,7 +61,6 @@ const MemberManager: React.FC<MemberManagerProps> = ({
   isViewer = false,
   onAdd,
   onUpdate,
-  onDelete,
   onAddRank,
   onDeleteRank,
   onShowHistory,
@@ -382,7 +380,6 @@ const MemberManager: React.FC<MemberManagerProps> = ({
               weaponSets={weaponSets}
               ranks={ranks}
               onEdit={isViewer ? undefined : openEdit}
-              onDelete={isViewer ? undefined : onDelete}
               onShowHistory={onShowHistory}
               onShowBuilds={onShowBuilds}
               onToggleStarter={isViewer ? undefined : onToggleStarter}

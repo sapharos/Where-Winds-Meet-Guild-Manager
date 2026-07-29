@@ -41,7 +41,6 @@ interface PlayerCardProps {
   build?: PlayerBuild;
   weaponSets?: WeaponSet[];
   onEdit?: (p: Player) => void;
-  onDelete?: (id: string) => void;
   onShowHistory?: (p: Player) => void;
   onShowBuilds?: (p: Player) => void;
   onToggleStarter?: (p: Player) => void;
@@ -57,7 +56,6 @@ const PlayerCard: React.FC<PlayerCardProps> = ({
   build,
   weaponSets = [],
   onEdit,
-  onDelete,
   onShowHistory,
   onShowBuilds,
   onToggleStarter,
@@ -235,15 +233,6 @@ const PlayerCard: React.FC<PlayerCardProps> = ({
           {onEdit && (
             <button onClick={() => onEdit(player)} title="Editar" className="text-slate-400 hover:text-white transition-colors">
               <i className="fa-solid fa-pen-to-square"></i>
-            </button>
-          )}
-          {onDelete && (
-            <button
-              onClick={() => onDelete(player.id)}
-              title="Eliminar"
-              className="text-slate-500 hover:text-red-400 transition-colors"
-            >
-              <i className="fa-solid fa-trash-can"></i>
             </button>
           )}
         </div>

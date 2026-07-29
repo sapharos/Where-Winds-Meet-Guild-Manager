@@ -76,8 +76,17 @@ const App: React.FC = () => {
     });
   }, []);
 
-  const loadAllData = useCallback(async () => {
-    setIsLoading(true);
+  /**
+   * Reads everything back from the server.
+   *
+   * `quiet` is for reloading after a change the user made themselves. Without
+   * it the spinner replaces the page, React throws away whatever is mounted,
+   * and the roster comes back with its filters and its search box blank -- so
+   * saving one build costs you the list you had narrowed down to. The data is
+   * already on screen and still valid; only the reason to blank it is missing.
+   */
+  const loadAllData = useCallback(async ({ quiet = false }: { quiet?: boolean } = {}) => {
+    if (!quiet) setIsLoading(true);
     try {
       const { players: loadedPlayers, sessions: loadedSessions, ranks: loadedRanks } =
         await storageService.getState();
@@ -274,21 +283,10 @@ const App: React.FC = () => {
     persist(storageService.savePlayers(updated));
   };
 
-  const handleDeletePlayer = (id: string) => {
-    if (rosterLocked) return;
-    const updated = players.filter(p => p.id !== id);
-    setPlayers(updated);
-    persist(storageService.savePlayers(updated));
-
-    const updatedSessions = sessions.map(s => ({
-      ...s,
-      assignments: s.assignments.filter(a => a.playerId !== id)
-    }));
-    setSessions(updatedSessions);
-    // Dropping a member also clears their deployments, which is a war-room
-    // write and needs that permission separately.
-    if (!warLocked) persist(storageService.saveSessions(updatedSessions));
-  };
+  // Nobody is deleted from the roster: leaving the guild is a change of state,
+  // not the end of a record. Someone marked as gone keeps their scans, their
+  // builds and the wars they fought, which is the whole point of keeping them --
+  // and they can come back without arriving as a stranger.
 
   const handleAddRank = (r: GuildRank) => {
     if (ranksLocked) return;
@@ -629,7 +627,6 @@ const App: React.FC = () => {
             isViewer={rosterLocked}
             onAdd={handleAddPlayer}
             onUpdate={handleUpdatePlayer}
-            onDelete={handleDeletePlayer}
             onAddRank={handleAddRank}
             onDeleteRank={handleDeleteRank}
             onShowHistory={setHistoryFor}
@@ -656,7 +653,7 @@ const App: React.FC = () => {
             (can('builds.manage') || buildsFor.id === session.user.playerId)
           }
           onClose={() => setBuildsFor(null)}
-          onSaved={() => void loadAllData()}
+          onSaved={() => void loadAllData({ quiet: true })}
         />
       )}
 
