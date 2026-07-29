@@ -13,6 +13,7 @@ import {
   WarStrategy,
 } from '../types';
 import { ROLE_NAMES } from './PlayerCard';
+import StrategyPlanner from './StrategyPlanner';
 
 const ROLE_KEYS: Record<Role, 'tank' | 'healer' | 'dps'> = {
   [Role.TANK]: 'tank',
@@ -43,10 +44,13 @@ const WarBoard: React.FC<Props> = ({ players, builds, canEdit }) => {
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState<'' | Role>('');
   const [markFilter, setMarkFilter] = useState<'' | WarSide | 'none'>('');
+  const [planning, setPlanning] = useState(false);
 
   const load = async () => {
     setDeployments(await api<Deployment[]>('/war/deployments').catch(() => []));
-    setStrategies(await api<WarStrategy[]>('/war/strategies').catch(() => []));
+    const plans = await api<WarStrategy[]>('/war/strategies').catch(() => []);
+    // Strategies written before units existed come back without them.
+    setStrategies(plans.map((s) => ({ ...s, units: s.units ?? [] })));
   };
 
   useEffect(() => {
@@ -72,6 +76,7 @@ const WarBoard: React.FC<Props> = ({ players, builds, canEdit }) => {
     here.filter((d) => d.lane === lane).map((d) => byId.get(d.playerId)).filter(Boolean) as Player[];
 
   const placed = new Set(here.map((d) => d.playerId));
+  const unitOf = new Map(here.map((d) => [d.playerId, d.unitId ?? null]));
   // Where somebody stands on the other board: nobody fights both halves, so
   // this is what makes them unavailable here.
   const elsewhere = new Map<string, WarSide>(
@@ -119,6 +124,19 @@ const WarBoard: React.FC<Props> = ({ players, builds, canEdit }) => {
     }
   };
 
+  const assign = async (playerId: string, unit: string | null) => {
+    setError(null);
+    try {
+      await api(`/war/deployments/${side}/${playerId}/unit`, {
+        method: 'PUT',
+        body: JSON.stringify({ unit }),
+      });
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo asignar la unidad');
+    }
+  };
+
   const clear = async () => {
     if (!window.confirm(`¿Vaciar todo el despliegue de ${WAR_SIDE_LABELS[side]}?`)) return;
     await api(`/war/deployments/${side}`, { method: 'DELETE' }).catch(() => undefined);
@@ -161,6 +179,14 @@ const WarBoard: React.FC<Props> = ({ players, builds, canEdit }) => {
                 </option>
               ))}
             </select>
+            <button
+              onClick={() => setPlanning(true)}
+              title="Crear y editar estrategias"
+              className="text-sm text-slate-400 hover:text-amber-500 border border-slate-800 hover:border-amber-700 rounded px-3 py-2 transition-all flex items-center gap-2"
+            >
+              <i className="fa-solid fa-chess"></i>
+              Estrategias
+            </button>
             <span className="text-sm text-slate-500">
               {here.length} / {LANE_CAPACITY * WAR_LANES.length} desplegados
             </span>
@@ -179,6 +205,73 @@ const WarBoard: React.FC<Props> = ({ players, builds, canEdit }) => {
           </div>
         )}
       </div>
+
+      {/* Units cut across the lanes, so they are counted over the whole side
+          rather than inside any one of them. */}
+      {strategy && strategy.units.length > 0 && (
+        <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-4">
+          <div className="flex items-baseline justify-between mb-3 gap-3 flex-wrap">
+            <h3 className="cinzel font-bold text-lg text-slate-300">Unidades tácticas</h3>
+            <span className="text-[11px] text-slate-500">
+              {here.filter((d) => !d.unitId).length} de {here.length} desplegados sin unidad
+            </span>
+          </div>
+
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {strategy.units.map((unit) => {
+              const members = here
+                .filter((d) => d.unitId === unit.id)
+                .map((d) => byId.get(d.playerId))
+                .filter(Boolean) as Player[];
+
+              const counts = { tank: 0, healer: 0, dps: 0 };
+              for (const m of members) for (const r of rolesOf(m)) counts[ROLE_KEYS[r]]++;
+              const wanted = unit.tank + unit.healer + unit.dps;
+
+              return (
+                <section
+                  key={unit.id}
+                  className="rounded-lg border p-3"
+                  style={{ borderColor: `${unit.color}66`, background: `${unit.color}0f` }}
+                >
+                  <div className="flex items-center gap-2 mb-2">
+                    <i className={`fa-solid ${unit.icon}`} style={{ color: unit.color }}></i>
+                    <h4 className="font-bold text-sm text-slate-100 truncate flex-1">{unit.name}</h4>
+                    <span
+                      className={`text-xs tabular-nums ${
+                        wanted && members.length < wanted ? 'text-amber-400 font-bold' : 'text-slate-500'
+                      }`}
+                    >
+                      {members.length}
+                      {wanted ? `/${wanted}` : ''}
+                    </span>
+                  </div>
+
+                  <div className="flex gap-2 mb-2 text-[10px] uppercase tracking-wider">
+                    {(['tank', 'healer', 'dps'] as const).map((key) => {
+                      const want = unit[key];
+                      const short = want > 0 && counts[key] < want;
+                      return (
+                        <span key={key} className={short ? 'text-amber-400 font-bold' : 'text-slate-500'}>
+                          {key === 'tank' ? 'Tanques' : key === 'healer' ? 'Sanadores' : 'DPS'}{' '}
+                          {counts[key]}
+                          {want ? `/${want}` : ''}
+                        </span>
+                      );
+                    })}
+                  </div>
+
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    {members.length
+                      ? members.map((m) => m.name).join(', ')
+                      : <span className="text-slate-600 italic">Sin nadie asignado</span>}
+                  </p>
+                </section>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       <div className="grid lg:grid-cols-4 gap-4">
         {WAR_LANES.map((lane) => {
@@ -227,28 +320,61 @@ const WarBoard: React.FC<Props> = ({ players, builds, canEdit }) => {
               </div>
 
               <div className="space-y-1.5 min-h-[60px]">
-                {members.map((p) => (
-                  <div
-                    key={p.id}
-                    className="flex items-center justify-between gap-2 bg-slate-950/70 border border-slate-800 rounded p-2"
-                  >
-                    <div className="min-w-0">
-                      <p className="text-sm text-slate-100 truncate">{p.name}</p>
-                      <p className="text-[10px] text-slate-500">
-                        {rolesOf(p).map((r) => ROLE_NAMES[r]).join(' · ')}
-                      </p>
+                {members.map((p) => {
+                  const unit = strategy?.units.find((u) => u.id === unitOf.get(p.id));
+                  return (
+                    <div
+                      key={p.id}
+                      className="bg-slate-950/70 border border-slate-800 rounded p-2"
+                      style={unit ? { borderColor: `${unit.color}66` } : undefined}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-sm text-slate-100 truncate">{p.name}</p>
+                          <p className="text-[10px] text-slate-500">
+                            {rolesOf(p).map((r) => ROLE_NAMES[r]).join(' · ')}
+                          </p>
+                        </div>
+                        {canEdit && (
+                          <button
+                            onClick={() => move(p.id, null)}
+                            title="Quitar de la línea"
+                            className="text-slate-600 hover:text-red-400 shrink-0 transition-all"
+                          >
+                            <i className="fa-solid fa-xmark"></i>
+                          </button>
+                        )}
+                      </div>
+
+                      {/* The unit is a separate question from the lane, and only
+                          worth asking once a strategy names some. */}
+                      {strategy && strategy.units.length > 0 && (
+                        canEdit ? (
+                          <select
+                            value={unitOf.get(p.id) ?? ''}
+                            onChange={(e) => assign(p.id, e.target.value || null)}
+                            className="mt-1.5 w-full bg-slate-950 border border-slate-800 rounded p-1 text-[11px] outline-none focus:ring-1 focus:ring-amber-500"
+                            style={unit ? { color: unit.color, borderColor: `${unit.color}66` } : undefined}
+                          >
+                            <option value="">Sin unidad</option>
+                            {strategy.units.map((u) => (
+                              <option key={u.id} value={u.id}>
+                                {u.name}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          unit && (
+                            <p className="mt-1 text-[10px] flex items-center gap-1.5" style={{ color: unit.color }}>
+                              <i className={`fa-solid ${unit.icon}`}></i>
+                              {unit.name}
+                            </p>
+                          )
+                        )
+                      )}
                     </div>
-                    {canEdit && (
-                      <button
-                        onClick={() => move(p.id, null)}
-                        title="Quitar de la línea"
-                        className="text-slate-600 hover:text-red-400 shrink-0 transition-all"
-                      >
-                        <i className="fa-solid fa-xmark"></i>
-                      </button>
-                    )}
-                  </div>
-                ))}
+                  );
+                })}
                 {!members.length && (
                   <p className="text-xs text-slate-600 italic py-3 text-center">Sin nadie asignado</p>
                 )}
@@ -358,6 +484,15 @@ const WarBoard: React.FC<Props> = ({ players, builds, canEdit }) => {
           </div>
         </section>
       </div>
+
+      {planning && (
+        <StrategyPlanner
+          side={side}
+          canEdit={canEdit}
+          onClose={() => setPlanning(false)}
+          onSaved={() => void load()}
+        />
+      )}
     </div>
   );
 };

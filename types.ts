@@ -36,6 +36,27 @@ export interface Deployment {
   side: WarSide;
   lane: WarLane;
   playerId: string;
+  // The tactical unit they belong to, when the current strategy names one.
+  unitId?: string | null;
+}
+
+export interface RoleTargets {
+  tank: number;
+  healer: number;
+  dps: number;
+}
+
+/**
+ * A job within the war -- escorting the coffin, holding the camps -- carried out
+ * by people drawn from any of the three lanes. A unit says what it needs, not
+ * where it stands, which is why it is not part of a lane.
+ */
+export interface TacticalUnit extends RoleTargets {
+  id: string;
+  name: string;
+  icon: string;
+  color: string;
+  notes?: string | null;
 }
 
 export interface WarStrategy {
@@ -43,7 +64,8 @@ export interface WarStrategy {
   side: WarSide;
   name: string;
   // Per lane, how many of each role the lane is meant to hold.
-  composition: Record<WarLane, { tank: number; healer: number; dps: number }>;
+  composition: Record<WarLane, RoleTargets>;
+  units: TacticalUnit[];
   notes?: string | null;
 }
 

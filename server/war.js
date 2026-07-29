@@ -9,11 +9,30 @@ const valid = (side, lane) => SIDES.includes(side) && LANES.includes(lane);
 
 export async function getDeployments() {
   const { rows } = await pool.query(
-    `SELECT side, lane, player_id AS "playerId", position
+    `SELECT side, lane, player_id AS "playerId", unit_id AS "unitId", position
        FROM war_deployments WHERE guild_id = $1 ORDER BY side, lane, position`,
     [GUILD_ID],
   );
   return rows;
+}
+
+/**
+ * Put a deployed member into a tactical unit, or take them out of one.
+ *
+ * Separate from placing them in a lane so that neither can silently clear the
+ * other: a unit is a job and a lane is a position, and moving somebody along
+ * the front does not take away what they were sent to do.
+ */
+export async function setUnit(side, playerId, unitId) {
+  if (!SIDES.includes(side)) throw Object.assign(new Error('unknown side'), { status: 400 });
+
+  const { rowCount } = await pool.query(
+    `UPDATE war_deployments SET unit_id = $1
+      WHERE guild_id = $2 AND side = $3 AND player_id = $4`,
+    [unitId || null, GUILD_ID, side, playerId],
+  );
+  if (!rowCount) throw Object.assign(new Error('ese miembro no esta desplegado'), { status: 409 });
+  return { ok: true };
 }
 
 /**
@@ -103,9 +122,29 @@ function cleanComposition(raw) {
   return composition;
 }
 
+// A unit draws from the whole side, not from one lane, so its target is bounded
+// by the whole board rather than by a single lane.
+const SIDE_CAPACITY = LANE_CAPACITY * LANES.length;
+
+const count = (value, ceiling) => Math.max(0, Math.min(ceiling, Number(value) || 0));
+
+function cleanUnits(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw.slice(0, 24).map((unit) => ({
+    id: unit?.id || randomUUID(),
+    name: String(unit?.name ?? '').trim().slice(0, 60) || 'Unidad sin nombre',
+    icon: String(unit?.icon ?? 'fa-users').trim() || 'fa-users',
+    color: /^#[0-9a-f]{6}$/i.test(unit?.color ?? '') ? unit.color : '#f59e0b',
+    tank: count(unit?.tank, SIDE_CAPACITY),
+    healer: count(unit?.healer, SIDE_CAPACITY),
+    dps: count(unit?.dps, SIDE_CAPACITY),
+    notes: unit?.notes ? String(unit.notes).slice(0, 300) : null,
+  }));
+}
+
 export async function listStrategies() {
   const { rows } = await pool.query(
-    `SELECT id, side, name, composition, notes FROM war_strategies
+    `SELECT id, side, name, composition, units, notes FROM war_strategies
       WHERE guild_id = $1 ORDER BY side, name`,
     [GUILD_ID],
   );
@@ -116,25 +155,53 @@ export async function saveStrategy(strategy) {
   if (!SIDES.includes(strategy?.side)) throw Object.assign(new Error('unknown side'), { status: 400 });
   const id = strategy.id || randomUUID();
 
+  const units = cleanUnits(strategy.units);
+
   await pool.query(
-    `INSERT INTO war_strategies (id, guild_id, side, name, composition, notes)
-     VALUES ($1, $2, $3, $4, $5, $6)
+    `INSERT INTO war_strategies (id, guild_id, side, name, composition, units, notes)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
      ON CONFLICT (id) DO UPDATE
-       SET name = EXCLUDED.name, composition = EXCLUDED.composition, notes = EXCLUDED.notes`,
+       SET name = EXCLUDED.name, composition = EXCLUDED.composition,
+           units = EXCLUDED.units, notes = EXCLUDED.notes`,
     [
       id,
       GUILD_ID,
       strategy.side,
       String(strategy.name ?? '').trim() || 'Sin nombre',
       JSON.stringify(cleanComposition(strategy.composition)),
+      JSON.stringify(units),
       strategy.notes ?? null,
     ],
   );
-  return { id };
+  await pruneUnits(strategy.side);
+  return { id, units };
 }
 
 export async function deleteStrategy(id) {
-  await pool.query(`DELETE FROM war_strategies WHERE id = $1 AND guild_id = $2`, [id, GUILD_ID]);
+  const { rows } = await pool.query(
+    `DELETE FROM war_strategies WHERE id = $1 AND guild_id = $2 RETURNING side`,
+    [id, GUILD_ID],
+  );
+  if (rows.length) await pruneUnits(rows[0].side);
+}
+
+/**
+ * Forget unit assignments whose unit no longer exists anywhere.
+ *
+ * Editing a strategy can delete a unit that members were already assigned to.
+ * The check is against every strategy on that side, not just the one edited,
+ * so somebody arranged under one plan is not unassigned by a change to another.
+ */
+async function pruneUnits(side) {
+  await pool.query(
+    `UPDATE war_deployments d SET unit_id = NULL
+      WHERE d.guild_id = $1 AND d.side = $2 AND d.unit_id IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM war_strategies s, jsonb_array_elements(s.units) u
+           WHERE s.guild_id = d.guild_id AND s.side = d.side AND u->>'id' = d.unit_id
+        )`,
+    [GUILD_ID, side],
+  );
 }
 
 export { EMPTY_LANE };

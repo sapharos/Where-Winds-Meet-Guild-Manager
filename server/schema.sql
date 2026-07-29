@@ -236,6 +236,13 @@ CREATE TABLE IF NOT EXISTS war_deployments (
 
 CREATE INDEX IF NOT EXISTS war_deployments_lane_idx ON war_deployments (guild_id, side, lane);
 
+-- Which tactical unit a deployed member belongs to. Units cut across the lanes
+-- -- an escort party takes people from all three -- so this is beside the lane
+-- and not instead of it. It is a bare id on purpose: units live inside a
+-- strategy, so the reference has to survive the strategy being edited or
+-- deleted, and a member whose unit no longer exists simply reads as unassigned.
+ALTER TABLE war_deployments ADD COLUMN IF NOT EXISTS unit_id TEXT;
+
 CREATE TABLE IF NOT EXISTS war_strategies (
   id          TEXT PRIMARY KEY,
   guild_id    TEXT NOT NULL REFERENCES guilds(id) ON DELETE CASCADE,
@@ -248,6 +255,11 @@ CREATE TABLE IF NOT EXISTS war_strategies (
 );
 
 CREATE INDEX IF NOT EXISTS war_strategies_side_idx ON war_strategies (guild_id, side);
+
+-- The tactical units a strategy calls for: [{ id, name, icon, color, tank,
+-- healer, dps, notes }]. They belong to the strategy rather than to the guild
+-- because a plan is exactly where "we need an escort party of five" is decided.
+ALTER TABLE war_strategies ADD COLUMN IF NOT EXISTS units JSONB NOT NULL DEFAULT '[]'::jsonb;
 
 CREATE TABLE IF NOT EXISTS wars (
   id         TEXT PRIMARY KEY,

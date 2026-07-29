@@ -5,7 +5,7 @@ import { SetBadge } from './BuildEditor';
 import { ICON_GROUPS } from './iconCatalog';
 
 /** Picks an icon by eye. Names alone mean nothing until you see the glyph. */
-const IconPicker: React.FC<{
+export const IconPicker: React.FC<{
   value?: string | null;
   onPick: (icon: string) => void;
   onClose: () => void;
