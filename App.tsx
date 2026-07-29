@@ -130,7 +130,7 @@ const App: React.FC = () => {
         return;
       }
       console.error('Load failed', err);
-      setLoadError('Could not reach the guild server. Data shown may be incomplete.');
+      setLoadError('No se pudo contactar con el servidor. Lo que ves puede estar incompleto.');
     } finally {
       setIsLoading(false);
     }
@@ -209,7 +209,7 @@ const App: React.FC = () => {
 
     peer.on('error', (err) => {
       console.error('Peer error:', err);
-      alert('Collaboration error: ' + err.type);
+      alert('Error de colaboración: ' + err.type);
     });
   };
 
@@ -237,13 +237,13 @@ const App: React.FC = () => {
       });
 
       conn.on('close', () => {
-        alert('Commander has disconnected.');
+        alert('El comandante se ha desconectado.');
         handleDisconnect();
       });
     });
 
     peer.on('error', (err) => {
-      alert('Failed to link command: ' + err.type);
+      alert('No se pudo conectar: ' + err.type);
       handleDisconnect();
     });
   };
@@ -441,7 +441,7 @@ const App: React.FC = () => {
             </div>
             <div className="min-w-0">
               <h1 className="cinzel text-lg sm:text-xl font-bold tracking-widest text-white leading-none truncate">
-                WHERE WINDS MEET
+                ZONA ZERO
               </h1>
               <div className="flex items-center gap-2 mt-0.5">
                 <p className="hidden sm:block text-[10px] uppercase tracking-[0.2em] text-amber-500 font-bold">

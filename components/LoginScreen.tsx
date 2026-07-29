@@ -40,7 +40,7 @@ const LoginScreen: React.FC<Props> = ({ onLogin }) => {
             <i className="fa-solid fa-wind text-3xl text-white"></i>
           </div>
           <h1 className="cinzel text-2xl font-bold tracking-widest text-white text-center leading-tight">
-            WHERE WINDS MEET
+            ZONA ZERO
           </h1>
           <p className="text-[10px] uppercase tracking-[0.2em] text-amber-500 font-bold mt-1">
             Strategic Command

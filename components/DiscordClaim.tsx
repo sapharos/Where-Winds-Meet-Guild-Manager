@@ -47,7 +47,7 @@ const DiscordClaim: React.FC<{ onDone: () => void }> = ({ onDone }) => {
             <i className="fa-solid fa-wind text-3xl text-white"></i>
           </div>
           <h1 className="cinzel text-2xl font-bold tracking-widest text-white text-center leading-tight">
-            WHERE WINDS MEET
+            ZONA ZERO
           </h1>
         </div>
 

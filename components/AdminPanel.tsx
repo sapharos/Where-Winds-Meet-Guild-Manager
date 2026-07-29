@@ -49,7 +49,7 @@ const AdminPanel: React.FC<Props> = ({ currentUser, canManageUsers, canManagePer
         setRequests(await api('/registrations').catch(() => []));
       }
     } catch (err) {
-      report(err instanceof Error ? err.message : 'Could not load settings', false);
+      report(err instanceof Error ? err.message : 'No se pudo cargar la configuración', false);
     }
   };
 
@@ -77,7 +77,7 @@ const AdminPanel: React.FC<Props> = ({ currentUser, canManageUsers, canManagePer
       setDirty(false);
       report('Permisos guardados.');
     } catch (err) {
-      report(err instanceof Error ? err.message : 'Could not save permissions', false);
+      report(err instanceof Error ? err.message : 'No se pudieron guardar los permisos', false);
     }
   };
 
@@ -91,7 +91,7 @@ const AdminPanel: React.FC<Props> = ({ currentUser, canManageUsers, canManagePer
       setUsers(await authService.listUsers());
       report('Usuario creado.');
     } catch (err) {
-      report(err instanceof Error ? err.message : 'Could not create user', false);
+      report(err instanceof Error ? err.message : 'No se pudo crear la cuenta', false);
     }
   };
 
@@ -101,7 +101,7 @@ const AdminPanel: React.FC<Props> = ({ currentUser, canManageUsers, canManagePer
       setUsers(await authService.listUsers());
       report('Usuario actualizado.');
     } catch (err) {
-      report(err instanceof Error ? err.message : 'Could not update user', false);
+      report(err instanceof Error ? err.message : 'No se pudo actualizar la cuenta', false);
     }
   };
 
@@ -125,7 +125,7 @@ const AdminPanel: React.FC<Props> = ({ currentUser, canManageUsers, canManagePer
       await authService.updateUser(user.id, { password });
       report(`Contraseña de ${user.username} actualizada.`);
     } catch (err) {
-      report(err instanceof Error ? err.message : 'Could not reset password', false);
+      report(err instanceof Error ? err.message : 'No se pudo cambiar la contraseña', false);
     }
   };
 
@@ -136,7 +136,7 @@ const AdminPanel: React.FC<Props> = ({ currentUser, canManageUsers, canManagePer
       setUsers(await authService.listUsers());
       report('Usuario eliminado.');
     } catch (err) {
-      report(err instanceof Error ? err.message : 'Could not delete user', false);
+      report(err instanceof Error ? err.message : 'No se pudo eliminar la cuenta', false);
     }
   };
 
