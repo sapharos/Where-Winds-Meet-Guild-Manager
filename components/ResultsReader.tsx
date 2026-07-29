@@ -110,15 +110,31 @@ interface Cell {
   digits: string;
   x0: number;
   x1: number;
+  /** Rescued from a token that was not clean digits: worth a second look. */
+  dirty: boolean;
 }
 
-const asDigits = (raw: string): string | null => {
+/**
+ * A run of digits, and whether it had to be rescued to become one.
+ *
+ * The engine sometimes frames a figure in brackets it invented -- poKer's
+ * nought came back as "[4" -- and rejecting that threw away the whole row,
+ * seven good figures with it. The brackets come off and the figure is marked
+ * instead: one cell to check beats eight to type.
+ */
+function asDigits(raw: string): { digits: string; dirty: boolean } | null {
   const token = raw.replace(/[.,\s]/g, '');
   if (!token) return null;
+
+  // Letters only stand in for digits where they cannot be part of a name.
   const safe = token.length === 1 || /[0-9]/.test(token);
-  const digits = safe ? token.replace(/[oO]/g, '0').replace(/[lI|]/g, '1') : token;
-  return /^[0-9]{1,18}$/.test(digits) ? digits : null;
-};
+  const mapped = safe ? token.replace(/[oO]/g, '0').replace(/[lI|]/g, '1') : token;
+  if (/^[0-9]{1,18}$/.test(mapped)) return { digits: mapped, dirty: false };
+
+  const stripped = mapped.replace(/[[\]()<>{}_]/g, '');
+  if (safe && /^[0-9]{1,18}$/.test(stripped)) return { digits: stripped, dirty: true };
+  return null;
+}
 
 /**
  * Where each column begins, taken from the rows that came out whole.
@@ -219,6 +235,7 @@ function place(cells: Cell[], columns: number[]): {
 
     slots[best] = Number(cell.digits);
     taken.set(best, cell.x0);
+    if (cell.dirty) split.add(best);
   }
 
   return { slots, split };
@@ -233,6 +250,8 @@ export interface ReadRow {
   figures: Record<string, number>;
   /** Figures recovered from a run shared with the next column: check these. */
   doubtful: string[];
+  /** Read from the copy the screen pins under the table, not from the table. */
+  pinned?: boolean;
 }
 
 interface Props {
@@ -284,7 +303,7 @@ const ResultsReader: React.FC<Props> = ({ images, participants, onClose, onApply
     const known = participants.map((p) => ({ ...p, plain: plain(p.name) }));
     const found = new Map<string, ReadRow>();
     // Every row from every image, kept whole until the columns are known.
-    const harvest: { name: string; cells: Cell[] }[] = [];
+    const harvest: { name: string; cells: Cell[]; pinned: boolean }[] = [];
 
     try {
       setStage('reading');
@@ -324,15 +343,20 @@ const ResultsReader: React.FC<Props> = ({ images, participants, onClose, onApply
           }
         }
 
+        const fromHere: { name: string; cells: Cell[] }[] = [];
+
         for (const { words: row } of lines) {
           row.sort((a, b) => a.bbox.x0 - b.bbox.x0);
 
           const cells: Cell[] = [];
           const letters: string[] = [];
           for (const word of row) {
-            const digits = asDigits(word.text);
-            if (digits) cells.push({ digits, x0: word.bbox.x0, x1: word.bbox.x1 });
-            else letters.push(word.text);
+            const read = asDigits(word.text);
+            if (read) {
+              cells.push({ ...read, x0: word.bbox.x0, x1: word.bbox.x1 });
+            } else {
+              letters.push(word.text);
+            }
           }
           // Two columns short would be a heading, a tab label or the frame rate
           // in the corner. One short is the overlap, and it can be repaired.
@@ -341,8 +365,17 @@ const ResultsReader: React.FC<Props> = ({ images, participants, onClose, onApply
           const name = letters.join(' ').trim();
           if (!name) continue;
 
-          harvest.push({ name, cells });
+          fromHere.push({ name, cells });
         }
+
+        // The screen shows seven rows and pins the reader's own beneath them,
+        // on a pale band that reads badly. Marked rather than dropped: the
+        // pinned row is not always the last one that survives reading, and
+        // dropping the last blindly threw away a real member instead. Marked,
+        // it simply loses to any other sighting of the same person.
+        fromHere.forEach((row, at) =>
+          harvest.push({ ...row, pinned: fromHere.length > 1 && at === fromHere.length - 1 }),
+        );
       }
 
       // Where the columns are is measured from the rows that came out whole,
@@ -350,10 +383,13 @@ const ResultsReader: React.FC<Props> = ({ images, participants, onClose, onApply
       // them arrive as one number, and only their position says where to cut.
       const columns = measure(harvest);
 
-      for (const { name, cells } of harvest) {
+      for (const { name, cells, pinned } of harvest) {
         const read = columns
           ? place(cells, columns)
-          : { slots: cells.map((c) => Number(c.digits)), split: new Set<number>() };
+          : {
+              slots: cells.map((c) => Number(c.digits)),
+              split: new Set<number>(cells.flatMap((c, at) => (c.dirty ? [at] : []))),
+            };
         const numbers = read.slots;
         if (numbers.length !== FIGURES.length || numbers.some((n) => n === null)) continue;
 
@@ -391,11 +427,17 @@ const ResultsReader: React.FC<Props> = ({ images, participants, onClose, onApply
           doubtful: FIGURES.filter((_, at) => read.split.has(at)).map((column) => column.key),
         };
 
-        // The screen repeats the reader's own row at the bottom, and pages
-        // overlap when scrolled, so the same person turns up more than once.
+        // Pages overlap when scrolled and the reader's own row is pinned to
+        // every one of them, so the same person turns up more than once. A
+        // sighting in the table proper beats the pinned copy; between equals,
+        // the one whose name was read most surely.
         const key = entry.playerId ?? `?${target}`;
         const seen = found.get(key);
-        if (!seen || entry.confidence > seen.confidence) found.set(key, entry);
+        const better =
+          !seen ||
+          (seen.pinned && !pinned) ||
+          (seen.pinned === pinned && entry.confidence > seen.confidence);
+        if (better) found.set(key, { ...entry, pinned });
       }
 
       setRows([...found.values()]);
