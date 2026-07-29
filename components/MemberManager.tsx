@@ -84,7 +84,7 @@ const MemberManager: React.FC<MemberManagerProps> = ({
   const [startersOnly, setStartersOnly] = useState(false);
   const [sideFilter, setSideFilter] = useState<'' | WarSide>('');
   const [showGone, setShowGone] = useState(false);
-  const [order, setOrder] = useState<'lineup' | 'mastery' | 'name'>('lineup');
+  const [order, setOrder] = useState<'lineup' | 'mastery' | 'set' | 'name'>('lineup');
 
   // The build shown on a card is the primary one; the rest describe how else
   // someone can play, which belongs in the build editor rather than here.
@@ -95,6 +95,18 @@ const MemberManager: React.FC<MemberManagerProps> = ({
     }
     return map;
   }, [builds]);
+
+  // Where a member sits when the roster is grouped by what they play: the
+  // catalogue's own order, so the list reads the way the sets are listed, and
+  // whoever has no set falls to the end rather than to the top.
+  const setRank = useMemo(() => {
+    const place = new Map(weaponSets.map((s, i) => [s.id, i]));
+    return (player: Player, which: 0 | 1) => {
+      const weapon = primaryOf.get(player.id)?.weapons[which];
+      const set = weapon ? weaponSets.find((s) => s.weapons.includes(weapon)) : undefined;
+      return set ? (place.get(set.id) ?? weaponSets.length) : Number.MAX_SAFE_INTEGER;
+    };
+  }, [weaponSets, primaryOf]);
 
   // Filtering asks who can bring a weapon, so it reads every build a member has
   // and not only the primary one: a second build is precisely where the weapon
@@ -170,6 +182,13 @@ const MemberManager: React.FC<MemberManagerProps> = ({
         if (mine !== theirs) return theirs - mine;
         return a.name.localeCompare(b.name);
       }
+      // Grouped by set, the second weapon breaks the tie, so a pair stays with
+      // its pair instead of scattering by name inside the group.
+      if (order === 'set') {
+        const gap = setRank(a, 0) - setRank(b, 0) || setRank(a, 1) - setRank(b, 1);
+        if (gap) return gap;
+        return a.name.localeCompare(b.name);
+      }
       // Whoever is being fielded comes first: on war day the roster is read to
       // check the line-up, not to browse the whole guild.
       if (order === 'lineup') {
@@ -178,7 +197,7 @@ const MemberManager: React.FC<MemberManagerProps> = ({
       }
       return a.name.localeCompare(b.name);
     });
-  }, [players, search, roleFilter, weaponFilter, weaponsOf, startersOnly, sideFilter, showGone, order, primaryOf]);
+  }, [players, search, roleFilter, weaponFilter, weaponsOf, startersOnly, sideFilter, showGone, order, setRank, primaryOf]);
 
   const openNew = () => {
     setEditing(null);
@@ -357,12 +376,13 @@ const MemberManager: React.FC<MemberManagerProps> = ({
 
           <select
             value={order}
-            onChange={(e) => setOrder(e.target.value as 'lineup' | 'mastery' | 'name')}
+            onChange={(e) => setOrder(e.target.value as 'lineup' | 'mastery' | 'set' | 'name')}
             title="Orden de la lista"
             className="bg-slate-950 border border-slate-800 rounded p-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
           >
             <option value="lineup">Titulares primero</option>
             <option value="mastery">Maestría marcial ↓</option>
+            <option value="set">Conjunto de armas</option>
             <option value="name">Nombre</option>
           </select>
 
