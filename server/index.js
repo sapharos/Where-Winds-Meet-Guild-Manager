@@ -22,6 +22,7 @@ import {
   endWar,
   listWars,
   warDetail,
+  warsFor,
   addWarImage,
   removeWarImage,
   setContribution,
@@ -531,6 +532,13 @@ app.get('/api/war/wars', requireAuth, asHandler(async (_req, res) => {
 
 app.get('/api/war/wars/:id', requireAuth, asHandler(async (req, res) => {
   res.json(await warDetail(req.params.id));
+}));
+
+// A member's own record. Readable by anyone signed in: the guild compares
+// itself, and hiding what one person did while showing the war they did it in
+// would only make the comparison worse informed.
+app.get('/api/players/:id/wars', requireAuth, asHandler(async (req, res) => {
+  res.json(await warsFor(req.params.id));
 }));
 
 app.post('/api/war/wars/:id/images', requireAuth, requirePermission('war.edit'), asHandler(async (req, res) => {

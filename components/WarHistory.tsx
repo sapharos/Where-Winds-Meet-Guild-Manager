@@ -1,5 +1,6 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../services/authService';
+import { impactOf } from '../services/impact';
 import { WAR_SIDE_LABELS, WarLane, WarSide } from '../types';
 import ResultsReader from './ResultsReader';
 
@@ -143,6 +144,12 @@ const WarHistory: React.FC<Props> = ({ canEdit, onClose }) => {
     await api(`/war/wars/${chosen}/images/${imageId}`, { method: 'DELETE' }).catch(() => undefined);
     await load(chosen);
   };
+
+  // Recomputed as figures are typed, so a correction shows its effect at once.
+  const scores = useMemo(
+    () => new Map(impactOf(detail?.participants ?? []).map((row) => [row.playerId, row.score])),
+    [detail],
+  );
 
   const setFigure = async (playerId: string, key: string, raw: string) => {
     if (!chosen) return;
@@ -298,6 +305,9 @@ const WarHistory: React.FC<Props> = ({ canEdit, onClose }) => {
               <section>
                 <h3 className="text-sm font-bold text-slate-300 mb-2">
                   Participantes ({detail.participants.length})
+                  <span className="ml-2 text-[11px] font-normal text-slate-500">
+                    · el impacto se calcula contra el resto de esta misma guerra
+                  </span>
                 </h3>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
@@ -305,6 +315,7 @@ const WarHistory: React.FC<Props> = ({ canEdit, onClose }) => {
                       <tr className="text-[10px] uppercase tracking-wider text-slate-500 text-left">
                         <th className="py-1 pr-3">Miembro</th>
                         <th className="py-1 pr-3">Bando</th>
+                        <th className="py-1 pr-3 text-right">Impacto</th>
                         {FIGURES.map((f) => (
                           <th key={f.key} className="py-1 pr-3 text-right">
                             {f.label}
@@ -318,6 +329,9 @@ const WarHistory: React.FC<Props> = ({ canEdit, onClose }) => {
                           <td className="py-1 pr-3 text-slate-200">{p.name}</td>
                           <td className="py-1 pr-3 text-[11px] text-slate-500">
                             {WAR_SIDE_LABELS[p.side]}
+                          </td>
+                          <td className="py-1 pr-3 text-right font-bold tabular-nums text-amber-400">
+                            {scores.get(p.playerId) ?? 0}
                           </td>
                           {FIGURES.map((f) => (
                             <td key={f.key} className="py-1 pr-3 text-right">

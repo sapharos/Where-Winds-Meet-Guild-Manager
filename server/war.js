@@ -229,6 +229,54 @@ export async function warDetail(id) {
   return { ...war.rows[0], participants: participants.rows, images: images.rows };
 }
 
+/**
+ * The wars one member fought, each with everyone who fought it.
+ *
+ * The whole line-up comes with every war and not just their own row, because
+ * what a figure means is decided by the rest of the war: twenty million damage
+ * is a good night or an ordinary one depending on what everybody else did.
+ */
+export async function warsFor(playerId) {
+  const { rows } = await pool.query(
+    `SELECT w.id, w.name, w.started_at AS "startedAt", w.ended_at AS "endedAt",
+            p.player_id AS "playerId", COALESCE(m.name, p.player_id) AS name,
+            p.side, p.lane, p.stats
+       FROM wars w
+       JOIN war_participants p ON p.war_id = w.id
+       LEFT JOIN players m ON m.guild_id = $2 AND m.id = p.player_id
+      WHERE w.guild_id = $2
+        AND EXISTS (
+          SELECT 1 FROM war_participants mine
+           WHERE mine.war_id = w.id AND mine.player_id = $1
+        )
+      ORDER BY w.started_at DESC, name`,
+    [playerId, GUILD_ID],
+  );
+
+  const wars = new Map();
+  for (const row of rows) {
+    let war = wars.get(row.id);
+    if (!war) {
+      war = {
+        id: row.id,
+        name: row.name,
+        startedAt: row.startedAt,
+        endedAt: row.endedAt,
+        participants: [],
+      };
+      wars.set(row.id, war);
+    }
+    war.participants.push({
+      playerId: row.playerId,
+      name: row.name,
+      side: row.side,
+      lane: row.lane,
+      stats: row.stats ?? {},
+    });
+  }
+  return [...wars.values()].slice(0, 30);
+}
+
 export async function addWarImage(warId, image, caption) {
   if (typeof image !== 'string' || !image.startsWith('data:image/')) {
     throw Object.assign(new Error('eso no es una imagen'), { status: 400 });
