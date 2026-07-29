@@ -243,6 +243,11 @@ CREATE INDEX IF NOT EXISTS war_deployments_lane_idx ON war_deployments (guild_id
 -- deleted, and a member whose unit no longer exists simply reads as unassigned.
 ALTER TABLE war_deployments ADD COLUMN IF NOT EXISTS unit_id TEXT;
 
+-- Which build they are meant to bring. A bare id for the same reason: builds
+-- are edited and deleted by their owner, and a plan naming one that is gone
+-- should fall back to whatever they usually play, not break the board.
+ALTER TABLE war_deployments ADD COLUMN IF NOT EXISTS build_id TEXT;
+
 CREATE TABLE IF NOT EXISTS war_strategies (
   id          TEXT PRIMARY KEY,
   guild_id    TEXT NOT NULL REFERENCES guilds(id) ON DELETE CASCADE,

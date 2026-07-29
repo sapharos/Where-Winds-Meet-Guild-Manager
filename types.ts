@@ -38,6 +38,9 @@ export interface Deployment {
   playerId: string;
   // The tactical unit they belong to, when the current strategy names one.
   unitId?: string | null;
+  // Which of their builds they are meant to bring to this war. Unset means the
+  // one they usually play.
+  buildId?: string | null;
 }
 
 export interface RoleTargets {

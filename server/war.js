@@ -9,7 +9,8 @@ const valid = (side, lane) => SIDES.includes(side) && LANES.includes(lane);
 
 export async function getDeployments() {
   const { rows } = await pool.query(
-    `SELECT side, lane, player_id AS "playerId", unit_id AS "unitId", position
+    `SELECT side, lane, player_id AS "playerId", unit_id AS "unitId",
+            build_id AS "buildId", position
        FROM war_deployments WHERE guild_id = $1 ORDER BY side, lane, position`,
     [GUILD_ID],
   );
@@ -97,6 +98,32 @@ export async function place(side, lane, playerId) {
     [GUILD_ID, side, lane, playerId, rows[0].held],
   );
   return { placed: true };
+}
+
+/**
+ * Say which build a deployed member should bring.
+ *
+ * The build is checked against that member's own, so a plan cannot name
+ * somebody else's; null puts them back on whatever they usually play.
+ */
+export async function setBuild(side, playerId, buildId) {
+  if (!SIDES.includes(side)) throw Object.assign(new Error('unknown side'), { status: 400 });
+
+  if (buildId) {
+    const { rows } = await pool.query(
+      `SELECT 1 FROM player_builds WHERE id = $1 AND guild_id = $2 AND player_id = $3`,
+      [buildId, GUILD_ID, playerId],
+    );
+    if (!rows.length) throw Object.assign(new Error('esa build no es suya'), { status: 400 });
+  }
+
+  const { rowCount } = await pool.query(
+    `UPDATE war_deployments SET build_id = $1
+      WHERE guild_id = $2 AND side = $3 AND player_id = $4`,
+    [buildId || null, GUILD_ID, side, playerId],
+  );
+  if (!rowCount) throw Object.assign(new Error('ese miembro no esta desplegado'), { status: 409 });
+  return { ok: true };
 }
 
 export async function clearSide(side) {

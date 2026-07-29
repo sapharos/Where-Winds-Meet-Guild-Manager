@@ -11,8 +11,10 @@ import {
   WarLane,
   WarSide,
   WarStrategy,
+  WeaponSet,
 } from '../types';
-import { ROLE_NAMES } from './PlayerCard';
+import { ROLE_ICONS } from '../constants';
+import { ROLE_NAMES, buildColours } from './PlayerCard';
 import StrategyPlanner from './StrategyPlanner';
 
 const ROLE_KEYS: Record<Role, 'tank' | 'healer' | 'dps'> = {
@@ -21,11 +23,24 @@ const ROLE_KEYS: Record<Role, 'tank' | 'healer' | 'dps'> = {
   [Role.DPS]: 'dps',
 };
 
+const ROLE_TEXT: Record<Role, string> = {
+  [Role.TANK]: 'text-blue-400',
+  [Role.HEALER]: 'text-green-400',
+  [Role.DPS]: 'text-red-400',
+};
+
 interface Props {
   players: Player[];
   builds: PlayerBuild[];
+  weaponSets: WeaponSet[];
   canEdit: boolean;
 }
+
+/** The colours of a build, as a left-to-right wash behind a card. */
+const wash = (build: PlayerBuild | undefined, sets: WeaponSet[]) => {
+  const { from, to } = buildColours(build, sets);
+  return { background: `linear-gradient(90deg, ${from}26 0%, ${to}26 100%)` };
+};
 
 /**
  * Where the line-up is arranged: two sides, three lanes, ten to a lane.
@@ -35,7 +50,7 @@ interface Props {
  * like, and the board says what it does, but nothing is stopped from differing.
  * A leader short of people needs to see the gap, not be blocked by it.
  */
-const WarBoard: React.FC<Props> = ({ players, builds, canEdit }) => {
+const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => {
   const [side, setSide] = useState<WarSide>('attack');
   const [deployments, setDeployments] = useState<Deployment[]>([]);
   const [strategies, setStrategies] = useState<WarStrategy[]>([]);
@@ -57,20 +72,32 @@ const WarBoard: React.FC<Props> = ({ players, builds, canEdit }) => {
     void load();
   }, []);
 
-  // A member's roles come from their primary build when they have one, since
-  // that is what describes how they actually play.
-  const rolesOf = useMemo(() => {
-    const primary = new Map<string, PlayerBuild>();
-    for (const b of builds) if (b.isPrimary || !primary.has(b.playerId)) primary.set(b.playerId, b);
-    return (player: Player): Role[] => {
-      const build = primary.get(player.id);
-      return build?.roles?.length ? build.roles : [player.role];
-    };
+  const owned = useMemo(() => {
+    const map = new Map<string, PlayerBuild[]>();
+    for (const b of builds) map.set(b.playerId, [...(map.get(b.playerId) ?? []), b]);
+    return map;
   }, [builds]);
 
   const active = players.filter((p) => p.isActive !== false);
   const here = deployments.filter((d) => d.side === side);
   const byId = new Map(players.map((p) => [p.id, p]));
+  const buildIdOf = new Map(here.map((d) => [d.playerId, d.buildId ?? null]));
+
+  /**
+   * The build a member is fighting with: the one the plan names for them, or
+   * the one they usually play. Everything else follows from it -- the colours
+   * on their card, and which roles they count towards.
+   */
+  const buildOf = (player: Player): PlayerBuild | undefined => {
+    const list = owned.get(player.id) ?? [];
+    const named = buildIdOf.get(player.id);
+    return list.find((b) => b.id === named) ?? list.find((b) => b.isPrimary) ?? list[0];
+  };
+
+  const rolesOf = (player: Player): Role[] => {
+    const build = buildOf(player);
+    return build?.roles?.length ? build.roles : [player.role];
+  };
 
   const inLane = (lane: WarLane) =>
     here.filter((d) => d.lane === lane).map((d) => byId.get(d.playerId)).filter(Boolean) as Player[];
@@ -134,6 +161,19 @@ const WarBoard: React.FC<Props> = ({ players, builds, canEdit }) => {
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo asignar la unidad');
+    }
+  };
+
+  const useBuild = async (playerId: string, build: string | null) => {
+    setError(null);
+    try {
+      await api(`/war/deployments/${side}/${playerId}/build`, {
+        method: 'PUT',
+        body: JSON.stringify({ build }),
+      });
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo cambiar la build');
     }
   };
 
@@ -322,17 +362,27 @@ const WarBoard: React.FC<Props> = ({ players, builds, canEdit }) => {
               <div className="space-y-1.5 min-h-[60px]">
                 {members.map((p) => {
                   const unit = strategy?.units.find((u) => u.id === unitOf.get(p.id));
+                  const build = buildOf(p);
+                  const mine = owned.get(p.id) ?? [];
                   return (
                     <div
                       key={p.id}
-                      className="bg-slate-950/70 border border-slate-800 rounded p-2"
-                      style={unit ? { borderColor: `${unit.color}66` } : undefined}
+                      className="border border-slate-800 rounded p-2"
+                      style={{
+                        ...wash(build, weaponSets),
+                        ...(unit ? { borderColor: `${unit.color}66` } : null),
+                      }}
                     >
                       <div className="flex items-center justify-between gap-2">
                         <div className="min-w-0">
                           <p className="text-sm text-slate-100 truncate">{p.name}</p>
-                          <p className="text-[10px] text-slate-500">
-                            {rolesOf(p).map((r) => ROLE_NAMES[r]).join(' · ')}
+                          <p className="text-[10px] text-slate-500 flex items-center gap-1.5">
+                            {rolesOf(p).map((r) => (
+                              <span key={r} className={ROLE_TEXT[r]} title={ROLE_NAMES[r]}>
+                                {ROLE_ICONS[r]}
+                              </span>
+                            ))}
+                            <span className="truncate">{build?.name ?? ROLE_NAMES[p.role]}</span>
                           </p>
                         </div>
                         {canEdit && (
@@ -345,6 +395,26 @@ const WarBoard: React.FC<Props> = ({ players, builds, canEdit }) => {
                           </button>
                         )}
                       </div>
+
+                      {/* Which build they should bring. Only worth asking of
+                          somebody who has more than one to choose between. */}
+                      {canEdit && mine.length > 1 && (
+                        <select
+                          value={buildIdOf.get(p.id) ?? ''}
+                          onChange={(e) => useBuild(p.id, e.target.value || null)}
+                          title="Build que debe usar en esta guerra"
+                          className="mt-1.5 w-full bg-slate-950/80 border border-slate-800 rounded p-1 text-[11px] outline-none focus:ring-1 focus:ring-amber-500"
+                        >
+                          <option value="">
+                            Build principal{mine.find((b) => b.isPrimary)?.name ? ` — ${mine.find((b) => b.isPrimary)!.name}` : ''}
+                          </option>
+                          {mine.map((b) => (
+                            <option key={b.id} value={b.id}>
+                              {b.name || 'Sin nombre'}
+                            </option>
+                          ))}
+                        </select>
+                      )}
 
                       {/* The unit is a separate question from the lane, and only
                           worth asking once a strategy names some. */}
@@ -432,7 +502,8 @@ const WarBoard: React.FC<Props> = ({ players, builds, canEdit }) => {
               return (
               <div
                 key={p.id}
-                className={`bg-slate-950/70 border border-slate-800 rounded p-2 ${busy ? 'opacity-45' : ''}`}
+                className={`border border-slate-800 rounded p-2 ${busy ? 'opacity-45' : ''}`}
+                style={wash(buildOf(p), weaponSets)}
               >
                 <div className="flex items-center gap-1.5 min-w-0">
                   {p.isStarter && (
@@ -448,8 +519,13 @@ const WarBoard: React.FC<Props> = ({ players, builds, canEdit }) => {
                   )}
                   <p className="text-sm text-slate-100 truncate">{p.name}</p>
                 </div>
-                <p className="text-[10px] text-slate-500 mb-1.5">
-                  {rolesOf(p).map((r) => ROLE_NAMES[r]).join(' · ')}
+                <p className="text-[10px] text-slate-500 mb-1.5 flex items-center gap-1.5">
+                  {rolesOf(p).map((r) => (
+                    <span key={r} className={ROLE_TEXT[r]} title={ROLE_NAMES[r]}>
+                      {ROLE_ICONS[r]}
+                    </span>
+                  ))}
+                  <span className="truncate">{buildOf(p)?.name ?? ROLE_NAMES[p.role]}</span>
                 </p>
                 {busy ? (
                   <p className="text-[10px] text-slate-500 italic">

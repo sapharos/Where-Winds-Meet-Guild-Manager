@@ -639,7 +639,7 @@ const App: React.FC = () => {
             canManageRanks={!ranksLocked}
           />
         ) : (
-          <WarBoard players={players} builds={builds} canEdit={!warLocked} />
+          <WarBoard players={players} builds={builds} weaponSets={weaponSets} canEdit={!warLocked} />
         )}
       </main>
 
