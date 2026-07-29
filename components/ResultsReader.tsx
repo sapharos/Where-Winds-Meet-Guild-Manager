@@ -154,6 +154,8 @@ function place(cells: Cell[], columns: number[]): {
   // are the ones worth a second look: where two figures touch, the engine reads
   // the digits at the join wrongly as often as it reads them at all.
   const split = new Set<number>();
+  /** Where the run currently holding each column began. */
+  const taken = new Map<number, number>();
 
   for (const cell of cells) {
     const covered = columns
@@ -186,6 +188,15 @@ function place(cells: Cell[], columns: number[]): {
       if (Math.abs(edge - cell.x0) < Math.abs(columns[best] - cell.x0)) best = at;
     });
 
+    // The panel behind the table shows through, and the ghost of it reads as
+    // stray digits. Where two runs claim a column the nearer one wins, rather
+    // than whichever happened to come first: the real figure sits on the
+    // column's edge and the ghost only drifts near it.
+    const held = taken.get(best);
+    if (held !== undefined && Math.abs(columns[best] - held) <= Math.abs(columns[best] - cell.x0)) {
+      continue;
+    }
+
     // Longer than any real figure and the next column empty: the two ran
     // together without the engine even leaving a gap to notice.
     if (cell.digits.length > MAX_DIGITS && best + 1 < FIGURES.length && slots[best + 1] === null) {
@@ -202,10 +213,12 @@ function place(cells: Cell[], columns: number[]): {
       if (slots[best] === null) slots[best] = Number(cell.digits.slice(0, cut));
       slots[best + 1] = Number(cell.digits.slice(cut));
       split.add(best).add(best + 1);
+      taken.set(best, cell.x0);
       continue;
     }
 
-    if (slots[best] === null) slots[best] = Number(cell.digits);
+    slots[best] = Number(cell.digits);
+    taken.set(best, cell.x0);
   }
 
   return { slots, split };
@@ -344,14 +357,24 @@ const ResultsReader: React.FC<Props> = ({ images, participants, onClose, onApply
         const numbers = read.slots;
         if (numbers.length !== FIGURES.length || numbers.some((n) => n === null)) continue;
 
+        // The portrait and its badges come back as a word or two of nonsense in
+        // front of the name, which drags every score down and sinks the close
+        // calls -- LuisGz read as "PR Ra 1S) LuisCz" and matched nobody. So
+        // each word is tried on its own as well as the line as a whole.
         const target = plain(name);
+        const attempts = [target, ...name.split(/\s+/).map(plain)].filter((t) => t.length >= 3);
+
         let best: { playerId: string; score: number } | null = null;
         for (const member of known) {
-          const score = Math.max(
-            closeness(target, member.plain),
-            // A name cut short by the avatar still identifies its owner.
-            member.plain.startsWith(target) && target.length >= 4 ? 0.9 : 0,
-          );
+          let score = 0;
+          for (const attempt of attempts) {
+            score = Math.max(
+              score,
+              closeness(attempt, member.plain),
+              // A name cut short by the avatar still identifies its owner.
+              member.plain.startsWith(attempt) && attempt.length >= 4 ? 0.9 : 0,
+            );
+          }
           if (!best || score > best.score) best = { playerId: member.playerId, score };
         }
 
