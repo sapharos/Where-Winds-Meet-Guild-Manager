@@ -33,6 +33,11 @@ const AdminPanel: React.FC<Props> = ({ currentUser, canManageUsers, canManagePer
 
   const report = (text: string, ok = true) => setMessage({ text, ok });
 
+  // Leader and subleader are held by one person at a time; showing who has one
+  // saves discovering it from a refusal after the fact.
+  const holderOf = (role: UserRole) =>
+    ['leader', 'subleader'].includes(role) ? users.find((u) => u.role === role) : undefined;
+
   const load = async () => {
     try {
       const cat = await authService.getPermissions();
@@ -341,11 +346,19 @@ const AdminPanel: React.FC<Props> = ({ currentUser, canManageUsers, canManagePer
                         value={user.role}
                         onChange={(e) => patchUser(user.id, { role: e.target.value as UserRole })}
                       >
-                        {catalog.roles.map((role) => (
-                          <option key={role} value={role}>
-                            {ROLE_LABELS[role] ?? role}
-                          </option>
-                        ))}
+                        {catalog.roles.map((role) => {
+                          const held = holderOf(role);
+                          return (
+                            <option
+                              key={role}
+                              value={role}
+                              disabled={Boolean(held) && held?.id !== user.id}
+                            >
+                              {ROLE_LABELS[role] ?? role}
+                              {held && held.id !== user.id ? ` — lo tiene ${held.username}` : ''}
+                            </option>
+                          );
+                        })}
                       </select>
                     </td>
                     <td className="p-2 border-b border-slate-800/60">

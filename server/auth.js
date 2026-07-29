@@ -81,8 +81,8 @@ async function seedAdmin() {
   const password = process.env.ADMIN_PASSWORD || randomBytes(9).toString('base64url');
 
   await pool.query(
-    `INSERT INTO users (id, guild_id, username, password_hash, role)
-     VALUES ($1, $2, $3, $4, 'admin')`,
+    `INSERT INTO users (id, guild_id, username, password_hash, role, is_root)
+     VALUES ($1, $2, $3, $4, 'admin', true)`,
     [randomUUID(), GUILD_ID, username, await hashPassword(password)],
   );
 

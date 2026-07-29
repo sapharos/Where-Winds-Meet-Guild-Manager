@@ -21,6 +21,18 @@ CREATE TABLE IF NOT EXISTS users (
 
 ALTER TABLE users ADD COLUMN IF NOT EXISTS disabled BOOLEAN NOT NULL DEFAULT false;
 
+-- The account the guild was set up with. Administrators are peers except in one
+-- respect: only this one may take the role away from another, so a fellow
+-- administrator cannot quietly remove the person who appointed them.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS is_root BOOLEAN NOT NULL DEFAULT false;
+
+-- Deployments that predate the column: the first administrator created is the
+-- one the guild was set up with.
+UPDATE users u SET is_root = true
+ WHERE u.role = 'admin'
+   AND NOT EXISTS (SELECT 1 FROM users r WHERE r.guild_id = u.guild_id AND r.is_root)
+   AND u.created_at = (SELECT min(created_at) FROM users m WHERE m.guild_id = u.guild_id AND m.role = 'admin');
+
 -- Signing in with Discord instead of a password. The id is Discord's own and
 -- never changes, unlike the username, which is why the id is what identifies.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS discord_id       TEXT;

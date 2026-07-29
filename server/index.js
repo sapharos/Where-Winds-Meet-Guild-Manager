@@ -133,9 +133,22 @@ app.get('/api/registrations', requireAuth, requirePermission('users.manage'), as
 }));
 
 app.post('/api/registrations/:id/approve', requireAuth, requirePermission('users.manage'), asHandler(async (req, res) => {
-  const role = req.body?.role;
-  if (role !== undefined && !ROLES.includes(role)) return res.status(400).json({ error: 'unknown role' });
-  res.json(await approveRegistration(req.params.id, role ?? 'member'));
+  const role = req.body?.role ?? 'member';
+  if (!ROLES.includes(role)) return res.status(400).json({ error: 'unknown role' });
+
+  // Approving grants a role like any other assignment, so it obeys the same
+  // rules -- otherwise it would be the way around them.
+  if (role === 'admin' && req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'solo un administrador puede nombrar a otro' });
+  }
+  const holder = await alreadyHeldBy(role, null);
+  if (holder) {
+    return res.status(409).json({
+      error: `${holder} ya tiene ese rol. Quitaselo primero para poder asignarlo.`,
+    });
+  }
+
+  res.json(await approveRegistration(req.params.id, role));
 }));
 
 app.post('/api/registrations/:id/reject', requireAuth, requirePermission('users.manage'), asHandler(async (req, res) => {
@@ -161,6 +174,16 @@ app.post('/api/users', requireAuth, requirePermission('users.manage'), asHandler
     return res.status(400).json({ error: `password must be at least ${MIN_PASSWORD} characters` });
   }
   if (!ROLES.includes(role)) return res.status(400).json({ error: 'unknown role' });
+  if (role === 'admin' && req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'solo un administrador puede nombrar a otro' });
+  }
+
+  const holder = await alreadyHeldBy(role, null);
+  if (holder) {
+    return res.status(409).json({
+      error: `${holder} ya tiene ese rol. Quitaselo primero para poder asignarlo.`,
+    });
+  }
 
   const taken = await pool.query(
     `SELECT 1 FROM users WHERE guild_id = $1 AND lower(username) = lower($2)`,
@@ -175,6 +198,36 @@ app.post('/api/users', requireAuth, requirePermission('users.manage'), asHandler
   );
   res.status(201).json({ id, username: username.trim(), role, disabled: false });
 }));
+
+// Roles only one person may hold at a time. Handing one over means taking it
+// off whoever has it first, which keeps the guild's chain of command something
+// somebody decided rather than something that drifted.
+const SINGULAR_ROLES = ['leader', 'subleader'];
+
+async function alreadyHeldBy(role, exceptUserId) {
+  if (!SINGULAR_ROLES.includes(role)) return null;
+  const { rows } = await pool.query(
+    `SELECT username FROM users WHERE guild_id = $1 AND role = $2 AND id <> $3`,
+    [GUILD_ID, role, exceptUserId ?? ''],
+  );
+  return rows[0]?.username ?? null;
+}
+
+/**
+ * Whether this actor may touch this administrator.
+ *
+ * Administrators are peers in everything except each other: only the account
+ * the guild was set up with may take the role away, so no administrator can
+ * quietly remove the person who appointed them, and a leader -- who manages
+ * accounts but does not outrank an administrator -- cannot touch them at all.
+ */
+async function mayActOnAdmin(actorId) {
+  const { rows } = await pool.query(
+    `SELECT is_root AS "isRoot" FROM users WHERE id = $1 AND guild_id = $2`,
+    [actorId, GUILD_ID],
+  );
+  return Boolean(rows[0]?.isRoot);
+}
 
 // Refuses any edit that would remove the last account able to administer the
 // guild -- changing its role, disabling it, or deleting it.
@@ -195,10 +248,33 @@ app.patch('/api/users/:id', requireAuth, requirePermission('users.manage'), asHa
   const { role, password, disabled } = req.body ?? {};
   const { id } = req.params;
 
-  const { rows } = await pool.query(`SELECT id FROM users WHERE id = $1 AND guild_id = $2`, [id, GUILD_ID]);
+  const { rows } = await pool.query(
+    `SELECT id, username, role FROM users WHERE id = $1 AND guild_id = $2`,
+    [id, GUILD_ID],
+  );
   if (!rows.length) return res.status(404).json({ error: 'no such user' });
+  const target = rows[0];
 
   if (role !== undefined && !ROLES.includes(role)) return res.status(400).json({ error: 'unknown role' });
+
+  // Changing, disabling or deleting an administrator all remove them just the
+  // same, so they are guarded together rather than only the obvious one.
+  const touchesAdmin = target.role === 'admin' && (role !== undefined || disabled !== undefined);
+  if (touchesAdmin && !(await mayActOnAdmin(req.user.id))) {
+    return res.status(403).json({
+      error: 'solo la cuenta con la que se creo el gremio puede cambiar a un administrador',
+    });
+  }
+  if (role === 'admin' && req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'solo un administrador puede nombrar a otro' });
+  }
+
+  const holder = role === undefined ? null : await alreadyHeldBy(role, id);
+  if (holder) {
+    return res.status(409).json({
+      error: `${holder} ya tiene ese rol. Quitaselo primero para poder asignarlo.`,
+    });
+  }
   if (password !== undefined && password.length < MIN_PASSWORD) {
     return res.status(400).json({ error: `password must be at least ${MIN_PASSWORD} characters` });
   }
@@ -217,6 +293,13 @@ app.patch('/api/users/:id', requireAuth, requirePermission('users.manage'), asHa
 app.delete('/api/users/:id', requireAuth, requirePermission('users.manage'), asHandler(async (req, res) => {
   const { id } = req.params;
   if (id === req.user.id) return res.status(409).json({ error: 'you cannot delete your own account' });
+
+  const { rows } = await pool.query(`SELECT role FROM users WHERE id = $1 AND guild_id = $2`, [id, GUILD_ID]);
+  if (rows[0]?.role === 'admin' && !(await mayActOnAdmin(req.user.id))) {
+    return res.status(403).json({
+      error: 'solo la cuenta con la que se creo el gremio puede eliminar a un administrador',
+    });
+  }
   if (await wouldStrandGuild(id, { disabled: true })) {
     return res.status(409).json({ error: 'this is the last administrator account' });
   }
