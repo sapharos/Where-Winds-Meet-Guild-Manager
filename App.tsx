@@ -10,6 +10,7 @@ import WarPlanner from './components/WarPlanner';
 import CollaborationPanel from './components/CollaborationPanel';
 import LoginScreen from './components/LoginScreen';
 import DiscordClaim from './components/DiscordClaim';
+import MyProfile from './components/MyProfile';
 import AdminPanel from './components/AdminPanel';
 import ScanImport from './components/ScanImport';
 import MemberHistory from './components/MemberHistory';
@@ -18,7 +19,7 @@ import BuildEditor from './components/BuildEditor';
 const App: React.FC = () => {
   const [session, setSession] = useState<Session | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
-  const [activeTab, setActiveTab] = useState<'roster' | 'war-room' | 'scan' | 'admin'>('roster');
+  const [activeTab, setActiveTab] = useState<'me' | 'roster' | 'war-room' | 'scan' | 'admin'>('roster');
   const [historyFor, setHistoryFor] = useState<Player | null>(null);
   const [buildsFor, setBuildsFor] = useState<Player | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
@@ -141,6 +142,12 @@ const App: React.FC = () => {
   useEffect(() => {
     if (session) void loadAllData();
   }, [session, loadAllData]);
+
+  // A member arrives asking how they are doing, not who else is in the guild,
+  // so the personal page opens when there is one to open.
+  useEffect(() => {
+    if (session?.user.playerId) setActiveTab('me');
+  }, [session?.user.playerId]);
 
   // PeerJS logic
   const broadcastState = useCallback((p: Player[], s: GuildWarSession[], r: GuildRank[]) => {
@@ -353,6 +360,7 @@ const App: React.FC = () => {
   };
 
   const activeSession = sessions.find(s => s.id === activeSessionId);
+  const myPlayer = players.find((p) => p.id === session?.user.playerId);
   const canSeeAdmin = can('users.manage') || can('permissions.manage') || can('builds.manage');
 
   const handleUpdateSession = (updatedSession: GuildWarSession) => {
@@ -406,6 +414,15 @@ const App: React.FC = () => {
               <i className="fa-solid fa-users"></i>
               Guild Roster
             </button>
+            {myPlayer && (
+              <button
+                onClick={() => setActiveTab('me')}
+                className={`px-6 py-2 rounded-md text-sm font-semibold transition-all flex items-center gap-2 ${activeTab === 'me' ? 'bg-amber-700 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
+              >
+                <i className="fa-solid fa-user"></i>
+                Mi perfil
+              </button>
+            )}
             <button
               onClick={() => setActiveTab('war-room')}
               className={`px-6 py-2 rounded-md text-sm font-semibold transition-all flex items-center gap-2 ${activeTab === 'war-room' ? 'bg-amber-700 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
@@ -511,6 +528,18 @@ const App: React.FC = () => {
             <i className="fa-solid fa-circle-notch fa-spin"></i>
             Loading guild data...
           </div>
+        ) : activeTab === 'me' ? (
+          myPlayer ? (
+            <MyProfile
+              player={myPlayer}
+              weaponSets={weaponSets}
+              onEditBuilds={() => setBuildsFor(myPlayer)}
+            />
+          ) : (
+            <p className="text-sm text-slate-500 text-center py-12">
+              Tu cuenta todavía no está enlazada a un miembro del roster.
+            </p>
+          )
         ) : activeTab === 'scan' ? (
           <ScanImport players={players} onImported={() => void loadAllData()} />
         ) : activeTab === 'admin' ? (
@@ -559,7 +588,10 @@ const App: React.FC = () => {
       {buildsFor && (
         <BuildEditor
           player={buildsFor}
-          canEdit={peerRole !== 'CLIENT' && can('builds.manage')}
+          canEdit={
+            peerRole !== 'CLIENT' &&
+            (can('builds.manage') || buildsFor.id === session.user.playerId)
+          }
           onClose={() => setBuildsFor(null)}
           onSaved={() => void loadAllData()}
         />

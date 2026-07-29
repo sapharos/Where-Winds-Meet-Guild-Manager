@@ -77,14 +77,17 @@ export async function finishDiscord(req, res, secret) {
 
   const profile = await exchange(String(code));
   const { rows } = await pool.query(
-    `SELECT id, username, role, disabled FROM users WHERE guild_id = $1 AND discord_id = $2`,
+    `SELECT id, username, role, disabled, player_id AS "playerId"
+       FROM users WHERE guild_id = $1 AND discord_id = $2`,
     [GUILD_ID, profile.id],
   );
 
   if (rows[0] && !rows[0].disabled) {
     // Keep the display name current: people rename themselves on Discord.
     await pool.query(`UPDATE users SET discord_username = $1 WHERE id = $2`, [profile.username, rows[0].id]);
-    return { user: { id: rows[0].id, username: rows[0].username, role: rows[0].role } };
+    return {
+      user: { id: rows[0].id, username: rows[0].username, role: rows[0].role, playerId: rows[0].playerId },
+    };
   }
   if (rows[0]?.disabled) throw Object.assign(new Error('that account is disabled'), { status: 403 });
 

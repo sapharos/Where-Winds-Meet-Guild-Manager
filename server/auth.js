@@ -149,7 +149,7 @@ export async function saveMatrix(incoming) {
 
 export async function verifyLogin(username, password) {
   const { rows } = await pool.query(
-    `SELECT id, username, password_hash, role, disabled FROM users
+    `SELECT id, username, password_hash, role, disabled, player_id AS "playerId" FROM users
       WHERE guild_id = $1 AND lower(username) = lower($2)`,
     [GUILD_ID, username],
   );
@@ -161,7 +161,7 @@ export async function verifyLogin(username, password) {
   const ok = await bcrypt.compare(password, hash);
 
   if (!user || !ok || user.disabled) return null;
-  return { id: user.id, username: user.username, role: user.role };
+  return { id: user.id, username: user.username, role: user.role, playerId: user.playerId };
 }
 
 export function issueCookie(res, user) {
@@ -188,7 +188,7 @@ export async function requireAuth(req, res, next) {
 
     const claims = jwt.verify(token, secret);
     const { rows } = await pool.query(
-      `SELECT id, username, role, disabled FROM users WHERE id = $1 AND guild_id = $2`,
+      `SELECT id, username, role, disabled, player_id AS "playerId" FROM users WHERE id = $1 AND guild_id = $2`,
       [claims.sub, GUILD_ID],
     );
     const user = rows[0];
@@ -197,7 +197,9 @@ export async function requireAuth(req, res, next) {
       return res.status(401).json({ error: 'not signed in' });
     }
 
-    req.user = { id: user.id, username: user.username, role: user.role };
+    // The roster entry this account belongs to, which is what makes a personal
+    // page possible and what lets a member edit their own builds.
+    req.user = { id: user.id, username: user.username, role: user.role, playerId: user.playerId };
     req.permissions = await permissionsFor(user.role);
     next();
   } catch {

@@ -146,6 +146,8 @@ export interface AuthUser {
   id: string;
   username: string;
   role: UserRole;
+  // The roster entry this account belongs to, when a leader has linked one.
+  playerId?: string | null;
 }
 
 export interface ManagedUser extends AuthUser {
