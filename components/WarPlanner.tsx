@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo } from 'react';
-import { Player, Role, Lane, TacticalGroup, WarAssignment, GuildWarSession, GuildRank } from '../types';
+import { Player, Role, Lane, TacticalGroup, WarAssignment, GuildWarSession, GuildRank, LANE_NAMES } from '../types';
 import { LANE_DATA, MAX_WAR_PLAYERS, GROUP_ICONS, GROUP_COLORS, ROLE_ICONS, ROLE_COLORS } from '../constants';
 import PlayerCard from './PlayerCard';
 
@@ -130,18 +130,18 @@ const WarPlanner: React.FC<WarPlannerProps> = ({ players, activeSession, onUpdat
   return (
     <div className="flex flex-col lg:flex-row gap-6 h-full relative">
       
-      {/* SIDEBAR: Available Roster */}
+      {/* SIDEBAR: Disponibles */}
       <div className={`w-full lg:w-80 flex flex-col gap-4 ${isViewer ? 'opacity-60 cursor-not-allowed grayscale-[0.5]' : ''}`}>
         <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl flex flex-col h-[calc(100vh-180px)]">
           <div className="mb-4">
             <h3 className="cinzel text-lg font-bold text-amber-500 flex justify-between items-center">
-              Available Roster
+              Disponibles
               <span className="text-xs bg-slate-800 text-slate-300 px-2 py-1 rounded font-sans">
                 {unassignedPlayers.length}
               </span>
             </h3>
             <p className="text-[10px] text-slate-500 uppercase tracking-tighter mt-1 italic">
-              {isViewer ? 'Observation Only' : `Assign to ${selectedLane.split(' ')[0]}`}
+              {isViewer ? 'Solo lectura' : `Asignar a ${LANE_NAMES[selectedLane].replace('Línea ', '')}`}
             </p>
           </div>
           
@@ -149,7 +149,7 @@ const WarPlanner: React.FC<WarPlannerProps> = ({ players, activeSession, onUpdat
             {unassignedPlayers.length === 0 ? (
               <div className="text-center py-12 text-slate-700">
                 <i className="fa-solid fa-people-group text-3xl mb-3 opacity-20"></i>
-                <p className="text-xs font-bold uppercase tracking-widest opacity-40">All members mobilized</p>
+                <p className="text-xs font-bold uppercase tracking-widest opacity-40">Todos asignados</p>
               </div>
             ) : (
               unassignedPlayers.map(p => (
@@ -162,7 +162,7 @@ const WarPlanner: React.FC<WarPlannerProps> = ({ players, activeSession, onUpdat
 
           <div className="mt-4 pt-4 border-t border-slate-800 space-y-2">
             <div className="flex justify-between text-xs">
-               <span className="text-slate-500 uppercase font-bold text-[10px]">War Strength</span>
+               <span className="text-slate-500 uppercase font-bold text-[10px]">Fuerza de guerra</span>
                <span className={assignments.length === 30 ? 'text-green-400 font-bold' : 'text-slate-200'}>
                   {assignments.length} / {MAX_WAR_PLAYERS}
                </span>
@@ -253,7 +253,7 @@ const WarPlanner: React.FC<WarPlannerProps> = ({ players, activeSession, onUpdat
                           : `bg-slate-900 border-slate-800 text-slate-400 ${isViewer ? 'opacity-40' : 'hover:bg-slate-800'}`}`}
                     >
                       <span className="text-base">{l.icon}</span>
-                      {l.id.split(' ')[0]}
+                      {LANE_NAMES[l.id].replace('Línea ', '')}
                     </button>
                   ))}
                 </div>
@@ -286,19 +286,19 @@ const WarPlanner: React.FC<WarPlannerProps> = ({ players, activeSession, onUpdat
         {/* Stats */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <div className="bg-slate-900/80 backdrop-blur-sm border border-slate-800 p-4 rounded-xl flex flex-col gap-1 border-l-4 border-l-blue-500 shadow-xl">
-            <span className="text-blue-400 text-[10px] uppercase font-bold tracking-widest opacity-80">Heavy Units</span>
+            <span className="text-blue-400 text-[10px] uppercase font-bold tracking-widest opacity-80">Tanques</span>
             <span className="text-2xl font-bold cinzel text-white">{getRoleCount(Role.TANK)}</span>
           </div>
           <div className="bg-slate-900/80 backdrop-blur-sm border border-slate-800 p-4 rounded-xl flex flex-col gap-1 border-l-4 border-l-red-500 shadow-xl">
-            <span className="text-red-400 text-[10px] uppercase font-bold tracking-widest opacity-80">Strike Forces</span>
+            <span className="text-red-400 text-[10px] uppercase font-bold tracking-widest opacity-80">Ofensiva</span>
             <span className="text-2xl font-bold cinzel text-white">{getRoleCount(Role.DPS)}</span>
           </div>
           <div className="bg-slate-900/80 backdrop-blur-sm border border-slate-800 p-4 rounded-xl flex flex-col gap-1 border-l-4 border-l-green-500 shadow-xl">
-            <span className="text-green-400 text-[10px] uppercase font-bold tracking-widest opacity-80">Support Corps</span>
+            <span className="text-green-400 text-[10px] uppercase font-bold tracking-widest opacity-80">Soporte</span>
             <span className="text-2xl font-bold cinzel text-white">{getRoleCount(Role.HEALER)}</span>
           </div>
           <div className="bg-slate-900/80 backdrop-blur-sm border border-slate-800 p-4 rounded-xl flex flex-col gap-1 border-l-4 border-l-amber-500 shadow-xl">
-            <span className="text-amber-500 text-[10px] uppercase font-bold tracking-widest opacity-80">Special Units</span>
+            <span className="text-amber-500 text-[10px] uppercase font-bold tracking-widest opacity-80">Unidades especiales</span>
             <span className="text-2xl font-bold cinzel text-white">{groups.length}</span>
           </div>
         </div>
@@ -313,7 +313,7 @@ const WarPlanner: React.FC<WarPlannerProps> = ({ players, activeSession, onUpdat
                 : 'bg-transparent text-slate-500 border border-transparent hover:text-slate-300'}`}
           >
             <i className="fa-solid fa-map-marked-alt text-base"></i>
-            Sector Deployment
+            Despliegue por líneas
           </button>
           <button 
             onClick={() => setViewMode('tactical')}
@@ -323,7 +323,7 @@ const WarPlanner: React.FC<WarPlannerProps> = ({ players, activeSession, onUpdat
                 : 'bg-transparent text-slate-500 border border-transparent hover:text-slate-300'}`}
           >
             <i className="fa-solid fa-crosshairs text-base"></i>
-            Tactical Units
+            Unidades tácticas
           </button>
         </div>
 
@@ -340,7 +340,7 @@ const WarPlanner: React.FC<WarPlannerProps> = ({ players, activeSession, onUpdat
                       : 'bg-transparent text-slate-500 border-transparent hover:text-slate-300'}`}
                 >
                   <span className="text-xl">{lane.icon}</span>
-                  <span className="hidden md:inline text-[11px] uppercase tracking-[0.2em] font-bold">{lane.id}</span>
+                  <span className="hidden md:inline text-[11px] uppercase tracking-[0.2em] font-bold">{LANE_NAMES[lane.id]}</span>
                   <span className={`text-[11px] px-2.5 py-0.5 rounded-full font-sans ${selectedLane === lane.id ? 'bg-amber-600 text-white' : 'bg-slate-800 text-slate-500'}`}>
                     {assignments.filter(a => a.lane === lane.id).length}
                   </span>
@@ -355,8 +355,8 @@ const WarPlanner: React.FC<WarPlannerProps> = ({ players, activeSession, onUpdat
                       {LANE_DATA.find(l => l.id === selectedLane)?.icon}
                    </div>
                    <div>
-                     <h4 className="cinzel text-2xl text-slate-100 font-bold uppercase tracking-widest">{selectedLane}</h4>
-                     <p className="text-[10px] text-slate-500 uppercase font-bold tracking-[0.2em] mt-1">Strategic Sector Strength Assessment</p>
+                     <h4 className="cinzel text-2xl text-slate-100 font-bold uppercase tracking-widest">{LANE_NAMES[selectedLane]}</h4>
+                     <p className="text-[10px] text-slate-500 uppercase font-bold tracking-[0.2em] mt-1">Evaluación de fuerza del sector</p>
                    </div>
                 </div>
               </div>
@@ -365,7 +365,7 @@ const WarPlanner: React.FC<WarPlannerProps> = ({ players, activeSession, onUpdat
                 {playersInLane(selectedLane).length === 0 ? (
                   <div className="col-span-full flex flex-col items-center justify-center py-32 text-slate-800 border-2 border-dashed border-slate-800 rounded-3xl opacity-50">
                      <i className="fa-solid fa-ghost text-9xl mb-6 opacity-5"></i>
-                     <p className="cinzel uppercase tracking-[0.4em] font-bold text-lg">Sector Abandoned</p>
+                     <p className="cinzel uppercase tracking-[0.4em] font-bold text-lg">Sector sin asignar</p>
                   </div>
                 ) : (
                   playersInLane(selectedLane).map(({ assignment, player }) => {
@@ -434,7 +434,7 @@ const WarPlanner: React.FC<WarPlannerProps> = ({ players, activeSession, onUpdat
                           </div>
                           <div>
                             <span className="tracking-[0.2em] uppercase text-sm font-bold block leading-none">{group.name}</span>
-                            <span className="text-[9px] uppercase tracking-widest opacity-60 mt-1 block font-sans">Specialty Squad</span>
+                            <span className="text-[9px] uppercase tracking-widest opacity-60 mt-1 block font-sans">Escuadra especial</span>
                           </div>
                        </h4>
                        <div className="flex items-center gap-4 relative z-10">
@@ -455,7 +455,7 @@ const WarPlanner: React.FC<WarPlannerProps> = ({ players, activeSession, onUpdat
                        {members.length === 0 ? (
                          <div className="col-span-full py-16 text-center border-2 border-dashed border-slate-800/50 rounded-2xl">
                             <i className={`fa-solid ${group.icon} text-6xl mb-5 text-slate-800 opacity-10`}></i>
-                            <p className="text-slate-600 text-[10px] uppercase font-bold tracking-[0.3em]">Unit Vacant</p>
+                            <p className="text-slate-600 text-[10px] uppercase font-bold tracking-[0.3em]">Sin miembros</p>
                          </div>
                        ) : (
                          members.map(({player, assignment}) => (
@@ -487,7 +487,7 @@ const WarPlanner: React.FC<WarPlannerProps> = ({ players, activeSession, onUpdat
                     <i className="fa-solid fa-scroll text-slate-700 group-hover/new:text-amber-500 text-4xl"></i>
                   </div>
                   <div className="text-center">
-                    <span className="text-slate-500 font-bold block cinzel text-lg uppercase tracking-[0.3em]">Commission specialty Unit</span>
+                    <span className="text-slate-500 font-bold block cinzel text-lg uppercase tracking-[0.3em]">Crear unidad especial</span>
                   </div>
                 </button>
               )}
@@ -504,18 +504,18 @@ const WarPlanner: React.FC<WarPlannerProps> = ({ players, activeSession, onUpdat
                    </div>
                    <div className="space-y-8">
                       <div>
-                         <label className="text-[10px] uppercase font-bold tracking-[0.2em] text-slate-500 block mb-3">Unit Identity</label>
+                         <label className="text-[10px] uppercase font-bold tracking-[0.2em] text-slate-500 block mb-3">Nombre de la unidad</label>
                          <input 
                             type="text" 
                             className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 outline-none focus:ring-1 focus:ring-amber-600/50 focus:border-amber-600 transition-all text-sm font-medium tracking-widest text-white shadow-inner"
-                            placeholder="e.g. Shadow Vanguard"
+                            placeholder="p. ej. Vanguardia Sombría"
                             value={newGroupName}
                             onChange={e => setNewGroupName(e.target.value)}
                          />
                       </div>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                          <div>
-                            <label className="text-[10px] uppercase font-bold tracking-[0.2em] text-slate-500 block mb-4">Tactical Insignia</label>
+                            <label className="text-[10px] uppercase font-bold tracking-[0.2em] text-slate-500 block mb-4">Insignia</label>
                             <div className="grid grid-cols-4 gap-2">
                                {GROUP_ICONS.map(icon => (
                                  <button 
@@ -529,7 +529,7 @@ const WarPlanner: React.FC<WarPlannerProps> = ({ players, activeSession, onUpdat
                             </div>
                          </div>
                          <div>
-                            <label className="text-[10px] uppercase font-bold tracking-[0.2em] text-slate-500 block mb-4">Unit Color</label>
+                            <label className="text-[10px] uppercase font-bold tracking-[0.2em] text-slate-500 block mb-4">Color</label>
                             <div className="grid grid-cols-4 gap-3">
                                {GROUP_COLORS.map(color => {
                                  const colorMap: Record<string, string> = {

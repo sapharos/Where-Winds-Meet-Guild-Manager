@@ -408,9 +408,9 @@ const App: React.FC = () => {
             <div>
               <h1 className="cinzel text-2xl font-bold tracking-widest text-white leading-none">WHERE WINDS MEET</h1>
               <div className="flex items-center gap-2 mt-1">
-                <p className="text-[10px] uppercase tracking-[0.2em] text-amber-500 font-bold">Strategic Command</p>
+                <p className="text-[10px] uppercase tracking-[0.2em] text-amber-500 font-bold">Mando Estratégico</p>
                 {peerRole === 'HOST' && <span className="bg-amber-600 text-[8px] px-1.5 py-0.5 rounded text-white font-bold animate-pulse">EDITOR</span>}
-                {peerRole === 'CLIENT' && <span className="bg-blue-600 text-[8px] px-1.5 py-0.5 rounded text-white font-bold">VIEWER</span>}
+                {peerRole === 'CLIENT' && <span className="bg-blue-600 text-[8px] px-1.5 py-0.5 rounded text-white font-bold">OBSERVADOR</span>}
               </div>
             </div>
           </div>
@@ -421,7 +421,7 @@ const App: React.FC = () => {
               className={`px-6 py-2 rounded-md text-sm font-semibold transition-all flex items-center gap-2 ${activeTab === 'roster' ? 'bg-amber-700 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
             >
               <i className="fa-solid fa-users"></i>
-              Guild Roster
+              Roster
             </button>
             {myPlayer && (
               <button
@@ -437,7 +437,7 @@ const App: React.FC = () => {
               className={`px-6 py-2 rounded-md text-sm font-semibold transition-all flex items-center gap-2 ${activeTab === 'war-room' ? 'bg-amber-700 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
             >
               <i className="fa-solid fa-chess-knight"></i>
-              War Room
+              Sala de Guerra
             </button>
             {can('roster.edit') && (
               <button
@@ -476,7 +476,7 @@ const App: React.FC = () => {
                   <button
                     onClick={handleExport}
                     className="p-2 text-slate-400 hover:text-amber-500 hover:bg-slate-900 rounded transition-all"
-                    title="Export Guild Data"
+                    title="Exportar los datos del gremio"
                   >
                     <i className="fa-solid fa-download"></i>
                   </button>
@@ -486,7 +486,7 @@ const App: React.FC = () => {
                     onClick={handleImportClick}
                     disabled={peerRole === 'CLIENT'}
                     className={`p-2 rounded transition-all ${peerRole === 'CLIENT' ? 'text-slate-700 cursor-not-allowed' : 'text-slate-400 hover:text-amber-500 hover:bg-slate-900'}`}
-                    title="Import Guild Data"
+                    title="Importar datos del gremio"
                   >
                     <i className="fa-solid fa-upload"></i>
                   </button>
@@ -587,7 +587,7 @@ const App: React.FC = () => {
             />
           ) : (
             <div className="flex items-center justify-center h-96">
-               <p className="text-slate-500">Initializing tactical interface...</p>
+               <p className="text-slate-500">Preparando la interfaz táctica...</p>
             </div>
           )
         )}
@@ -612,15 +612,15 @@ const App: React.FC = () => {
            <div className="flex items-center gap-8 text-[10px] font-bold uppercase tracking-widest text-slate-500">
               <span className="flex items-center gap-2">
                  <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></div>
-                 Defensive Grade: <span className="text-white">OPTIMIZED</span>
+                 Grado defensivo: <span className="text-white">ÓPTIMO</span>
               </span>
               <span className="flex items-center gap-2">
                  <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>
-                 Siegemastery: <span className="text-white">BALANCED</span>
+                 Asedio: <span className="text-white">EQUILIBRADO</span>
               </span>
               <span className="flex items-center gap-2">
                  <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
-                 Sustain Matrix: <span className="text-white">STABLE</span>
+                 Sostenimiento: <span className="text-white">ESTABLE</span>
               </span>
            </div>
         </footer>

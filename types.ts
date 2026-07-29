@@ -12,6 +12,15 @@ export enum Lane {
   UNASSIGNED = 'Unassigned'
 }
 
+// Shown instead of the enum values, which are stored on every assignment in the
+// database and so cannot be translated without rewriting past war plans.
+export const LANE_NAMES: Record<Lane, string> = {
+  [Lane.TOP]: 'Línea superior',
+  [Lane.MID]: 'Línea central',
+  [Lane.BOT]: 'Línea inferior',
+  [Lane.UNASSIGNED]: 'Sin asignar',
+};
+
 export enum Platform {
   PC = 'PC',
   PS5 = 'PS5',
