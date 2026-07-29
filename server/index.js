@@ -427,10 +427,11 @@ app.patch('/api/players/:id/flags', requireAuth, requirePermission('roster.edit'
 
   const { rows } = await pool.query(
     `UPDATE players
-        SET is_starter = COALESCE($1, is_starter),
-            war_side   = CASE WHEN $2::boolean THEN $3 ELSE war_side END,
-            is_active  = COALESCE($4, is_active),
-            -- Somebody who has left is not being fielded on Saturday.
+        SET war_side  = CASE WHEN $2::boolean THEN $3 ELSE war_side END,
+            is_active = COALESCE($4, is_active),
+            -- One assignment covering both rules, because a column may only be
+            -- set once: keep what was asked for, unless the member is being
+            -- marked as gone, in which case they are not being fielded either.
             is_starter = CASE WHEN $4::boolean IS false THEN false
                               ELSE COALESCE($1, is_starter) END
       WHERE guild_id = $5 AND id = $6

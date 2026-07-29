@@ -63,10 +63,15 @@ const App: React.FC = () => {
         return;
       }
       console.error('Save failed', err);
+      // Saying "check the connection" when the server answered and refused
+      // sends the reader looking in the wrong place, so its own words are
+      // shown when it gave any.
       setSaveError(
-        err instanceof ApiError && err.status === 403
-          ? 'Your role does not allow that change.'
-          : 'Changes could not be saved. Check the connection to the server.',
+        err instanceof ApiError
+          ? err.status === 403
+            ? 'Tu rol no permite ese cambio.'
+            : `No se pudo guardar: ${err.message}`
+          : 'No se pudo guardar. Revisa la conexión con el servidor.',
       );
     });
   }, []);
@@ -323,8 +328,19 @@ const App: React.FC = () => {
 
   const setFlags = (p: Player, flags: { isStarter?: boolean; warSide?: WarSide | null; isActive?: boolean }) => {
     if (rosterLocked) return;
+
+    // Shown immediately so the roster stays responsive, but put back if the
+    // save fails: a card that keeps a change the server rejected is worse than
+    // a slow one, because the work looks done until the page is reloaded.
+    const before = { isStarter: p.isStarter, warSide: p.warSide, isActive: p.isActive };
     setPlayers((prev) => prev.map((x) => (x.id === p.id ? { ...x, ...flags } : x)));
-    persist(api(`/players/${p.id}/flags`, { method: 'PATCH', body: JSON.stringify(flags) }));
+
+    persist(
+      api(`/players/${p.id}/flags`, { method: 'PATCH', body: JSON.stringify(flags) }).catch((err) => {
+        setPlayers((prev) => prev.map((x) => (x.id === p.id ? { ...x, ...before } : x)));
+        throw err;
+      }),
+    );
   };
 
   const handleToggleStarter = (p: Player) => setFlags(p, { isStarter: !p.isStarter });
