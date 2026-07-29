@@ -2,8 +2,18 @@ import React, { useEffect, useRef, useState } from 'react';
 
 const MINUTE = 60_000;
 
-/** How long before an event is worth interrupting somebody over. */
-const WARNING_MS = 90_000;
+/**
+ * When to interrupt somebody: a minute out to get ready, thirty seconds out to
+ * go. Each fires inside its own band -- opening the page twenty seconds before
+ * an event should bring one warning, not both at once.
+ */
+const WARNINGS = [
+  { at: 60_000, label: '1 minuto' },
+  { at: 30_000, label: '30 segundos' },
+];
+
+/** From the first warning onwards the panel says so without being asked. */
+const WARNING_MS = WARNINGS[0].at;
 
 /** The jungle comes round again and again; the boss comes twice and is done. */
 const JUNGLE_EVERY = 5 * MINUTE;
@@ -71,21 +81,27 @@ const WarTimers: React.FC<Props> = ({ startedAt, offset, mayBeWarned }) => {
   const jungle = nextJungle(elapsed);
   const boss = nextBoss(elapsed);
 
-  // A warning fires once per event, and only for the people who asked for it.
+  // Each warning fires once per event, and only for the people who asked.
   useEffect(() => {
     if (warnings !== 'on') return;
     for (const event of [jungle, boss]) {
-      if (!event || event.remaining > WARNING_MS || event.remaining <= 0) continue;
-      if (fired.current.has(event.key)) continue;
-      fired.current.add(event.key);
-      try {
-        new Notification(`${event.label} en ${clock(event.remaining)}`, {
-          body: 'Zona Zero · sala de guerra',
-          tag: event.key,
-        });
-      } catch {
-        // Denied or unsupported: the panel still shows the countdown.
-      }
+      if (!event) continue;
+      WARNINGS.forEach((warning, index) => {
+        const floor = WARNINGS[index + 1]?.at ?? 0;
+        if (event.remaining > warning.at || event.remaining <= floor) return;
+
+        const key = `${event.key}@${warning.at}`;
+        if (fired.current.has(key)) return;
+        fired.current.add(key);
+        try {
+          new Notification(`${event.label} en ${warning.label}`, {
+            body: 'Zona Zero · sala de guerra',
+            tag: key,
+          });
+        } catch {
+          // Denied or unsupported: the panel still shows the countdown.
+        }
+      });
     }
   }, [warnings, jungle.key, jungle.remaining, boss?.key, boss?.remaining]);
 
@@ -146,7 +162,7 @@ const WarTimers: React.FC<Props> = ({ startedAt, offset, mayBeWarned }) => {
       {mayBeWarned && (
         <button
           onClick={ask}
-          title="Avisar minuto y medio antes de cada temporizador, mientras esta pagina siga abierta"
+          title="Avisar un minuto y treinta segundos antes de cada temporizador, mientras esta pagina siga abierta"
           className={`text-xs font-bold px-3 py-2 rounded border transition-all flex items-center gap-2 ${
             warnings === 'on'
               ? 'border-amber-500 text-amber-400 bg-amber-500/10'
@@ -154,7 +170,7 @@ const WarTimers: React.FC<Props> = ({ startedAt, offset, mayBeWarned }) => {
           }`}
         >
           <i className={`fa-solid ${warnings === 'on' ? 'fa-bell' : 'fa-bell-slash'}`}></i>
-          Avisos 1:30 antes
+          Avisos 1:00 y 0:30
         </button>
       )}
     </div>
