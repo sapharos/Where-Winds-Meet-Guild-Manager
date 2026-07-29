@@ -12,7 +12,7 @@ const valid = (side, lane) => SIDES.includes(side) && LANES.includes(lane);
 
 export async function getDeployments() {
   const { rows } = await pool.query(
-    `SELECT side, lane, player_id AS "playerId", unit_id AS "unitId",
+    `SELECT side, lane, player_id AS "playerId", unit_ids AS "unitIds",
             build_id AS "buildId", position
        FROM war_deployments WHERE guild_id = $1 ORDER BY side, lane, position`,
     [GUILD_ID],
@@ -21,22 +21,26 @@ export async function getDeployments() {
 }
 
 /**
- * Put a deployed member into a tactical unit, or take them out of one.
+ * Say which tactical units a deployed member belongs to.
  *
  * Separate from placing them in a lane so that neither can silently clear the
  * other: a unit is a job and a lane is a position, and moving somebody along
- * the front does not take away what they were sent to do.
+ * the front does not take away what they were sent to do. More than one job at
+ * a time is ordinary -- the same healer can be on the escort and in the camps.
  */
-export async function setUnit(side, playerId, unitId) {
+export async function setUnits(side, playerId, unitIds) {
   if (!SIDES.includes(side)) throw Object.assign(new Error('unknown side'), { status: 400 });
 
+  const wanted = Array.isArray(unitIds) ? unitIds : [];
+  const clean = [...new Set(wanted.filter((id) => typeof id === 'string' && id))].slice(0, 24);
+
   const { rowCount } = await pool.query(
-    `UPDATE war_deployments SET unit_id = $1
+    `UPDATE war_deployments SET unit_ids = $1::jsonb
       WHERE guild_id = $2 AND side = $3 AND player_id = $4`,
-    [unitId || null, GUILD_ID, side, playerId],
+    [JSON.stringify(clean), GUILD_ID, side, playerId],
   );
   if (!rowCount) throw Object.assign(new Error('ese miembro no esta desplegado'), { status: 409 });
-  return { ok: true };
+  return { units: clean };
 }
 
 /**
@@ -238,12 +242,16 @@ export async function deleteStrategy(id) {
  */
 async function pruneUnits(side) {
   await pool.query(
-    `UPDATE war_deployments d SET unit_id = NULL
-      WHERE d.guild_id = $1 AND d.side = $2 AND d.unit_id IS NOT NULL
-        AND NOT EXISTS (
-          SELECT 1 FROM war_strategies s, jsonb_array_elements(s.units) u
-           WHERE s.guild_id = d.guild_id AND s.side = d.side AND u->>'id' = d.unit_id
-        )`,
+    `UPDATE war_deployments d
+        SET unit_ids = COALESCE((
+              SELECT jsonb_agg(held)
+                FROM jsonb_array_elements_text(d.unit_ids) AS held
+               WHERE EXISTS (
+                 SELECT 1 FROM war_strategies s, jsonb_array_elements(s.units) u
+                  WHERE s.guild_id = d.guild_id AND s.side = d.side AND u->>'id' = held
+               )
+            ), '[]'::jsonb)
+      WHERE d.guild_id = $1 AND d.side = $2 AND jsonb_array_length(d.unit_ids) > 0`,
     [GUILD_ID, side],
   );
 }

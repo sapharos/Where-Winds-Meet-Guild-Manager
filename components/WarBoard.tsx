@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../services/authService';
 import {
   Deployment,
@@ -72,8 +72,13 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
   const [markFilter, setMarkFilter] = useState<'' | WarSide | 'none'>('');
   const [planning, setPlanning] = useState(false);
 
+  // What the board holds right now, for handlers that fire faster than a render.
+  const latest = useRef<Deployment[]>([]);
+
   const load = async () => {
-    setDeployments(await api<Deployment[]>('/war/deployments').catch(() => []));
+    const fresh = await api<Deployment[]>('/war/deployments').catch(() => []);
+    latest.current = fresh;
+    setDeployments(fresh);
     const plans = await api<WarStrategy[]>('/war/strategies').catch(() => []);
     // Strategies written before units existed come back without them.
     setStrategies(plans.map((s) => ({ ...s, units: s.units ?? [] })));
@@ -115,7 +120,7 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
 
   const placed = new Set(here.map((d) => d.playerId));
   const full = deployments.length >= WAR_CAPACITY;
-  const unitOf = new Map(here.map((d) => [d.playerId, d.unitId ?? null]));
+  const unitsOf = new Map<string, string[]>(here.map((d) => [d.playerId, d.unitIds ?? []]));
   // Where somebody stands on the other board: nobody fights both halves, so
   // this is what makes them unavailable here.
   const elsewhere = new Map<string, WarSide>(
@@ -163,15 +168,35 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
     }
   };
 
-  const assign = async (playerId: string, unit: string | null) => {
+  /**
+   * Add somebody to a unit, or take them out of one.
+   *
+   * Read from the ref and shown at once, because putting a person in two units
+   * is two clicks in a row: waiting for the first to come back from the server
+   * before the second is read would make the second overwrite the first.
+   */
+  const toggleUnit = async (playerId: string, unitId: string) => {
+    const before = latest.current;
+    const held = before.find((d) => d.side === side && d.playerId === playerId)?.unitIds ?? [];
+    const next = held.includes(unitId) ? held.filter((id) => id !== unitId) : [...held, unitId];
+
+    const after = before.map((d) =>
+      d.side === side && d.playerId === playerId ? { ...d, unitIds: next } : d,
+    );
     setError(null);
+    // Into the ref as well as the state: React has not re-rendered by the time
+    // the next click arrives, and the second unit must build on the first.
+    latest.current = after;
+    setDeployments(after);
+
     try {
-      await api(`/war/deployments/${side}/${playerId}/unit`, {
+      await api(`/war/deployments/${side}/${playerId}/units`, {
         method: 'PUT',
-        body: JSON.stringify({ unit }),
+        body: JSON.stringify({ units: next }),
       });
-      await load();
     } catch (err) {
+      latest.current = before;
+      setDeployments(before);
       setError(err instanceof Error ? err.message : 'No se pudo asignar la unidad');
     }
   };
@@ -274,14 +299,14 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
           <div className="flex items-baseline justify-between mb-3 gap-3 flex-wrap">
             <h3 className="cinzel font-bold text-lg text-slate-300">Unidades tácticas</h3>
             <span className="text-[11px] text-slate-500">
-              {here.filter((d) => !d.unitId).length} de {here.length} desplegados sin unidad
+              {here.filter((d) => !(d.unitIds?.length)).length} de {here.length} desplegados sin unidad
             </span>
           </div>
 
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {strategy.units.map((unit) => {
               const members = here
-                .filter((d) => d.unitId === unit.id)
+                .filter((d) => d.unitIds?.includes(unit.id))
                 .map((d) => byId.get(d.playerId))
                 .filter(Boolean) as Player[];
 
@@ -382,7 +407,8 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
 
               <div className="space-y-1.5 min-h-[60px]">
                 {members.map((p) => {
-                  const unit = strategy?.units.find((u) => u.id === unitOf.get(p.id));
+                  const held = unitsOf.get(p.id) ?? [];
+                  const first = strategy?.units.find((u) => held.includes(u.id));
                   const build = buildOf(p);
                   const mine = owned.get(p.id) ?? [];
                   return (
@@ -391,7 +417,7 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
                       className="border border-slate-800 rounded p-2"
                       style={{
                         ...wash(build, weaponSets),
-                        ...(unit ? { borderColor: `${unit.color}66` } : null),
+                        ...(first ? { borderColor: `${first.color}66` } : null),
                       }}
                     >
                       <div className="flex items-center justify-between gap-2">
@@ -437,31 +463,38 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
                         </select>
                       )}
 
-                      {/* The unit is a separate question from the lane, and only
-                          worth asking once a strategy names some. */}
+                      {/* The units are a separate question from the lane, and
+                          only worth asking once a strategy names some. Chips
+                          rather than a list: somebody can hold several jobs, and
+                          arranging thirty people should not mean opening thirty
+                          menus. */}
                       {strategy && strategy.units.length > 0 && (
-                        canEdit ? (
-                          <select
-                            value={unitOf.get(p.id) ?? ''}
-                            onChange={(e) => assign(p.id, e.target.value || null)}
-                            className="mt-1.5 w-full bg-slate-950 border border-slate-800 rounded p-1 text-[11px] outline-none focus:ring-1 focus:ring-amber-500"
-                            style={unit ? { color: unit.color, borderColor: `${unit.color}66` } : undefined}
-                          >
-                            <option value="">Sin unidad</option>
-                            {strategy.units.map((u) => (
-                              <option key={u.id} value={u.id}>
-                                {u.name}
-                              </option>
-                            ))}
-                          </select>
-                        ) : (
-                          unit && (
-                            <p className="mt-1 text-[10px] flex items-center gap-1.5" style={{ color: unit.color }}>
-                              <i className={`fa-solid ${unit.icon}`}></i>
-                              {unit.name}
-                            </p>
-                          )
-                        )
+                        <div className="mt-1.5 flex flex-wrap gap-1">
+                          {strategy.units
+                            .filter((u) => canEdit || held.includes(u.id))
+                            .map((u) => {
+                              const on = held.includes(u.id);
+                              return (
+                                <button
+                                  key={u.id}
+                                  disabled={!canEdit}
+                                  onClick={() => toggleUnit(p.id, u.id)}
+                                  title={on ? `Quitar de ${u.name}` : `Añadir a ${u.name}`}
+                                  className={`text-[10px] px-1.5 py-0.5 rounded border flex items-center gap-1 max-w-full transition-all ${
+                                    on ? '' : 'border-slate-800 text-slate-600 hover:text-slate-300'
+                                  }`}
+                                  style={
+                                    on
+                                      ? { borderColor: u.color, color: u.color, backgroundColor: `${u.color}1f` }
+                                      : undefined
+                                  }
+                                >
+                                  <i className={`fa-solid ${u.icon} text-[9px]`}></i>
+                                  <span className="truncate">{u.name}</span>
+                                </button>
+                              );
+                            })}
+                        </div>
                       )}
                     </div>
                   );

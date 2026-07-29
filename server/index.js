@@ -9,7 +9,7 @@ import { listWeaponSets, saveWeaponSets, seedWeaponSets } from './weapons.js';
 import {
   getDeployments,
   place,
-  setUnit,
+  setUnits,
   setBuild,
   clearSide,
   listStrategies,
@@ -468,8 +468,8 @@ app.delete('/api/war/deployments/:side', requireAuth, requirePermission('war.edi
 }));
 
 // A unit is a job, a lane is a position: setting one must never clear the other.
-app.put('/api/war/deployments/:side/:playerId/unit', requireAuth, requirePermission('war.edit'), asHandler(async (req, res) => {
-  res.json(await setUnit(req.params.side, req.params.playerId, req.body?.unit ?? null));
+app.put('/api/war/deployments/:side/:playerId/units', requireAuth, requirePermission('war.edit'), asHandler(async (req, res) => {
+  res.json(await setUnits(req.params.side, req.params.playerId, req.body?.units ?? []));
 }));
 
 app.put('/api/war/deployments/:side/:playerId/build', requireAuth, requirePermission('war.edit'), asHandler(async (req, res) => {

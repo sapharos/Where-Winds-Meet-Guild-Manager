@@ -236,12 +236,28 @@ CREATE TABLE IF NOT EXISTS war_deployments (
 
 CREATE INDEX IF NOT EXISTS war_deployments_lane_idx ON war_deployments (guild_id, side, lane);
 
--- Which tactical unit a deployed member belongs to. Units cut across the lanes
+-- Which tactical units a deployed member belongs to. Units cut across the lanes
 -- -- an escort party takes people from all three -- so this is beside the lane
--- and not instead of it. It is a bare id on purpose: units live inside a
--- strategy, so the reference has to survive the strategy being edited or
--- deleted, and a member whose unit no longer exists simply reads as unassigned.
-ALTER TABLE war_deployments ADD COLUMN IF NOT EXISTS unit_id TEXT;
+-- and not instead of it, and one person can hold more than one job at once.
+-- Bare ids on purpose: units live inside a strategy, so the reference has to
+-- survive the strategy being edited or deleted, and a member whose unit no
+-- longer exists simply reads as unassigned.
+ALTER TABLE war_deployments ADD COLUMN IF NOT EXISTS unit_ids JSONB NOT NULL DEFAULT '[]'::jsonb;
+
+-- Carry over the single-unit column this replaced, then retire it. Guarded so
+-- that running the schema again on an already-migrated database does nothing.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+     WHERE table_name = 'war_deployments' AND column_name = 'unit_id'
+  ) THEN
+    UPDATE war_deployments
+       SET unit_ids = jsonb_build_array(unit_id)
+     WHERE unit_id IS NOT NULL AND unit_ids = '[]'::jsonb;
+    ALTER TABLE war_deployments DROP COLUMN unit_id;
+  END IF;
+END $$;
 
 -- Which build they are meant to bring. A bare id for the same reason: builds
 -- are edited and deleted by their owner, and a plan naming one that is gone

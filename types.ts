@@ -41,8 +41,9 @@ export interface Deployment {
   side: WarSide;
   lane: WarLane;
   playerId: string;
-  // The tactical unit they belong to, when the current strategy names one.
-  unitId?: string | null;
+  // The tactical units they belong to. More than one is ordinary: the same
+  // healer can be on the escort and in the camps.
+  unitIds?: string[];
   // Which of their builds they are meant to bring to this war. Unset means the
   // one they usually play.
   buildId?: string | null;
