@@ -1,6 +1,6 @@
 
 import React, { useMemo, useState } from 'react';
-import { Player, PlayerBuild, Role, Platform, MembershipStatus, GuildRank, SECTS, WeaponSet } from '../types';
+import { Player, PlayerBuild, Role, Platform, MembershipStatus, GuildRank, SECTS, WeaponSet, WarSide, WAR_SIDE_LABELS } from '../types';
 import PlayerCard, { ROLE_NAMES } from './PlayerCard';
 
 interface MemberManagerProps {
@@ -17,6 +17,7 @@ interface MemberManagerProps {
   onShowHistory?: (p: Player) => void;
   onShowBuilds?: (p: Player) => void;
   onToggleStarter?: (p: Player) => void;
+  onCycleSide?: (p: Player) => void;
   canManageRanks?: boolean;
 }
 
@@ -45,6 +46,7 @@ const MemberManager: React.FC<MemberManagerProps> = ({
   onShowHistory,
   onShowBuilds,
   onToggleStarter,
+  onCycleSide,
   canManageRanks = false,
 }) => {
   const [editing, setEditing] = useState<Player | null>(null);
@@ -59,6 +61,7 @@ const MemberManager: React.FC<MemberManagerProps> = ({
   const [roleFilter, setRoleFilter] = useState<'' | Role>('');
   const [buildFilter, setBuildFilter] = useState('');
   const [startersOnly, setStartersOnly] = useState(false);
+  const [sideFilter, setSideFilter] = useState<'' | WarSide>('');
 
   // The build shown on a card is the primary one; the rest describe how else
   // someone can play, which belongs in the build editor rather than here.
@@ -89,9 +92,13 @@ const MemberManager: React.FC<MemberManagerProps> = ({
         if (!covered.includes(roleFilter)) return false;
       }
       if (buildFilter && build?.name !== buildFilter) return false;
+      if (sideFilter && p.warSide !== sideFilter) return false;
       return true;
-    });
-  }, [players, search, roleFilter, buildFilter, startersOnly, primaryOf]);
+    })
+    // Whoever is being fielded comes first: on war day the roster is read to
+    // check the line-up, not to browse the whole guild.
+    .sort((a, b) => Number(Boolean(b.isStarter)) - Number(Boolean(a.isStarter)) || a.name.localeCompare(b.name));
+  }, [players, search, roleFilter, buildFilter, startersOnly, sideFilter, primaryOf]);
 
   const openNew = () => {
     setEditing(null);
@@ -156,7 +163,7 @@ const MemberManager: React.FC<MemberManagerProps> = ({
           )}
         </div>
 
-        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-3">
           <div className="relative">
             <i className="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-600 text-xs"></i>
             <input
@@ -194,6 +201,19 @@ const MemberManager: React.FC<MemberManagerProps> = ({
             ))}
           </select>
 
+          <select
+            value={sideFilter}
+            onChange={(e) => setSideFilter(e.target.value as '' | WarSide)}
+            className="bg-slate-950 border border-slate-800 rounded p-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
+          >
+            <option value="">Ataque y defensa</option>
+            {(Object.keys(WAR_SIDE_LABELS) as WarSide[]).map((side) => (
+              <option key={side} value={side}>
+                {WAR_SIDE_LABELS[side]}
+              </option>
+            ))}
+          </select>
+
           <button
             onClick={() => setStartersOnly((v) => !v)}
             className={`rounded p-2 text-sm border transition-all flex items-center justify-center gap-2 ${
@@ -226,6 +246,7 @@ const MemberManager: React.FC<MemberManagerProps> = ({
               onShowHistory={onShowHistory}
               onShowBuilds={onShowBuilds}
               onToggleStarter={isViewer ? undefined : onToggleStarter}
+              onCycleSide={isViewer ? undefined : onCycleSide}
             />
           ))}
         </div>

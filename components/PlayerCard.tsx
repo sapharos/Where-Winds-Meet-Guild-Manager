@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { Player, PlayerBuild, Role, MembershipStatus, GuildRank, WeaponSet } from '../types';
+import { Player, PlayerBuild, Role, MembershipStatus, GuildRank, WeaponSet, WarSide, WAR_SIDE_LABELS } from '../types';
 import { ROLE_COLORS, ROLE_ICONS, PLATFORM_ICONS, STATUS_COLORS } from '../constants';
 
 export const ROLE_NAMES: Record<Role, string> = {
@@ -45,6 +45,7 @@ interface PlayerCardProps {
   onShowHistory?: (p: Player) => void;
   onShowBuilds?: (p: Player) => void;
   onToggleStarter?: (p: Player) => void;
+  onCycleSide?: (p: Player) => void;
   className?: string;
   compact?: boolean;
   ranks?: GuildRank[];
@@ -59,6 +60,7 @@ const PlayerCard: React.FC<PlayerCardProps> = ({
   onShowHistory,
   onShowBuilds,
   onToggleStarter,
+  onCycleSide,
   className = '',
   compact = false,
   ranks = [],
@@ -122,6 +124,17 @@ const PlayerCard: React.FC<PlayerCardProps> = ({
                     {build.name}
                   </span>
                 )}
+                {player.warSide && (
+                  <span
+                    className={`text-[8px] px-1.5 py-0.5 rounded border uppercase font-bold tracking-tighter ${
+                      player.warSide === 'attack'
+                        ? 'border-red-600 text-red-300 bg-red-600/15'
+                        : 'border-sky-600 text-sky-300 bg-sky-600/15'
+                    }`}
+                  >
+                    {WAR_SIDE_LABELS[player.warSide as WarSide]}
+                  </span>
+                )}
                 {orphaned && (
                   <span
                     className="text-[9px] text-amber-500"
@@ -157,6 +170,25 @@ const PlayerCard: React.FC<PlayerCardProps> = ({
               }`}
             >
               <i className={`${player.isStarter ? 'fa-solid' : 'fa-regular'} fa-star`}></i>
+            </button>
+          )}
+          {onCycleSide && (
+            <button
+              onClick={() => onCycleSide(player)}
+              title={
+                player.warSide
+                  ? `${WAR_SIDE_LABELS[player.warSide as WarSide]} — pulsa para cambiar`
+                  : 'Sin asignar — pulsa para poner en Ataque'
+              }
+              className={`transition-colors ${
+                player.warSide === 'attack'
+                  ? 'text-red-400 hover:text-red-300'
+                  : player.warSide === 'defense'
+                    ? 'text-sky-400 hover:text-sky-300'
+                    : 'text-slate-600 hover:text-slate-400'
+              }`}
+            >
+              <i className={`fa-solid ${player.warSide === 'defense' ? 'fa-shield' : 'fa-khanda'}`}></i>
             </button>
           )}
           {onShowBuilds && (

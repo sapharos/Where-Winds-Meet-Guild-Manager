@@ -85,6 +85,10 @@ ALTER TABLE players ADD COLUMN IF NOT EXISTS game_position TEXT;
 -- screenshot, and never cleared by a sweep.
 ALTER TABLE players ADD COLUMN IF NOT EXISTS is_starter BOOLEAN NOT NULL DEFAULT false;
 
+-- Which half of a guild war a member is fielded in: 'attack', 'defense', or
+-- undecided. A leader's call, like the two above, and never read from a sweep.
+ALTER TABLE players ADD COLUMN IF NOT EXISTS war_side TEXT;
+
 CREATE UNIQUE INDEX IF NOT EXISTS players_game_uid_idx
   ON players (guild_id, game_uid) WHERE game_uid IS NOT NULL;
 

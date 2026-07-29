@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Peer } from 'peerjs';
-import { Player, GuildWarSession, Lane, TacticalGroup, MembershipStatus, GuildRank, PeerRole, SyncPacket, ROLE_LABELS, PlayerBuild, WeaponSet } from './types';
+import { Player, GuildWarSession, Lane, TacticalGroup, MembershipStatus, GuildRank, PeerRole, SyncPacket, ROLE_LABELS, PlayerBuild, WeaponSet, WarSide } from './types';
 import { storageService } from './services/storageService';
 import { authService, api, ApiError, Session } from './services/authService';
 import { DEFAULT_GROUPS } from './constants';
@@ -311,14 +311,18 @@ const App: React.FC = () => {
     if (e.target) e.target.value = '';
   };
 
-  const handleToggleStarter = (p: Player) => {
+  const setFlags = (p: Player, flags: { isStarter?: boolean; warSide?: WarSide | null }) => {
     if (rosterLocked) return;
-    const next = !p.isStarter;
-    setPlayers((prev) => prev.map((x) => (x.id === p.id ? { ...x, isStarter: next } : x)));
-    persist(
-      api(`/players/${p.id}/starter`, { method: 'PATCH', body: JSON.stringify({ isStarter: next }) }),
-    );
+    setPlayers((prev) => prev.map((x) => (x.id === p.id ? { ...x, ...flags } : x)));
+    persist(api(`/players/${p.id}/flags`, { method: 'PATCH', body: JSON.stringify(flags) }));
   };
+
+  const handleToggleStarter = (p: Player) => setFlags(p, { isStarter: !p.isStarter });
+
+  // Undecided is a state worth returning to, so the button cycles through it
+  // rather than only swapping between the two sides.
+  const handleCycleSide = (p: Player) =>
+    setFlags(p, { warSide: p.warSide === 'attack' ? 'defense' : p.warSide === 'defense' ? null : 'attack' });
 
   const handleLogin = async (username: string, password: string) => {
     setSession(await authService.login(username, password));
@@ -523,6 +527,7 @@ const App: React.FC = () => {
             onShowHistory={setHistoryFor}
             onShowBuilds={setBuildsFor}
             onToggleStarter={handleToggleStarter}
+            onCycleSide={handleCycleSide}
             builds={builds}
             weaponSets={weaponSets}
             canManageRanks={!ranksLocked}

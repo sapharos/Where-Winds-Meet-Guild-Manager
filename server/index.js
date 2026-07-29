@@ -180,7 +180,7 @@ app.get('/api/state', requireAuth, asHandler(async (_req, res) => {
   const [players, ranks, sessions] = await Promise.all([
     pool.query(
       `SELECT id, name, role, level, sect, platform, status, rank_id AS "rankId", notes,
-              game_uid AS "gameUid", online_id AS "onlineId", is_starter AS "isStarter"
+              game_uid AS "gameUid", online_id AS "onlineId", is_starter AS "isStarter", war_side AS "warSide"
          FROM players WHERE guild_id = $1 ORDER BY name`,
       [GUILD_ID],
     ),
@@ -259,12 +259,31 @@ app.get('/api/players/:id/scans', requireAuth, asHandler(async (req, res) => {
   res.json(await historyFor(req.params.id));
 }));
 
-// A single flag, so it gets its own route rather than resending the roster --
-// which would also race with anyone else editing at the same moment.
-app.patch('/api/players/:id/starter', requireAuth, requirePermission('roster.edit'), asHandler(async (req, res) => {
+// The war-day flags: fielded or not, and which half of the fight. Their own
+// route rather than resending the roster, which would be wasteful for a
+// checkbox and would race with anyone else editing at the same moment. Only
+// the flags named in the body are touched.
+const WAR_SIDES = ['attack', 'defense'];
+
+app.patch('/api/players/:id/flags', requireAuth, requirePermission('roster.edit'), asHandler(async (req, res) => {
+  const { isStarter, warSide } = req.body ?? {};
+  if (warSide !== undefined && warSide !== null && !WAR_SIDES.includes(warSide)) {
+    return res.status(400).json({ error: 'warSide must be attack, defense or null' });
+  }
+
   const { rows } = await pool.query(
-    `UPDATE players SET is_starter = $1 WHERE guild_id = $2 AND id = $3 RETURNING id`,
-    [Boolean(req.body?.isStarter), GUILD_ID, req.params.id],
+    `UPDATE players
+        SET is_starter = COALESCE($1, is_starter),
+            war_side   = CASE WHEN $2::boolean THEN $3 ELSE war_side END
+      WHERE guild_id = $4 AND id = $5
+      RETURNING id`,
+    [
+      isStarter === undefined ? null : Boolean(isStarter),
+      warSide !== undefined,
+      warSide ?? null,
+      GUILD_ID,
+      req.params.id,
+    ],
   );
   if (!rows.length) return res.status(404).json({ error: 'no such member' });
   res.json({ ok: true });

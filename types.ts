@@ -91,7 +91,17 @@ export interface Player {
   rankId?: string; 
   notes?: string;
   isStarter?: boolean;
+  warSide?: WarSide | null;
 }
+
+// Which half of a guild war someone is fielded in. Undecided is a real state:
+// most of the roster is neither until the leader assigns them.
+export type WarSide = 'attack' | 'defense';
+
+export const WAR_SIDE_LABELS: Record<WarSide, string> = {
+  attack: 'Ataque',
+  defense: 'Defensa',
+};
 
 export interface WarAssignment {
   playerId: string;
