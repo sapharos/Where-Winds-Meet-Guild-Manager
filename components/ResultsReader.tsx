@@ -98,6 +98,119 @@ function figure(raw: string): number | null {
   return /^[0-9]{1,12}$/.test(digits) ? Number(digits) : null;
 }
 
+/**
+ * No single column holds more than this. It is a ceiling, not a rule: where to
+ * cut a run of digits is decided by where the next column starts, and this only
+ * catches a cut that came out longer than any real figure could be.
+ */
+const MAX_DIGITS = 8;
+
+/** A run of digits and where it sits, which is what says which column it is. */
+interface Cell {
+  digits: string;
+  x0: number;
+  x1: number;
+}
+
+const asDigits = (raw: string): string | null => {
+  const token = raw.replace(/[.,\s]/g, '');
+  if (!token) return null;
+  const safe = token.length === 1 || /[0-9]/.test(token);
+  const digits = safe ? token.replace(/[oO]/g, '0').replace(/[lI|]/g, '1') : token;
+  return /^[0-9]{1,18}$/.test(digits) ? digits : null;
+};
+
+/**
+ * Where each column begins, taken from the rows that came out whole.
+ *
+ * Values are set flush left under their heading, so the left edge of a figure
+ * is the steadiest thing about it -- widths change from row to row, centres
+ * move with them, and left edges do not.
+ */
+function measure(rows: { cells: Cell[] }[]): number[] | null {
+  const whole = rows.filter((row) => row.cells.length === FIGURES.length);
+  if (whole.length < 2) return null;
+  return FIGURES.map((_, at) => {
+    const edges = whole.map((row) => row.cells[at].x0).sort((a, b) => a - b);
+    return edges[Math.floor(edges.length / 2)];
+  });
+}
+
+/**
+ * Read a row against the columns, cutting a figure in two where it has run
+ * into its neighbour.
+ *
+ * A wide number leaves no gap before the next column and comes back as one
+ * long run of digits. Nothing in the digits says where to divide them -- only
+ * where the next column starts does, so the cut is made at that point and the
+ * digits fall either side of it.
+ */
+function place(cells: Cell[], columns: number[]): {
+  slots: (number | null)[];
+  split: Set<number>;
+} {
+  const slots: (number | null)[] = FIGURES.map(() => null);
+  // Which figures had to be cut out of a run shared with their neighbour. Those
+  // are the ones worth a second look: where two figures touch, the engine reads
+  // the digits at the join wrongly as often as it reads them at all.
+  const split = new Set<number>();
+
+  for (const cell of cells) {
+    const covered = columns
+      .map((edge, at) => ({ at, edge }))
+      .filter(({ edge }) => edge >= cell.x0 - 6 && edge < cell.x1);
+
+    if (covered.length > 1) {
+      const width = (cell.x1 - cell.x0) / cell.digits.length;
+      let from = 0;
+      covered.forEach(({ at }, index) => {
+        const next = covered[index + 1];
+        const upto = next
+          ? Math.max(
+              from + 1,
+              Math.min(cell.digits.length - 1, from + MAX_DIGITS, Math.round((next.edge - cell.x0) / width)),
+            )
+          : cell.digits.length;
+        const piece = cell.digits.slice(from, upto);
+        if (piece && slots[at] === null) {
+          slots[at] = Number(piece);
+          split.add(at);
+        }
+        from = upto;
+      });
+      continue;
+    }
+
+    let best = 0;
+    columns.forEach((edge, at) => {
+      if (Math.abs(edge - cell.x0) < Math.abs(columns[best] - cell.x0)) best = at;
+    });
+
+    // Longer than any real figure and the next column empty: the two ran
+    // together without the engine even leaving a gap to notice.
+    if (cell.digits.length > MAX_DIGITS && best + 1 < FIGURES.length && slots[best + 1] === null) {
+      const width = (cell.x1 - cell.x0) / cell.digits.length;
+      const edge = columns[best + 1];
+      const cut = Math.max(
+        1,
+        Math.min(
+          MAX_DIGITS,
+          cell.digits.length - 1,
+          edge > cell.x0 ? Math.round((edge - cell.x0) / width) : MAX_DIGITS,
+        ),
+      );
+      if (slots[best] === null) slots[best] = Number(cell.digits.slice(0, cut));
+      slots[best + 1] = Number(cell.digits.slice(cut));
+      split.add(best).add(best + 1);
+      continue;
+    }
+
+    if (slots[best] === null) slots[best] = Number(cell.digits);
+  }
+
+  return { slots, split };
+}
+
 export interface ReadRow {
   /** What the picture said the name was. */
   read: string;
@@ -105,6 +218,8 @@ export interface ReadRow {
   playerId: string | null;
   confidence: number;
   figures: Record<string, number>;
+  /** Figures recovered from a run shared with the next column: check these. */
+  doubtful: string[];
 }
 
 interface Props {
@@ -155,6 +270,8 @@ const ResultsReader: React.FC<Props> = ({ images, participants, onClose, onApply
 
     const known = participants.map((p) => ({ ...p, plain: plain(p.name) }));
     const found = new Map<string, ReadRow>();
+    // Every row from every image, kept whole until the columns are known.
+    const harvest: { name: string; cells: Cell[] }[] = [];
 
     try {
       setStage('reading');
@@ -197,49 +314,65 @@ const ResultsReader: React.FC<Props> = ({ images, participants, onClose, onApply
         for (const { words: row } of lines) {
           row.sort((a, b) => a.bbox.x0 - b.bbox.x0);
 
-          const numbers = row
-            .map((w) => figure(w.text))
-            .filter((value): value is number => value !== null);
-          // A member's row carries every column. Anything shorter is a header,
-          // a heading, or the frame rate in the corner.
-          if (numbers.length < FIGURES.length) continue;
+          const cells: Cell[] = [];
+          const letters: string[] = [];
+          for (const word of row) {
+            const digits = asDigits(word.text);
+            if (digits) cells.push({ digits, x0: word.bbox.x0, x1: word.bbox.x1 });
+            else letters.push(word.text);
+          }
+          // Two columns short would be a heading, a tab label or the frame rate
+          // in the corner. One short is the overlap, and it can be repaired.
+          if (cells.length < FIGURES.length - 1) continue;
 
-          const name = row
-            .filter((w) => figure(w.text) === null)
-            .map((w) => w.text)
-            .join(' ')
-            .trim();
+          const name = letters.join(' ').trim();
           if (!name) continue;
 
-          const target = plain(name);
-          let best: { playerId: string; score: number } | null = null;
-          for (const member of known) {
-            const score = Math.max(
-              closeness(target, member.plain),
-              // A name cut short by the avatar still identifies its owner.
-              member.plain.startsWith(target) && target.length >= 4 ? 0.9 : 0,
-            );
-            if (!best || score > best.score) best = { playerId: member.playerId, score };
-          }
-
-          const figures: Record<string, number> = {};
-          FIGURES.forEach((figure, at) => {
-            figures[figure.key] = numbers[at];
-          });
-
-          const entry: ReadRow = {
-            read: name,
-            playerId: best && best.score >= 0.6 ? best.playerId : null,
-            confidence: best?.score ?? 0,
-            figures,
-          };
-
-          // The screen repeats the reader's own row at the bottom, and pages
-          // overlap when scrolled, so the same person turns up more than once.
-          const key = entry.playerId ?? `?${target}`;
-          const seen = found.get(key);
-          if (!seen || entry.confidence > seen.confidence) found.set(key, entry);
+          harvest.push({ name, cells });
         }
+      }
+
+      // Where the columns are is measured from the rows that came out whole,
+      // and the rest are read against them. Two figures with no gap between
+      // them arrive as one number, and only their position says where to cut.
+      const columns = measure(harvest);
+
+      for (const { name, cells } of harvest) {
+        const read = columns
+          ? place(cells, columns)
+          : { slots: cells.map((c) => Number(c.digits)), split: new Set<number>() };
+        const numbers = read.slots;
+        if (numbers.length !== FIGURES.length || numbers.some((n) => n === null)) continue;
+
+        const target = plain(name);
+        let best: { playerId: string; score: number } | null = null;
+        for (const member of known) {
+          const score = Math.max(
+            closeness(target, member.plain),
+            // A name cut short by the avatar still identifies its owner.
+            member.plain.startsWith(target) && target.length >= 4 ? 0.9 : 0,
+          );
+          if (!best || score > best.score) best = { playerId: member.playerId, score };
+        }
+
+        const figures: Record<string, number> = {};
+        FIGURES.forEach((column, at) => {
+          figures[column.key] = numbers[at] as number;
+        });
+
+        const entry: ReadRow = {
+          read: name,
+          playerId: best && best.score >= 0.6 ? best.playerId : null,
+          confidence: best?.score ?? 0,
+          figures,
+          doubtful: FIGURES.filter((_, at) => read.split.has(at)).map((column) => column.key),
+        };
+
+        // The screen repeats the reader's own row at the bottom, and pages
+        // overlap when scrolled, so the same person turns up more than once.
+        const key = entry.playerId ?? `?${target}`;
+        const seen = found.get(key);
+        if (!seen || entry.confidence > seen.confidence) found.set(key, entry);
       }
 
       setRows([...found.values()]);
@@ -330,11 +463,21 @@ const ResultsReader: React.FC<Props> = ({ images, participants, onClose, onApply
                             ))}
                           </select>
                         </td>
-                        {FIGURES.map((f) => (
-                          <td key={f.key} className="py-1 pr-3 text-right tabular-nums text-slate-300">
-                            {row.figures[f.key]?.toLocaleString('es') ?? '—'}
-                          </td>
-                        ))}
+                        {FIGURES.map((f) => {
+                          const doubtful = row.doubtful.includes(f.key);
+                          return (
+                            <td
+                              key={f.key}
+                              title={doubtful ? 'Esta columna venía pegada a la siguiente: compruébala' : undefined}
+                              className={`py-1 pr-3 text-right tabular-nums ${
+                                doubtful ? 'text-amber-400 font-bold' : 'text-slate-300'
+                              }`}
+                            >
+                              {doubtful && <i className="fa-solid fa-triangle-exclamation mr-1 text-[10px]"></i>}
+                              {row.figures[f.key]?.toLocaleString('es') ?? '—'}
+                            </td>
+                          );
+                        })}
                       </tr>
                     ))}
                   </tbody>

@@ -33,12 +33,17 @@ interface Detail extends Omit<WarRow, 'participants' | 'images'> {
   images: WarImage[];
 }
 
-/** The results screen's own columns, in its own order. */
+/**
+ * The results screen's own columns, in its own order.
+ *
+ * The game heads two of them "Derrotado" -- kills and deaths -- so they are
+ * named here for what they are rather than for what the screen calls them.
+ */
 export const FIGURES: { key: string; label: string }[] = [
-  { key: 'kills', label: 'Derrotados' },
-  { key: 'assists', label: 'Asistencia' },
-  { key: 'deaths', label: 'Derrotado' },
-  { key: 'coin', label: 'Moneda' },
+  { key: 'kills', label: 'Kills' },
+  { key: 'assists', label: 'Asistencias' },
+  { key: 'deaths', label: 'Muertes' },
+  { key: 'coin', label: 'Monedas' },
   { key: 'damage', label: 'Daño' },
   { key: 'taken', label: 'Daño recibido' },
   { key: 'healing', label: 'Curación' },
