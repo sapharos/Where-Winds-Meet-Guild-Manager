@@ -42,6 +42,7 @@ const WarBoard: React.FC<Props> = ({ players, builds, canEdit }) => {
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState<'' | Role>('');
+  const [markFilter, setMarkFilter] = useState<'' | WarSide | 'none'>('');
 
   const load = async () => {
     setDeployments(await api<Deployment[]>('/war/deployments').catch(() => []));
@@ -71,18 +72,37 @@ const WarBoard: React.FC<Props> = ({ players, builds, canEdit }) => {
     here.filter((d) => d.lane === lane).map((d) => byId.get(d.playerId)).filter(Boolean) as Player[];
 
   const placed = new Set(here.map((d) => d.playerId));
+  // Where somebody stands on the other board: nobody fights both halves, so
+  // this is what makes them unavailable here.
+  const elsewhere = new Map<string, WarSide>(
+    deployments.filter((d) => d.side !== side).map((d) => [d.playerId, d.side] as const),
+  );
+
+  /**
+   * How high somebody sits in the list of who is left to field.
+   *
+   * Reading downwards: this side's starters, then the rest of this side, then
+   * the other side's starters and the rest of them, then whoever is unmarked.
+   * Last of all come those already standing on the other board, who cannot be
+   * picked at all -- kept visible so their absence is explained rather than
+   * merely noticed.
+   */
+  const rank = (p: Player) => {
+    if (elsewhere.has(p.id)) return -1;
+    if (p.warSide === side) return p.isStarter ? 6 : 5;
+    if (p.warSide) return p.isStarter ? 4 : 3;
+    return p.isStarter ? 2 : 1;
+  };
 
   const needle = search.trim().toLowerCase();
   const bench = active
     .filter((p) => !placed.has(p.id))
     .filter((p) => !needle || p.name.toLowerCase().includes(needle))
     .filter((p) => !roleFilter || rolesOf(p).includes(roleFilter))
-    // Whoever is most likely to be picked rises: starters first, and within
-    // them the ones already earmarked for the side being arranged.
-    .sort((a, b) => {
-      const rank = (p: Player) => (p.isStarter ? 2 : 0) + (p.warSide === side ? 1 : 0);
-      return rank(b) - rank(a) || a.name.localeCompare(b.name);
-    });
+    .filter((p) =>
+      !markFilter || (markFilter === 'none' ? !p.warSide : p.warSide === markFilter),
+    )
+    .sort((a, b) => rank(b) - rank(a) || a.name.localeCompare(b.name));
 
   const strategy = strategies.find((s) => s.id === chosen && s.side === side);
 
@@ -254,23 +274,40 @@ const WarBoard: React.FC<Props> = ({ players, builds, canEdit }) => {
                 className="w-full bg-slate-950 border border-slate-800 rounded p-2 pl-8 text-sm outline-none focus:ring-1 focus:ring-amber-500"
               />
             </div>
-            <select
-              value={roleFilter}
-              onChange={(e) => setRoleFilter(e.target.value as '' | Role)}
-              className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
-            >
-              <option value="">Todos los roles</option>
-              {Object.values(Role).map((r) => (
-                <option key={r} value={r}>
-                  {ROLE_NAMES[r]}
-                </option>
-              ))}
-            </select>
+            <div className="grid grid-cols-2 gap-2">
+              <select
+                value={roleFilter}
+                onChange={(e) => setRoleFilter(e.target.value as '' | Role)}
+                className="bg-slate-950 border border-slate-800 rounded p-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
+              >
+                <option value="">Todos los roles</option>
+                {Object.values(Role).map((r) => (
+                  <option key={r} value={r}>
+                    {ROLE_NAMES[r]}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={markFilter}
+                onChange={(e) => setMarkFilter(e.target.value as '' | WarSide | 'none')}
+                className="bg-slate-950 border border-slate-800 rounded p-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
+              >
+                <option value="">Cualquier marca</option>
+                <option value="attack">{WAR_SIDE_LABELS.attack}</option>
+                <option value="defense">{WAR_SIDE_LABELS.defense}</option>
+                <option value="none">Sin asignar</option>
+              </select>
+            </div>
           </div>
 
           <div className="space-y-1.5 max-h-[520px] overflow-y-auto custom-scrollbar pr-1">
-            {bench.map((p) => (
-              <div key={p.id} className="bg-slate-950/70 border border-slate-800 rounded p-2">
+            {bench.map((p) => {
+              const busy = elsewhere.get(p.id);
+              return (
+              <div
+                key={p.id}
+                className={`bg-slate-950/70 border border-slate-800 rounded p-2 ${busy ? 'opacity-45' : ''}`}
+              >
                 <div className="flex items-center gap-1.5 min-w-0">
                   {p.isStarter && (
                     <i className="fa-solid fa-star text-amber-400 text-[10px] shrink-0" title="Titular"></i>
@@ -288,27 +325,34 @@ const WarBoard: React.FC<Props> = ({ players, builds, canEdit }) => {
                 <p className="text-[10px] text-slate-500 mb-1.5">
                   {rolesOf(p).map((r) => ROLE_NAMES[r]).join(' · ')}
                 </p>
-                {canEdit && (
-                  <div className="flex gap-1">
-                    {WAR_LANES.map((lane) => (
-                      <button
-                        key={lane.id}
-                        onClick={() => move(p.id, lane.id)}
-                        disabled={inLane(lane.id).length >= LANE_CAPACITY}
-                        title={`Enviar a ${lane.label}`}
-                        className="flex-1 text-[10px] py-1 rounded border transition-all disabled:opacity-30"
-                        style={{ borderColor: `${lane.colour}80`, color: lane.colour }}
-                      >
-                        {lane.label.replace('Línea ', '')}
-                      </button>
-                    ))}
-                  </div>
+                {busy ? (
+                  <p className="text-[10px] text-slate-500 italic">
+                    Ya desplegado en {WAR_SIDE_LABELS[busy]}
+                  </p>
+                ) : (
+                  canEdit && (
+                    <div className="flex gap-1">
+                      {WAR_LANES.map((lane) => (
+                        <button
+                          key={lane.id}
+                          onClick={() => move(p.id, lane.id)}
+                          disabled={inLane(lane.id).length >= LANE_CAPACITY}
+                          title={`Enviar a ${lane.label}`}
+                          className="flex-1 text-[10px] py-1 rounded border transition-all disabled:opacity-30"
+                          style={{ borderColor: `${lane.colour}80`, color: lane.colour }}
+                        >
+                          {lane.label.replace('Línea ', '')}
+                        </button>
+                      ))}
+                    </div>
+                  )
                 )}
               </div>
-            ))}
+              );
+            })}
             {!bench.length && (
               <p className="text-xs text-slate-600 italic py-3 text-center">
-                {needle || roleFilter ? 'Nadie coincide con el filtro' : 'Todos asignados'}
+                {needle || roleFilter || markFilter ? 'Nadie coincide con el filtro' : 'Todos asignados'}
               </p>
             )}
           </div>

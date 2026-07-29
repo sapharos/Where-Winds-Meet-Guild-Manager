@@ -46,6 +46,21 @@ export async function place(side, lane, playerId) {
     throw Object.assign(new Error('ese miembro ya no esta en el gremio'), { status: 409 });
   }
 
+  // Nobody fights both halves of the same war. The two boards are arranged
+  // separately, often by different people, so the clash has to be refused here
+  // rather than left to whoever happens to look at both.
+  const other = side === 'attack' ? 'defense' : 'attack';
+  const clash = await pool.query(
+    `SELECT lane FROM war_deployments WHERE guild_id = $1 AND side = $2 AND player_id = $3`,
+    [GUILD_ID, other, playerId],
+  );
+  if (clash.rows.length) {
+    throw Object.assign(
+      new Error(`ya esta desplegado en ${other === 'attack' ? 'Ataque' : 'Defensa'}`),
+      { status: 409 },
+    );
+  }
+
   const { rows } = await pool.query(
     `SELECT count(*)::int AS held FROM war_deployments
       WHERE guild_id = $1 AND side = $2 AND lane = $3 AND player_id <> $4`,
