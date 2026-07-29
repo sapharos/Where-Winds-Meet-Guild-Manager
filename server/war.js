@@ -444,6 +444,33 @@ export async function updateWar(id, { name, matchType } = {}) {
   return { ok: true };
 }
 
+/**
+ * Throw away a war and everything recorded about it.
+ *
+ * Unlike a member -- who leaves the guild but keeps a history worth reading --
+ * a war that should not exist has nothing worth keeping: it is a mistake, a
+ * test, or a false start, and leaving it in place skews every ranking computed
+ * against the wars around it. The participants and result screens go with it
+ * through ON DELETE CASCADE.
+ *
+ * Deleting the war in progress is allowed on purpose: starting one by accident
+ * is exactly when this is needed, and refusing would leave someone with a live
+ * war they must first finish in order to erase. The locks are released either
+ * way, so the boards can never be left frozen by a war that no longer exists.
+ */
+export async function deleteWar(id) {
+  const { rows } = await pool.query(
+    `DELETE FROM wars WHERE id = $1 AND guild_id = $2 RETURNING ended_at AS "endedAt"`,
+    [id, GUILD_ID],
+  );
+  if (!rows.length) throw Object.assign(new Error('esa guerra no existe'), { status: 404 });
+
+  if (rows[0].endedAt === null) {
+    await pool.query(`DELETE FROM app_settings WHERE key = ANY($1)`, [SIDES.map(lockKey)]);
+  }
+  return { deleted: id };
+}
+
 /* ------------------------------------------------------------ strategies */
 
 const EMPTY_LANE = { tank: 0, healer: 0, dps: 0 };

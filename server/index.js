@@ -21,6 +21,7 @@ import {
   startWar,
   endWar,
   updateWar,
+  deleteWar,
   listWars,
   warDetail,
   warsFor,
@@ -527,6 +528,10 @@ app.post('/api/war/wars/:id/end', requireAuth, requirePermission('war.edit'), as
 
 app.patch('/api/war/wars/:id', requireAuth, requirePermission('war.edit'), asHandler(async (req, res) => {
   res.json(await updateWar(req.params.id, { name: req.body?.name, matchType: req.body?.matchType }));
+}));
+
+app.delete('/api/war/wars/:id', requireAuth, requirePermission('war.edit'), asHandler(async (req, res) => {
+  res.json(await deleteWar(req.params.id));
 }));
 
 // The record a war leaves behind. Readable by the guild -- everyone wants to

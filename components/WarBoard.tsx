@@ -777,7 +777,13 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
         )}
       </div>
 
-      {history && <WarHistory canEdit={canEdit} onClose={() => setHistory(false)} />}
+      {history && (
+        <WarHistory
+          canEdit={canEdit}
+          onClose={() => setHistory(false)}
+          onChanged={() => void load()}
+        />
+      )}
 
       {starting && <StartWarModal onClose={() => setStarting(false)} onStart={begin} />}
 

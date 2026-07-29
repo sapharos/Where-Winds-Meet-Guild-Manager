@@ -76,13 +76,20 @@ async function shrink(file: Blob): Promise<string> {
 interface Props {
   canEdit: boolean;
   onClose: () => void;
+  /**
+   * Something changed here that the board behind is also showing. Deleting the
+   * war in progress is the case that matters: without telling the board, it
+   * would go on displaying a war that no longer exists, with both formations
+   * still frozen by it.
+   */
+  onChanged: () => void;
 }
 
 /**
  * What the wars left behind: who was there, what they did, and the screens the
  * game showed at the end.
  */
-const WarHistory: React.FC<Props> = ({ canEdit, onClose }) => {
+const WarHistory: React.FC<Props> = ({ canEdit, onClose, onChanged }) => {
   const [wars, setWars] = useState<WarRow[] | null>(null);
   const [chosen, setChosen] = useState<string | null>(null);
   const [detail, setDetail] = useState<Detail | null>(null);
@@ -152,16 +159,47 @@ const WarHistory: React.FC<Props> = ({ canEdit, onClose }) => {
     [detail],
   );
 
-  // Decided in a hurry when the war started, so it is the one field most
-  // likely to need a correction afterwards. Updates the list in place rather
-  // than reloading, so picking a new type does not scroll the reader away.
-  const setMatchType = async (matchType: WarMatchType) => {
+  /**
+   * Both are decided in the rush of starting a war, so both are the fields most
+   * likely to need a correction afterwards. The list is patched in place rather
+   * than reloaded, so a correction does not scroll the reader away from it.
+   */
+  const amend = async (changes: { name?: string; matchType?: WarMatchType }) => {
     if (!chosen) return;
-    setDetail((prev) => (prev ? { ...prev, matchType } : prev));
-    setWars((prev) => (prev ?? []).map((w) => (w.id === chosen ? { ...w, matchType } : w)));
-    await api(`/war/wars/${chosen}`, { method: 'PATCH', body: JSON.stringify({ matchType }) }).catch(
-      (err) => setMessage({ text: err instanceof Error ? err.message : 'No se pudo guardar', ok: false }),
+    setDetail((prev) => (prev ? { ...prev, ...changes } : prev));
+    setWars((prev) => (prev ?? []).map((w) => (w.id === chosen ? { ...w, ...changes } : w)));
+    await api(`/war/wars/${chosen}`, { method: 'PATCH', body: JSON.stringify(changes) }).catch((err) =>
+      setMessage({ text: err instanceof Error ? err.message : 'No se pudo guardar', ok: false }),
     );
+  };
+
+  /**
+   * A war that should not exist has nothing worth keeping -- but it takes the
+   * results screens and everyone's figures with it, so the warning says exactly
+   * what is about to be lost rather than asking a vague "are you sure".
+   */
+  const remove = async () => {
+    if (!detail || !chosen) return;
+    const cost = [
+      `${detail.participants.length} participantes`,
+      detail.images.length > 0 ? `${detail.images.length} capturas` : null,
+    ]
+      .filter(Boolean)
+      .join(' y ');
+    if (!window.confirm(`¿Borrar «${detail.name}»? Se pierden sus ${cost}. No se puede deshacer.`)) {
+      return;
+    }
+    try {
+      await api(`/war/wars/${chosen}`, { method: 'DELETE' });
+      const left = (wars ?? []).filter((w) => w.id !== chosen);
+      setWars(left);
+      setDetail(null);
+      setChosen(left[0]?.id ?? null);
+      setMessage({ text: 'Guerra borrada.', ok: true });
+      onChanged();
+    } catch (err) {
+      setMessage({ text: err instanceof Error ? err.message : 'No se pudo borrar', ok: false });
+    }
   };
 
   const setFigure = async (playerId: string, key: string, raw: string) => {
@@ -255,21 +293,49 @@ const WarHistory: React.FC<Props> = ({ canEdit, onClose }) => {
           {detail && (
             <>
               {canEdit && (
-                <div className="flex items-center gap-2 -mt-1">
-                  <span className="text-[10px] uppercase tracking-wider text-slate-500">
-                    Tipo de partida
-                  </span>
-                  <select
-                    value={detail.matchType}
-                    onChange={(e) => setMatchType(e.target.value as WarMatchType)}
-                    className="bg-slate-950 border border-slate-800 rounded px-2 py-1 text-xs outline-none focus:ring-1 focus:ring-amber-500"
+                <div className="flex items-end gap-3 flex-wrap bg-slate-950/40 border border-slate-800 rounded-lg p-3">
+                  <div className="flex-1 min-w-[180px]">
+                    <label className="block text-[10px] uppercase tracking-wider text-slate-500 mb-1">
+                      Nombre
+                    </label>
+                    <input
+                      type="text"
+                      defaultValue={detail.name}
+                      key={detail.id}
+                      onBlur={(e) => {
+                        const name = e.target.value.trim();
+                        if (name && name !== detail.name) void amend({ name });
+                        else e.target.value = detail.name;
+                      }}
+                      className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1 text-sm outline-none focus:ring-1 focus:ring-amber-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] uppercase tracking-wider text-slate-500 mb-1">
+                      Tipo de partida
+                    </label>
+                    <select
+                      value={detail.matchType}
+                      onChange={(e) => void amend({ matchType: e.target.value as WarMatchType })}
+                      className="bg-slate-950 border border-slate-800 rounded px-2 py-[5px] text-sm outline-none focus:ring-1 focus:ring-amber-500"
+                    >
+                      {(Object.keys(WAR_MATCH_TYPE_LABELS) as WarMatchType[]).map((type) => (
+                        <option key={type} value={type}>
+                          {WAR_MATCH_TYPE_LABELS[type]}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <button
+                    onClick={remove}
+                    title="Borrar esta guerra y todo lo registrado en ella"
+                    className="text-xs text-slate-500 hover:text-red-400 border border-slate-800 hover:border-red-900 rounded px-3 py-1.5 transition-all flex items-center gap-2"
                   >
-                    {(Object.keys(WAR_MATCH_TYPE_LABELS) as WarMatchType[]).map((type) => (
-                      <option key={type} value={type}>
-                        {WAR_MATCH_TYPE_LABELS[type]}
-                      </option>
-                    ))}
-                  </select>
+                    <i className="fa-solid fa-trash-can"></i>
+                    Borrar guerra
+                  </button>
                 </div>
               )}
 
