@@ -71,14 +71,15 @@ const PlayerCard: React.FC<PlayerCardProps> = ({
       className={`relative p-3 rounded-lg border transition-all ${
         player.isStarter ? 'border-amber-400 shadow-[0_0_0_1px_rgba(251,191,36,0.35)]' : 'border-slate-800'
       } ${className}`}
-      style={{ background: `linear-gradient(135deg, ${from}59 0%, ${to}59 100%)` }}
+      style={{ background: `linear-gradient(90deg, ${from}59 0%, ${to}59 100%)` }}
     >
       {/* A solid edge as well as the wash: a tint alone is easy to miss against
-          a dark card, and the point is to read the build without looking. */}
+          a dark card. It carries the primary weapon's colour, which is also
+          where the wash starts, so the card reads left to right. */}
       <span
         aria-hidden
         className="absolute left-0 top-0 bottom-0 w-1 rounded-l-lg"
-        style={{ background: `linear-gradient(180deg, ${from} 0%, ${to} 100%)` }}
+        style={{ backgroundColor: from }}
       />
 
       <div className="flex justify-between items-start pl-2">
