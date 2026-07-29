@@ -372,6 +372,16 @@ const App: React.FC = () => {
   const myPlayer = players.find((p) => p.id === session?.user.playerId);
   const canSeeAdmin = can('users.manage') || can('permissions.manage') || can('builds.manage');
 
+  // The tabs as data rather than five near-identical blocks of markup: adding
+  // one should not mean copying a class list and hoping it still matches.
+  const tabs = [
+    { id: 'roster' as const, label: 'Roster', icon: 'fa-users', show: true },
+    { id: 'me' as const, label: 'Mi perfil', icon: 'fa-user', show: Boolean(myPlayer) },
+    { id: 'war-room' as const, label: 'Sala de Guerra', icon: 'fa-chess-knight', show: true },
+    { id: 'scan' as const, label: 'Escaneo', icon: 'fa-file-import', show: can('roster.edit') },
+    { id: 'admin' as const, label: 'Administración', icon: 'fa-user-shield', show: canSeeAdmin },
+  ].filter((t) => t.show);
+
   const handleUpdateSession = (updatedSession: GuildWarSession) => {
     if (warLocked) return;
     const updated = sessions.map(s => s.id === updatedSession.id ? updatedSession : s);
@@ -400,128 +410,164 @@ const App: React.FC = () => {
   return (
     <div className="min-h-screen bg-[#0a0b0c] text-slate-200">
       <header className="border-b border-slate-800 bg-slate-900/80 backdrop-blur-md sticky top-0 z-50">
-        <div className="max-w-[1600px] mx-auto px-6 py-4 flex flex-col md:flex-row justify-between items-center gap-4">
-          <div className="flex items-center gap-4">
-            <div className={`w-12 h-12 bg-gradient-to-br from-amber-600 to-amber-900 rounded-lg flex items-center justify-center shadow-lg border border-amber-500/30 ${peerRole === 'HOST' ? 'pulse-gold' : ''}`}>
-              <i className="fa-solid fa-wind text-2xl text-white"></i>
+        {/* Identity and account on one line, navigation on its own below it.
+            Sharing a line is what squeezed the labels into three lines each. */}
+        <div className="max-w-[1600px] mx-auto px-4 sm:px-6 pt-3 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div
+              className={`w-10 h-10 shrink-0 bg-gradient-to-br from-amber-600 to-amber-900 rounded-lg flex items-center justify-center shadow-lg border border-amber-500/30 ${
+                peerRole === 'HOST' ? 'pulse-gold' : ''
+              }`}
+            >
+              <i className="fa-solid fa-wind text-xl text-white"></i>
             </div>
-            <div>
-              <h1 className="cinzel text-2xl font-bold tracking-widest text-white leading-none">WHERE WINDS MEET</h1>
-              <div className="flex items-center gap-2 mt-1">
-                <p className="text-[10px] uppercase tracking-[0.2em] text-amber-500 font-bold">Mando Estratégico</p>
-                {peerRole === 'HOST' && <span className="bg-amber-600 text-[8px] px-1.5 py-0.5 rounded text-white font-bold animate-pulse">EDITOR</span>}
-                {peerRole === 'CLIENT' && <span className="bg-blue-600 text-[8px] px-1.5 py-0.5 rounded text-white font-bold">OBSERVADOR</span>}
+            <div className="min-w-0">
+              <h1 className="cinzel text-lg sm:text-xl font-bold tracking-widest text-white leading-none truncate">
+                WHERE WINDS MEET
+              </h1>
+              <div className="flex items-center gap-2 mt-0.5">
+                <p className="hidden sm:block text-[10px] uppercase tracking-[0.2em] text-amber-500 font-bold">
+                  Mando Estratégico
+                </p>
+                {peerRole === 'HOST' && (
+                  <span className="bg-amber-600 text-[8px] px-1.5 py-0.5 rounded text-white font-bold animate-pulse">
+                    EDITOR
+                  </span>
+                )}
+                {peerRole === 'CLIENT' && (
+                  <span className="bg-blue-600 text-[8px] px-1.5 py-0.5 rounded text-white font-bold">
+                    OBSERVADOR
+                  </span>
+                )}
               </div>
             </div>
           </div>
 
-          <nav className="flex bg-slate-950 p-1 rounded-lg border border-slate-800">
-            <button 
-              onClick={() => setActiveTab('roster')}
-              className={`px-6 py-2 rounded-md text-sm font-semibold transition-all flex items-center gap-2 ${activeTab === 'roster' ? 'bg-amber-700 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
-            >
-              <i className="fa-solid fa-users"></i>
-              Roster
-            </button>
-            {myPlayer && (
-              <button
-                onClick={() => setActiveTab('me')}
-                className={`px-6 py-2 rounded-md text-sm font-semibold transition-all flex items-center gap-2 ${activeTab === 'me' ? 'bg-amber-700 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
-              >
-                <i className="fa-solid fa-user"></i>
-                Mi perfil
-              </button>
-            )}
-            <button
-              onClick={() => setActiveTab('war-room')}
-              className={`px-6 py-2 rounded-md text-sm font-semibold transition-all flex items-center gap-2 ${activeTab === 'war-room' ? 'bg-amber-700 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
-            >
-              <i className="fa-solid fa-chess-knight"></i>
-              Sala de Guerra
-            </button>
-            {can('roster.edit') && (
-              <button
-                onClick={() => setActiveTab('scan')}
-                className={`px-6 py-2 rounded-md text-sm font-semibold transition-all flex items-center gap-2 ${activeTab === 'scan' ? 'bg-amber-700 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
-              >
-                <i className="fa-solid fa-file-import"></i>
-                Escaneo
-              </button>
-            )}
-            {canSeeAdmin && (
-              <button
-                onClick={() => setActiveTab('admin')}
-                className={`px-6 py-2 rounded-md text-sm font-semibold transition-all flex items-center gap-2 ${activeTab === 'admin' ? 'bg-amber-700 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
-              >
-                <i className="fa-solid fa-user-shield"></i>
-                Administración
-              </button>
-            )}
-          </nav>
-
-          <div className="flex items-center gap-4">
-             <CollaborationPanel 
-                peerId={myPeerId} 
-                role={peerRole} 
-                onHost={handleHost} 
-                onJoin={handleJoin} 
+          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+            <div className="hidden lg:block">
+              <CollaborationPanel
+                peerId={myPeerId}
+                role={peerRole}
+                onHost={handleHost}
+                onJoin={handleJoin}
                 onDisconnect={handleDisconnect}
                 connectedCount={connectedPeers}
-             />
-             
-             <div className="h-8 w-px bg-slate-800 hidden xl:block"></div>
-             
-             <div className="flex bg-slate-950 p-1 rounded-lg border border-slate-800">
-                {can('data.export') && (
-                  <button
-                    onClick={handleExport}
-                    className="p-2 text-slate-400 hover:text-amber-500 hover:bg-slate-900 rounded transition-all"
-                    title="Exportar los datos del gremio"
-                  >
-                    <i className="fa-solid fa-download"></i>
-                  </button>
-                )}
-                {can('data.import') && (
-                  <button
-                    onClick={handleImportClick}
-                    disabled={peerRole === 'CLIENT'}
-                    className={`p-2 rounded transition-all ${peerRole === 'CLIENT' ? 'text-slate-700 cursor-not-allowed' : 'text-slate-400 hover:text-amber-500 hover:bg-slate-900'}`}
-                    title="Importar datos del gremio"
-                  >
-                    <i className="fa-solid fa-upload"></i>
-                  </button>
-                )}
-                <input type="file" ref={fileInputRef} className="hidden" accept=".json" onChange={handleFileImport} />
-             </div>
+              />
+            </div>
 
-             <div className="h-8 w-px bg-slate-800 hidden xl:block"></div>
+            {/* Below large screens the same tools live behind one button. A
+                native details element needs no state and closes itself. */}
+            <details className="lg:hidden relative">
+              <summary className="list-none cursor-pointer p-2 rounded-lg bg-slate-950 border border-slate-800 text-slate-400 hover:text-amber-500 transition-all">
+                <i className="fa-solid fa-ellipsis"></i>
+              </summary>
+              <div className="absolute right-0 mt-2 w-60 bg-slate-900 border border-slate-800 rounded-lg shadow-2xl p-3 space-y-3 z-50">
+                <CollaborationPanel
+                  peerId={myPeerId}
+                  role={peerRole}
+                  onHost={handleHost}
+                  onJoin={handleJoin}
+                  onDisconnect={handleDisconnect}
+                  connectedCount={connectedPeers}
+                />
+                <div className="flex gap-2">
+                  {can('data.export') && (
+                    <button
+                      onClick={handleExport}
+                      className="flex-1 text-xs py-2 rounded border border-slate-800 text-slate-400 hover:text-amber-500 transition-all"
+                    >
+                      <i className="fa-solid fa-download mr-1.5"></i>
+                      Exportar
+                    </button>
+                  )}
+                  {can('data.import') && (
+                    <button
+                      onClick={handleImportClick}
+                      disabled={peerRole === 'CLIENT'}
+                      className="flex-1 text-xs py-2 rounded border border-slate-800 text-slate-400 hover:text-amber-500 disabled:text-slate-700 transition-all"
+                    >
+                      <i className="fa-solid fa-upload mr-1.5"></i>
+                      Importar
+                    </button>
+                  )}
+                </div>
+              </div>
+            </details>
 
-             <div className="flex items-center gap-3">
-                <div className="text-right leading-tight hidden sm:block">
-                   <div className="text-sm font-semibold text-white">{session.user.username}</div>
-                   <div className="text-[10px] uppercase tracking-wider text-amber-500 font-bold">
-                     {ROLE_LABELS[session.user.role] ?? session.user.role}
-                   </div>
+            <div className="hidden lg:flex bg-slate-950 p-1 rounded-lg border border-slate-800">
+              {can('data.export') && (
+                <button
+                  onClick={handleExport}
+                  className="p-2 text-slate-400 hover:text-amber-500 hover:bg-slate-900 rounded transition-all"
+                  title="Exportar los datos del gremio"
+                >
+                  <i className="fa-solid fa-download"></i>
+                </button>
+              )}
+              {can('data.import') && (
+                <button
+                  onClick={handleImportClick}
+                  disabled={peerRole === 'CLIENT'}
+                  className={`p-2 rounded transition-all ${
+                    peerRole === 'CLIENT'
+                      ? 'text-slate-700 cursor-not-allowed'
+                      : 'text-slate-400 hover:text-amber-500 hover:bg-slate-900'
+                  }`}
+                  title="Importar datos del gremio"
+                >
+                  <i className="fa-solid fa-upload"></i>
+                </button>
+              )}
+            </div>
+            <input type="file" ref={fileInputRef} className="hidden" accept=".json" onChange={handleFileImport} />
+
+            <div className="flex items-center gap-2">
+              <div className="text-right leading-tight hidden md:block">
+                <div className="text-sm font-semibold text-white">{session.user.username}</div>
+                <div className="text-[10px] uppercase tracking-wider text-amber-500 font-bold">
+                  {ROLE_LABELS[session.user.role] ?? session.user.role}
                 </div>
-                <div className="flex bg-slate-950 p-1 rounded-lg border border-slate-800">
-                   <button
-                     onClick={handleChangePassword}
-                     className="p-2 text-slate-400 hover:text-amber-500 hover:bg-slate-900 rounded transition-all"
-                     title="Cambiar contraseña"
-                   >
-                     <i className="fa-solid fa-key"></i>
-                   </button>
-                   <button
-                     onClick={handleLogout}
-                     className="p-2 text-slate-400 hover:text-amber-500 hover:bg-slate-900 rounded transition-all"
-                     title="Cerrar sesión"
-                   >
-                     <i className="fa-solid fa-right-from-bracket"></i>
-                   </button>
-                </div>
-             </div>
+              </div>
+              <div className="flex bg-slate-950 p-1 rounded-lg border border-slate-800">
+                <button
+                  onClick={handleChangePassword}
+                  className="p-2 text-slate-400 hover:text-amber-500 hover:bg-slate-900 rounded transition-all"
+                  title="Cambiar contraseña"
+                >
+                  <i className="fa-solid fa-key"></i>
+                </button>
+                <button
+                  onClick={handleLogout}
+                  className="p-2 text-slate-400 hover:text-amber-500 hover:bg-slate-900 rounded transition-all"
+                  title="Cerrar sesión"
+                >
+                  <i className="fa-solid fa-right-from-bracket"></i>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
+
+        {/* Scrolls sideways when it does not fit rather than wrapping: a label
+            broken across three lines is what made this feel unfinished. */}
+        <nav className="max-w-[1600px] mx-auto px-4 sm:px-6 py-3 overflow-x-auto no-bar">
+          <div className="flex gap-1 w-max mx-auto bg-slate-950 p-1 rounded-lg border border-slate-800">
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`px-4 sm:px-5 py-2 rounded-md text-sm font-semibold transition-all flex items-center gap-2 whitespace-nowrap ${
+                  activeTab === tab.id
+                    ? 'bg-amber-700 text-white shadow-lg'
+                    : 'text-slate-500 hover:text-slate-300'
+                }`}
+              >
+                <i className={`fa-solid ${tab.icon}`}></i>
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </nav>
       </header>
 
       {(loadError || saveError) && (
@@ -608,7 +654,7 @@ const App: React.FC = () => {
       )}
 
       {activeTab === 'war-room' && (
-        <footer className="fixed bottom-0 left-0 right-0 bg-slate-950/90 backdrop-blur-md border-t border-slate-800 p-3 flex justify-center z-50">
+        <footer className="hidden md:flex fixed bottom-0 left-0 right-0 bg-slate-950/90 backdrop-blur-md border-t border-slate-800 p-3 flex justify-center z-50">
            <div className="flex items-center gap-8 text-[10px] font-bold uppercase tracking-widest text-slate-500">
               <span className="flex items-center gap-2">
                  <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></div>
