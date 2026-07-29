@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { api } from '../services/authService';
 import { WAR_SIDE_LABELS, WarLane, WarSide } from '../types';
+import ResultsReader from './ResultsReader';
 
 interface WarRow {
   id: string;
@@ -32,11 +33,16 @@ interface Detail extends Omit<WarRow, 'participants' | 'images'> {
   images: WarImage[];
 }
 
-const FIGURES: { key: string; label: string }[] = [
+/** The results screen's own columns, in its own order. */
+export const FIGURES: { key: string; label: string }[] = [
+  { key: 'kills', label: 'Derrotados' },
+  { key: 'assists', label: 'Asistencia' },
+  { key: 'deaths', label: 'Derrotado' },
+  { key: 'coin', label: 'Moneda' },
   { key: 'damage', label: 'Daño' },
+  { key: 'taken', label: 'Daño recibido' },
   { key: 'healing', label: 'Curación' },
-  { key: 'kills', label: 'Bajas' },
-  { key: 'deaths', label: 'Muertes' },
+  { key: 'siege', label: 'Daño de asedio' },
 ];
 
 const when = (iso: string) =>
@@ -75,6 +81,7 @@ const WarHistory: React.FC<Props> = ({ canEdit, onClose }) => {
   const [detail, setDetail] = useState<Detail | null>(null);
   const [message, setMessage] = useState<{ text: string; ok: boolean } | null>(null);
   const [zoom, setZoom] = useState<string | null>(null);
+  const [reading, setReading] = useState(false);
   const drop = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -223,6 +230,17 @@ const WarHistory: React.FC<Props> = ({ canEdit, onClose }) => {
                     Resultados ({detail.images.length})
                   </h3>
                   {canEdit && (
+                    <div className="flex items-center gap-4">
+                      {detail.images.length > 0 && (
+                        <button
+                          onClick={() => setReading(true)}
+                          title="Leer las cifras de las capturas. La primera vez descarga el lector."
+                          className="text-xs text-slate-500 hover:text-amber-500 transition-all"
+                        >
+                          <i className="fa-solid fa-wand-magic-sparkles mr-1.5"></i>
+                          Leer resultados
+                        </button>
+                      )}
                     <label className="text-xs text-slate-500 hover:text-amber-500 cursor-pointer transition-all">
                       <i className="fa-solid fa-image mr-1.5"></i>
                       Subir imagen
@@ -237,6 +255,7 @@ const WarHistory: React.FC<Props> = ({ canEdit, onClose }) => {
                         }}
                       />
                     </label>
+                    </div>
                   )}
                 </div>
 
@@ -323,6 +342,26 @@ const WarHistory: React.FC<Props> = ({ canEdit, onClose }) => {
           )}
         </div>
       </div>
+
+      {reading && detail && (
+        <ResultsReader
+          images={detail.images.map((i) => i.image)}
+          participants={detail.participants.map((p) => ({ playerId: p.playerId, name: p.name }))}
+          onClose={() => setReading(false)}
+          onApply={async (rows) => {
+            for (const row of rows) {
+              if (!row.playerId) continue;
+              await api(`/war/wars/${chosen}/participants/${row.playerId}`, {
+                method: 'PATCH',
+                body: JSON.stringify({ stats: row.figures }),
+              }).catch(() => undefined);
+            }
+            setReading(false);
+            if (chosen) await load(chosen);
+            setMessage({ text: `${rows.length} filas guardadas.`, ok: true });
+          }}
+        />
+      )}
 
       {zoom && (
         <div

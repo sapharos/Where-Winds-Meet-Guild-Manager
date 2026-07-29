@@ -256,7 +256,8 @@ export async function removeWarImage(warId, imageId) {
   return { ok: true };
 }
 
-const FIGURES = ['damage', 'healing', 'kills', 'deaths', 'assists', 'taken'];
+// The columns the results screen actually reports, in its own order.
+const FIGURES = ['kills', 'assists', 'deaths', 'coin', 'damage', 'taken', 'healing', 'siege'];
 
 /** Record what one member did. Absent figures are left as they were. */
 export async function setContribution(warId, playerId, body) {
