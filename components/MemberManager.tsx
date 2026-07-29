@@ -2,6 +2,7 @@
 import React, { useMemo, useState } from 'react';
 import { Player, PlayerBuild, Role, Platform, MembershipStatus, GuildRank, SECTS, WeaponSet, WarSide, WAR_SIDE_LABELS } from '../types';
 import PlayerCard, { ROLE_NAMES } from './PlayerCard';
+import { SetBadge } from './BuildEditor';
 
 interface MemberManagerProps {
   players: Player[];
@@ -21,6 +22,26 @@ interface MemberManagerProps {
   onToggleActive?: (p: Player) => void;
   canManageRanks?: boolean;
 }
+
+/** One weapon in the filter list, with how many members carry it. */
+const WeaponOption: React.FC<{
+  weapon: string;
+  count: number;
+  colour: string;
+  checked: boolean;
+  onToggle: () => void;
+}> = ({ weapon, count, colour, checked, onToggle }) => (
+  <label className="flex items-center gap-2 px-2 py-1 rounded cursor-pointer hover:bg-slate-900 transition-all">
+    <input type="checkbox" checked={checked} onChange={onToggle} className="accent-amber-500" />
+    <span
+      className={`text-xs flex-1 truncate ${checked ? 'font-semibold' : 'text-slate-400'}`}
+      style={checked ? { color: colour } : undefined}
+    >
+      {weapon}
+    </span>
+    <span className={`text-[10px] ${count ? 'text-slate-500' : 'text-slate-700'}`}>{count}</span>
+  </label>
+);
 
 const EMPTY: Omit<Player, 'id'> = {
   name: '',
@@ -61,7 +82,7 @@ const MemberManager: React.FC<MemberManagerProps> = ({
 
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState<'' | Role>('');
-  const [buildFilter, setBuildFilter] = useState('');
+  const [weaponFilter, setWeaponFilter] = useState<string[]>([]);
   const [startersOnly, setStartersOnly] = useState(false);
   const [sideFilter, setSideFilter] = useState<'' | WarSide>('');
   const [showGone, setShowGone] = useState(false);
@@ -76,10 +97,44 @@ const MemberManager: React.FC<MemberManagerProps> = ({
     return map;
   }, [builds]);
 
-  const buildNames = useMemo(
-    () => [...new Set(builds.map((b) => b.name).filter(Boolean))].sort(),
-    [builds],
-  );
+  // Filtering asks who can bring a weapon, so it reads every build a member has
+  // and not only the primary one: a second build is precisely where the weapon
+  // you are short of tends to be.
+  const weaponsOf = useMemo(() => {
+    const map = new Map<string, Set<string>>();
+    for (const build of builds) {
+      let owned = map.get(build.playerId);
+      if (!owned) map.set(build.playerId, (owned = new Set()));
+      for (const weapon of build.weapons) owned.add(weapon);
+    }
+    return map;
+  }, [builds]);
+
+  // How many of the people on the roster carry each weapon, so the list says
+  // what the guild actually fields rather than what the catalogue offers.
+  const usage = useMemo(() => {
+    const count = new Map<string, number>();
+    for (const player of players) {
+      if (player.isActive === false) continue;
+      for (const weapon of weaponsOf.get(player.id) ?? []) {
+        count.set(weapon, (count.get(weapon) ?? 0) + 1);
+      }
+    }
+    return count;
+  }, [players, weaponsOf]);
+
+  // The catalogue, in its own order, plus anything a build still names after the
+  // catalogue moved on -- otherwise those members become unfilterable.
+  const weaponGroups = useMemo(() => {
+    const known = new Set(weaponSets.flatMap((s) => s.weapons));
+    const loose = [...usage.keys()].filter((w) => !known.has(w)).sort();
+    return { sets: weaponSets, loose };
+  }, [weaponSets, usage]);
+
+  const toggleWeapon = (weapon: string) =>
+    setWeaponFilter((prev) =>
+      prev.includes(weapon) ? prev.filter((w) => w !== weapon) : [...prev, weapon],
+    );
 
   const visible = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -97,14 +152,19 @@ const MemberManager: React.FC<MemberManagerProps> = ({
         const covered = build?.roles?.length ? build.roles : [p.role];
         if (!covered.includes(roleFilter)) return false;
       }
-      if (buildFilter && build?.name !== buildFilter) return false;
+      // Several weapons read as "any of these": you pick the ones that would
+      // serve and see who could bring one, not who brings the whole list.
+      if (weaponFilter.length) {
+        const owned = weaponsOf.get(p.id);
+        if (!owned || !weaponFilter.some((w) => owned.has(w))) return false;
+      }
       if (sideFilter && p.warSide !== sideFilter) return false;
       return true;
     })
     // Whoever is being fielded comes first: on war day the roster is read to
     // check the line-up, not to browse the whole guild.
     .sort((a, b) => Number(Boolean(b.isStarter)) - Number(Boolean(a.isStarter)) || a.name.localeCompare(b.name));
-  }, [players, search, roleFilter, buildFilter, startersOnly, sideFilter, showGone, primaryOf]);
+  }, [players, search, roleFilter, weaponFilter, weaponsOf, startersOnly, sideFilter, showGone, primaryOf]);
 
   const openNew = () => {
     setEditing(null);
@@ -196,18 +256,77 @@ const MemberManager: React.FC<MemberManagerProps> = ({
             ))}
           </select>
 
-          <select
-            value={buildFilter}
-            onChange={(e) => setBuildFilter(e.target.value)}
-            className="bg-slate-950 border border-slate-800 rounded p-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
-          >
-            <option value="">Todas las builds</option>
-            {buildNames.map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
-          </select>
+          <details className="relative">
+            <summary className="list-none cursor-pointer bg-slate-950 border border-slate-800 rounded p-2 text-sm flex items-center justify-between gap-2 hover:border-slate-700 transition-all">
+              <span className={weaponFilter.length ? 'text-amber-400 truncate' : 'text-slate-400 truncate'}>
+                {weaponFilter.length === 0
+                  ? 'Todas las armas'
+                  : weaponFilter.length === 1
+                    ? weaponFilter[0]
+                    : `${weaponFilter.length} armas`}
+              </span>
+              <i className="fa-solid fa-chevron-down text-[10px] text-slate-600"></i>
+            </summary>
+
+            <div className="absolute z-30 mt-1 w-72 max-w-[calc(100vw-3rem)] max-h-80 overflow-y-auto custom-scrollbar bg-slate-950 border border-slate-800 rounded-lg p-2 shadow-2xl">
+              <button
+                onClick={() => setWeaponFilter([])}
+                disabled={!weaponFilter.length}
+                className="w-full text-left text-[11px] px-2 py-1.5 rounded text-slate-500 hover:text-amber-500 disabled:text-slate-700 disabled:hover:text-slate-700 transition-all"
+              >
+                <i className="fa-solid fa-xmark mr-1.5"></i>
+                Quitar el filtro de armas
+              </button>
+
+              {weaponGroups.sets.map((set) => (
+                <div key={set.id} className="mt-1">
+                  <div className="flex items-center gap-1.5 px-2 py-1">
+                    <SetBadge set={set} size={12} />
+                    <span className="text-[10px] uppercase tracking-wider" style={{ color: set.color }}>
+                      {set.name}
+                    </span>
+                  </div>
+                  {set.weapons.map((weapon) => (
+                    <WeaponOption
+                      key={weapon}
+                      weapon={weapon}
+                      count={usage.get(weapon) ?? 0}
+                      colour={set.color}
+                      checked={weaponFilter.includes(weapon)}
+                      onToggle={() => toggleWeapon(weapon)}
+                    />
+                  ))}
+                </div>
+              ))}
+
+              {weaponGroups.loose.length > 0 && (
+                <div className="mt-1">
+                  <div className="flex items-center gap-1.5 px-2 py-1">
+                    <i className="fa-solid fa-triangle-exclamation text-[10px] text-amber-600"></i>
+                    <span className="text-[10px] uppercase tracking-wider text-amber-600">
+                      Fuera del catálogo
+                    </span>
+                  </div>
+                  {weaponGroups.loose.map((weapon) => (
+                    <WeaponOption
+                      key={weapon}
+                      weapon={weapon}
+                      count={usage.get(weapon) ?? 0}
+                      colour="#f59e0b"
+                      checked={weaponFilter.includes(weapon)}
+                      onToggle={() => toggleWeapon(weapon)}
+                    />
+                  ))}
+                </div>
+              )}
+
+              {!weaponGroups.sets.length && !weaponGroups.loose.length && (
+                <p className="text-[11px] text-slate-600 px-2 py-2">
+                  No hay conjuntos de armas definidos.
+                </p>
+              )}
+            </div>
+          </details>
 
           <select
             value={sideFilter}
