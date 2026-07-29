@@ -165,6 +165,12 @@ export const WAR_MINUTES = 30;
 /** Liga, ranked, or a challenge arranged against one particular guild. */
 export const MATCH_TYPES = ['league', 'ranked', 'custom'];
 
+/**
+ * How it went. Null is a real state and stays allowed: a war nobody closed by
+ * hand is shut by the clock at thirty minutes, with nobody there to say.
+ */
+export const OUTCOMES = ['win', 'loss'];
+
 export async function currentWar() {
   // Closed by the clock rather than by remembering to. Whoever opens the war
   // room next is the one who notices, and the end time is the war's own thirty
@@ -246,7 +252,7 @@ export async function warsFor(playerId) {
     // are spelled apart on purpose: called the same thing, the driver keeps
     // whichever came last and the war silently takes a member's name.
     `SELECT w.id, w.name AS "warName", w.started_at AS "startedAt",
-            w.ended_at AS "endedAt", w.match_type AS "matchType",
+            w.ended_at AS "endedAt", w.match_type AS "matchType", w.outcome,
             p.player_id AS "playerId", COALESCE(m.name, p.player_id) AS "playerName",
             p.side, p.lane, p.stats
        FROM wars w
@@ -271,6 +277,7 @@ export async function warsFor(playerId) {
         startedAt: row.startedAt,
         endedAt: row.endedAt,
         matchType: row.matchType,
+        outcome: row.outcome,
         participants: [],
       };
       wars.set(row.id, war);
@@ -414,11 +421,20 @@ export async function startWar(name, matchType) {
   return { id, participants: deployed.length };
 }
 
-/** Close the war and open both boards again for the next one. */
-export async function endWar(id) {
+/**
+ * Close the war and open both boards again for the next one.
+ *
+ * Whoever closes it says how it went, since they were there. The clock closing
+ * it at thirty minutes leaves that unsaid, to be filled in from the history.
+ */
+export async function endWar(id, outcome) {
+  if (!OUTCOMES.includes(outcome)) {
+    throw Object.assign(new Error('marca si la guerra se gano o se perdio'), { status: 400 });
+  }
   const { rowCount } = await pool.query(
-    `UPDATE wars SET ended_at = now() WHERE id = $1 AND guild_id = $2 AND ended_at IS NULL`,
-    [id, GUILD_ID],
+    `UPDATE wars SET ended_at = now(), outcome = $3
+      WHERE id = $1 AND guild_id = $2 AND ended_at IS NULL`,
+    [id, GUILD_ID, outcome],
   );
   if (!rowCount) throw Object.assign(new Error('esa guerra no esta en curso'), { status: 404 });
 
@@ -432,16 +448,29 @@ export async function endWar(id) {
  * Decided in the rush of starting a war, so it is the one thing about the
  * record most likely to be picked wrong or typed in a hurry.
  */
-export async function updateWar(id, { name, matchType } = {}) {
+export async function updateWar(id, { name, matchType, outcome } = {}) {
   if (matchType !== undefined && !MATCH_TYPES.includes(matchType)) {
     throw Object.assign(new Error('tipo de partida invalido'), { status: 400 });
+  }
+  // Null is meaningful here -- it puts a war back to unmarked -- so it has to
+  // be told apart from "not mentioned in this request".
+  if (outcome !== undefined && outcome !== null && !OUTCOMES.includes(outcome)) {
+    throw Object.assign(new Error('resultado invalido'), { status: 400 });
   }
   const { rowCount } = await pool.query(
     `UPDATE wars SET
         name = COALESCE($1, name),
-        match_type = COALESCE($2, match_type)
-      WHERE id = $3 AND guild_id = $4`,
-    [name === undefined ? null : String(name).trim() || null, matchType ?? null, id, GUILD_ID],
+        match_type = COALESCE($2, match_type),
+        outcome = CASE WHEN $5::boolean THEN $3 ELSE outcome END
+      WHERE id = $4 AND guild_id = $6`,
+    [
+      name === undefined ? null : String(name).trim() || null,
+      matchType ?? null,
+      outcome ?? null,
+      id,
+      outcome !== undefined,
+      GUILD_ID,
+    ],
   );
   if (!rowCount) throw Object.assign(new Error('esa guerra no existe'), { status: 404 });
   return { ok: true };

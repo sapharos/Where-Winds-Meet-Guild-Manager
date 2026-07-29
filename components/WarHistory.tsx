@@ -1,7 +1,15 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../services/authService';
 import { impactOf } from '../services/impact';
-import { WAR_MATCH_TYPE_LABELS, WAR_SIDE_LABELS, WarLane, WarMatchType, WarSide } from '../types';
+import {
+  WAR_MATCH_TYPE_LABELS,
+  WAR_OUTCOME_LABELS,
+  WAR_SIDE_LABELS,
+  WarLane,
+  WarMatchType,
+  WarOutcome,
+  WarSide,
+} from '../types';
 import ResultsReader from './ResultsReader';
 import FigureCell from './FigureCell';
 
@@ -10,7 +18,7 @@ interface WarRow {
   name: string;
   startedAt: string;
   endedAt: string | null;
-  outcome: string | null;
+  outcome: WarOutcome | null;
   matchType: WarMatchType;
   participants: number;
   images: number;
@@ -203,7 +211,11 @@ const WarHistory: React.FC<Props> = ({ canEdit, onClose, onChanged }) => {
    * likely to need a correction afterwards. The list is patched in place rather
    * than reloaded, so a correction does not scroll the reader away from it.
    */
-  const amend = async (changes: { name?: string; matchType?: WarMatchType }) => {
+  const amend = async (changes: {
+    name?: string;
+    matchType?: WarMatchType;
+    outcome?: WarOutcome | null;
+  }) => {
     if (!chosen) return;
     setDetail((prev) => (prev ? { ...prev, ...changes } : prev));
     setWars((prev) => (prev ?? []).map((w) => (w.id === chosen ? { ...w, ...changes } : w)));
@@ -318,6 +330,17 @@ const WarHistory: React.FC<Props> = ({ canEdit, onClose, onChanged }) => {
                     <span className="text-[9px] uppercase tracking-wider text-slate-500 border border-slate-700 rounded px-1 py-0.5">
                       {WAR_MATCH_TYPE_LABELS[w.matchType]}
                     </span>
+                    {w.outcome && (
+                      <span
+                        className={`text-[9px] uppercase tracking-wider font-bold rounded px-1 py-0.5 border ${
+                          w.outcome === 'win'
+                            ? 'border-emerald-700 text-emerald-400 bg-emerald-500/10'
+                            : 'border-red-800 text-red-400 bg-red-500/10'
+                        }`}
+                      >
+                        {WAR_OUTCOME_LABELS[w.outcome]}
+                      </span>
+                    )}
                   </div>
                   <p className="text-[10px] text-slate-500">
                     {when(w.startedAt)} · {minutes(w.startedAt, w.endedAt)} · {w.participants} en campo
@@ -361,6 +384,32 @@ const WarHistory: React.FC<Props> = ({ canEdit, onClose, onChanged }) => {
                       {(Object.keys(WAR_MATCH_TYPE_LABELS) as WarMatchType[]).map((type) => (
                         <option key={type} value={type}>
                           {WAR_MATCH_TYPE_LABELS[type]}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] uppercase tracking-wider text-slate-500 mb-1">
+                      Resultado
+                    </label>
+                    <select
+                      value={detail.outcome ?? ''}
+                      onChange={(e) =>
+                        void amend({ outcome: (e.target.value || null) as WarOutcome | null })
+                      }
+                      className={`bg-slate-950 border rounded px-2 py-[5px] text-sm outline-none focus:ring-1 focus:ring-amber-500 ${
+                        detail.outcome === 'win'
+                          ? 'border-emerald-700 text-emerald-400'
+                          : detail.outcome === 'loss'
+                            ? 'border-red-800 text-red-400'
+                            : 'border-slate-800 text-slate-400'
+                      }`}
+                    >
+                      <option value="">Sin marcar</option>
+                      {(Object.keys(WAR_OUTCOME_LABELS) as WarOutcome[]).map((option) => (
+                        <option key={option} value={option}>
+                          {WAR_OUTCOME_LABELS[option]}
                         </option>
                       ))}
                     </select>

@@ -183,6 +183,15 @@ export const WAR_MATCH_TYPE_LABELS: Record<WarMatchType, string> = {
   custom: 'Personalizada (reto)',
 };
 
+// Cómo terminó. Puede quedar sin marcar: una guerra que nadie cerró a mano la
+// cierra el reloj a los treinta minutos, sin nadie delante que lo diga.
+export type WarOutcome = 'win' | 'loss';
+
+export const WAR_OUTCOME_LABELS: Record<WarOutcome, string> = {
+  win: 'Victoria',
+  loss: 'Derrota',
+};
+
 export interface WarAssignment {
   playerId: string;
   lane: Lane;

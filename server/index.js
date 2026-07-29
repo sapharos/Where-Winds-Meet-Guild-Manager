@@ -523,11 +523,16 @@ app.post('/api/war/wars', requireAuth, requirePermission('war.edit'), asHandler(
 }));
 
 app.post('/api/war/wars/:id/end', requireAuth, requirePermission('war.edit'), asHandler(async (req, res) => {
-  res.json(await endWar(req.params.id));
+  res.json(await endWar(req.params.id, req.body?.outcome));
 }));
 
 app.patch('/api/war/wars/:id', requireAuth, requirePermission('war.edit'), asHandler(async (req, res) => {
-  res.json(await updateWar(req.params.id, { name: req.body?.name, matchType: req.body?.matchType }));
+  // Only the keys actually sent are touched: outcome accepts null to unmark.
+  const changes = {};
+  if ('name' in (req.body ?? {})) changes.name = req.body.name;
+  if ('matchType' in (req.body ?? {})) changes.matchType = req.body.matchType;
+  if ('outcome' in (req.body ?? {})) changes.outcome = req.body.outcome;
+  res.json(await updateWar(req.params.id, changes));
 }));
 
 app.delete('/api/war/wars/:id', requireAuth, requirePermission('war.edit'), asHandler(async (req, res) => {

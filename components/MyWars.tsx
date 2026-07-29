@@ -1,6 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../services/authService';
-import { WAR_MATCH_TYPE_LABELS, WAR_SIDE_LABELS, WarMatchType, WarSide } from '../types';
+import {
+  WAR_MATCH_TYPE_LABELS,
+  WAR_OUTCOME_LABELS,
+  WAR_SIDE_LABELS,
+  WarMatchType,
+  WarOutcome,
+  WarSide,
+} from '../types';
 import { FIGURES } from './WarHistory';
 import { Impact, WEIGHTS, impactOf } from '../services/impact';
 
@@ -17,6 +24,7 @@ interface War {
   startedAt: string;
   endedAt: string | null;
   matchType: WarMatchType;
+  outcome: WarOutcome | null;
   participants: Participation[];
 }
 
@@ -111,6 +119,17 @@ const MyWars: React.FC<Props> = ({ playerId }) => {
                     <span className="text-[9px] uppercase tracking-wider text-slate-500 border border-slate-700 rounded px-1 py-0.5 shrink-0">
                       {WAR_MATCH_TYPE_LABELS[war.matchType]}
                     </span>
+                    {war.outcome && (
+                      <span
+                        className={`text-[9px] uppercase tracking-wider font-bold rounded px-1 py-0.5 border shrink-0 ${
+                          war.outcome === 'win'
+                            ? 'border-emerald-700 text-emerald-400 bg-emerald-500/10'
+                            : 'border-red-800 text-red-400 bg-red-500/10'
+                        }`}
+                      >
+                        {WAR_OUTCOME_LABELS[war.outcome]}
+                      </span>
+                    )}
                   </div>
                   <p className="text-[11px] text-slate-500">
                     {when(war.startedAt)} · {place}.º de {ranked.length}

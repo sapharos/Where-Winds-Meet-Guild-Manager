@@ -12,6 +12,7 @@ import {
   WAR_SIDE_LABELS,
   WarLane,
   WarMatchType,
+  WarOutcome,
   WarSide,
   WarStrategy,
   WeaponSet,
@@ -22,6 +23,7 @@ import StrategyPlanner from './StrategyPlanner';
 import WarTimers from './WarTimers';
 import WarHistory from './WarHistory';
 import StartWarModal from './StartWarModal';
+import FinishWarModal from './FinishWarModal';
 
 const ROLE_KEYS: Record<Role, 'tank' | 'healer' | 'dps'> = {
   [Role.TANK]: 'tank',
@@ -83,6 +85,7 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
     { id: string; name: string; startedAt: string; matchType: WarMatchType } | null
   >(null);
   const [starting, setStarting] = useState(false);
+  const [finishing, setFinishing] = useState(false);
   // Who is being dragged, and which lane is under the cursor. The lane is kept
   // so the target can light up: a drop with no feedback beforehand is a guess.
   const [dragging, setDragging] = useState<string | null>(null);
@@ -330,15 +333,12 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
     await load();
   };
 
-  const finish = async () => {
-    if (!war || !window.confirm(`¿Finalizar «${war.name}»? Se abrirán las dos formaciones.`)) return;
+  const finish = async (outcome: WarOutcome) => {
+    if (!war) return;
+    await api(`/war/wars/${war.id}/end`, { method: 'POST', body: JSON.stringify({ outcome }) });
+    setFinishing(false);
     setError(null);
-    try {
-      await api(`/war/wars/${war.id}/end`, { method: 'POST' });
-      await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo finalizar la guerra');
-    }
+    await load();
   };
 
   const clear = async () => {
@@ -470,7 +470,7 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
                   en curso
                 </span>
                 <button
-                  onClick={finish}
+                  onClick={() => setFinishing(true)}
                   className="text-sm font-bold px-4 py-2 rounded border border-slate-700 text-slate-300 hover:text-white transition-all"
                 >
                   Finalizar guerra
@@ -889,6 +889,14 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
       )}
 
       {starting && <StartWarModal onClose={() => setStarting(false)} onStart={begin} />}
+
+      {finishing && war && (
+        <FinishWarModal
+          warName={war.name}
+          onClose={() => setFinishing(false)}
+          onFinish={finish}
+        />
+      )}
 
       {planning && (
         <StrategyPlanner
