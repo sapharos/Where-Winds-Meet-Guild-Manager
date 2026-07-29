@@ -6,11 +6,59 @@ const MINUTE = 60_000;
  * When to interrupt somebody: a minute out to get ready, thirty seconds out to
  * go. Each fires inside its own band -- opening the page twenty seconds before
  * an event should bring one warning, not both at once.
+ *
+ * The two sound different on purpose, and not merely louder: a pair of low
+ * notes against a rising four-note siren. In the middle of a fight nobody reads
+ * the screen to find out which warning just went off, so the warning has to say
+ * which it is by its shape.
  */
 const WARNINGS = [
-  { at: 60_000, label: '1 minuto' },
-  { at: 30_000, label: '30 segundos' },
+  {
+    at: 60_000,
+    label: '1 minuto',
+    tone: [
+      [620, 0.18],
+      [620, 0.18],
+    ] as [number, number][],
+    buzz: [180, 120, 180],
+  },
+  {
+    at: 30_000,
+    label: '30 segundos',
+    tone: [
+      [988, 0.12],
+      [1319, 0.12],
+      [988, 0.12],
+      [1319, 0.26],
+    ] as [number, number][],
+    buzz: [90, 70, 90, 70, 90, 70, 320],
+  },
 ];
+
+/**
+ * A short alarm built on the spot rather than fetched: no file to ship, no
+ * request to fail at the worst moment, and the browser will not refuse to play
+ * it because it never left the page.
+ */
+function sound(ctx: AudioContext, steps: [number, number][]) {
+  let at = ctx.currentTime + 0.02;
+  for (const [frequency, length] of steps) {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    // Square, because a sine reads as a notification and this is an alarm.
+    osc.type = 'square';
+    osc.frequency.value = frequency;
+    // Ramped rather than switched, so it does not click on the way in or out.
+    gain.gain.setValueAtTime(0.0001, at);
+    gain.gain.exponentialRampToValueAtTime(0.75, at + 0.012);
+    gain.gain.exponentialRampToValueAtTime(0.0001, at + length);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(at);
+    osc.stop(at + length + 0.02);
+    at += length + 0.07;
+  }
+}
 
 /** From the first warning onwards the panel says so without being asked. */
 const WARNING_MS = WARNINGS[0].at;
@@ -69,6 +117,9 @@ const WarTimers: React.FC<Props> = ({ startedAt, offset, mayBeWarned }) => {
   const [elapsed, setElapsed] = useState(0);
   const [warnings, setWarnings] = useState<'off' | 'on'>('off');
   const fired = useRef<Set<string>>(new Set());
+  const audio = useRef<AudioContext | null>(null);
+  const [toast, setToast] = useState<{ label: string; when: string; colour: string } | null>(null);
+  const clearing = useRef<number>();
 
   useEffect(() => {
     const began = Date.parse(startedAt);
@@ -81,9 +132,8 @@ const WarTimers: React.FC<Props> = ({ startedAt, offset, mayBeWarned }) => {
   const jungle = nextJungle(elapsed);
   const boss = nextBoss(elapsed);
 
-  // Each warning fires once per event, and only for the people who asked.
+  // Each warning fires once per event.
   useEffect(() => {
-    if (warnings !== 'on') return;
     for (const event of [jungle, boss]) {
       if (!event) continue;
       WARNINGS.forEach((warning, index) => {
@@ -93,28 +143,84 @@ const WarTimers: React.FC<Props> = ({ startedAt, offset, mayBeWarned }) => {
         const key = `${event.key}@${warning.at}`;
         if (fired.current.has(key)) return;
         fired.current.add(key);
+
+        // The banner is for everyone in the room. It asks no permission and
+        // makes no noise, so there is no reason to keep it from the people
+        // who are only there to fight.
+        setToast({
+          label: event.label,
+          when: warning.label,
+          colour: event.key.startsWith('boss') ? '#f87171' : '#a3e635',
+        });
+        window.clearTimeout(clearing.current);
+        clearing.current = window.setTimeout(() => setToast(null), 8_000);
+
+        if (warnings !== 'on') return;
+
+        // Three more ways of saying it, because each fails somewhere: the sound
+        // needs the volume up, the buzz needs a phone that has a motor, and the
+        // notification needs a permission that may have been refused.
+        if (audio.current) sound(audio.current, warning.tone);
+        try {
+          navigator.vibrate?.(warning.buzz);
+        } catch {
+          // Not every device has one, and iOS has none of this at all.
+        }
         try {
           new Notification(`${event.label} en ${warning.label}`, {
             body: 'Zona Zero · sala de guerra',
             tag: key,
           });
         } catch {
-          // Denied or unsupported: the panel still shows the countdown.
+          // Denied or unsupported: the banner and the panel still stand.
         }
       });
     }
   }, [warnings, jungle.key, jungle.remaining, boss?.key, boss?.remaining]);
 
+  useEffect(() => () => window.clearTimeout(clearing.current), []);
+
+  /**
+   * Turning warnings on is the click the browser was waiting for.
+   *
+   * Audio cannot start without one, so the context is opened here and kept, and
+   * the first alarm is played back straight away -- it doubles as proof that the
+   * volume is up, which is worth knowing before the war rather than during it.
+   */
   const ask = async () => {
     if (warnings === 'on') {
       setWarnings('off');
       return;
     }
-    const granted =
-      typeof Notification !== 'undefined' &&
-      (Notification.permission === 'granted' ||
-        (await Notification.requestPermission()) === 'granted');
-    setWarnings(granted ? 'on' : 'off');
+
+    // Unless a warning is about to sound anyway: arming inside the last minute
+    // would otherwise play the sample and the real thing on top of each other,
+    // which lands as one muddled noise at the moment attention matters most.
+    const imminent = [jungle, boss].some(
+      (event) => event !== null && event.remaining <= WARNINGS[0].at,
+    );
+
+    try {
+      const Ctor =
+        window.AudioContext ??
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      audio.current ??= new Ctor();
+      await audio.current.resume();
+      if (!imminent) sound(audio.current, WARNINGS[0].tone);
+    } catch {
+      // No audio: the notification and the panel still do their job.
+    }
+    try {
+      if (!imminent) navigator.vibrate?.(WARNINGS[0].buzz);
+    } catch {
+      // As above.
+    }
+
+    setWarnings('on');
+    // Asked for, not required: refusing notifications must not cost the alarm.
+    if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+      await Notification.requestPermission().catch(() => undefined);
+    }
   };
 
   const Face: React.FC<{ event: Countdown | null; icon: string; colour: string }> = ({
@@ -148,7 +254,29 @@ const WarTimers: React.FC<Props> = ({ startedAt, offset, mayBeWarned }) => {
   };
 
   return (
-    <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-4 flex items-center gap-4 flex-wrap">
+    <>
+      {/* Big enough to be caught out of the corner of an eye, and above
+          everything else, because it is worth nothing a moment later. */}
+      {toast && (
+        <div className="fixed inset-x-0 top-6 z-[80] flex justify-center px-4 pointer-events-none">
+          <button
+            onClick={() => setToast(null)}
+            className="pointer-events-auto rounded-2xl border-2 px-8 py-5 shadow-2xl backdrop-blur-sm text-center animate-pulse"
+            style={{
+              borderColor: toast.colour,
+              background: `linear-gradient(180deg, ${toast.colour}26 0%, #0b1120 100%)`,
+              boxShadow: `0 0 40px ${toast.colour}55`,
+            }}
+          >
+            <p className="cinzel text-4xl sm:text-5xl font-bold" style={{ color: toast.colour }}>
+              {toast.label}
+            </p>
+            <p className="text-lg sm:text-xl text-slate-200 mt-1">en {toast.when}</p>
+          </button>
+        </div>
+      )}
+
+      <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-4 flex items-center gap-4 flex-wrap">
       <div>
         <p className="text-[10px] uppercase tracking-wider text-slate-500">En guerra</p>
         <p className="text-lg font-bold text-slate-200 tabular-nums leading-none">{clock(elapsed)}</p>
@@ -162,7 +290,7 @@ const WarTimers: React.FC<Props> = ({ startedAt, offset, mayBeWarned }) => {
       {mayBeWarned && (
         <button
           onClick={ask}
-          title="Avisar un minuto y treinta segundos antes de cada temporizador, mientras esta pagina siga abierta"
+          title="Alarma, vibracion y notificacion un minuto y treinta segundos antes de cada temporizador, mientras esta pagina siga abierta"
           className={`text-xs font-bold px-3 py-2 rounded border transition-all flex items-center gap-2 ${
             warnings === 'on'
               ? 'border-amber-500 text-amber-400 bg-amber-500/10'
@@ -173,7 +301,8 @@ const WarTimers: React.FC<Props> = ({ startedAt, offset, mayBeWarned }) => {
           Avisos 1:00 y 0:30
         </button>
       )}
-    </div>
+      </div>
+    </>
   );
 };
 
