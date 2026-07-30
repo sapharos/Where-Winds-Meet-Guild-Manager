@@ -208,6 +208,26 @@ export async function listWars() {
   return rows;
 }
 
+/**
+ * The weapons a participant fought with, best effort.
+ *
+ * A war freezes the build somebody was carrying, but only if whoever set the
+ * line-up said which one -- and a build recorded years of renames ago can since
+ * have been deleted. So it prefers the build the war actually recorded, falls
+ * back to their primary, and failing that to whatever they last edited. Empty
+ * for a member with no builds at all, which the scoring reads as "no
+ * allowance" rather than as an error.
+ *
+ * Both $1 (the war) and $2 (the guild) are already bound where this is spliced
+ * in; it takes no parameters of its own.
+ */
+const CARRIED = `
+  SELECT b.weapons
+    FROM player_builds b
+   WHERE b.guild_id = $2 AND b.player_id = p.player_id
+   ORDER BY (b.id IS NOT DISTINCT FROM p.build_id) DESC, b.is_primary DESC, b.updated_at DESC
+   LIMIT 1`;
+
 export async function warDetail(id) {
   const war = await pool.query(
     `SELECT id, name, started_at AS "startedAt", ended_at AS "endedAt", outcome, notes, plans,
@@ -222,9 +242,10 @@ export async function warDetail(id) {
   const participants = await pool.query(
     `SELECT p.player_id AS "playerId", COALESCE(m.name, p.player_id) AS name,
             p.side, p.lane, p.unit_ids AS "unitIds", p.build_id AS "buildId",
-            p.contribution, p.stats
+            p.contribution, p.stats, COALESCE(carried.weapons, '[]'::jsonb) AS weapons
        FROM war_participants p
        LEFT JOIN players m ON m.guild_id = $2 AND m.id = p.player_id
+       LEFT JOIN LATERAL (${CARRIED}) carried ON true
       WHERE p.war_id = $1
       ORDER BY p.side, p.lane, name`,
     [id, GUILD_ID],
@@ -254,10 +275,11 @@ export async function warsFor(playerId) {
     `SELECT w.id, w.name AS "warName", w.started_at AS "startedAt",
             w.ended_at AS "endedAt", w.match_type AS "matchType", w.outcome,
             p.player_id AS "playerId", COALESCE(m.name, p.player_id) AS "playerName",
-            p.side, p.lane, p.stats
+            p.side, p.lane, p.stats, COALESCE(carried.weapons, '[]'::jsonb) AS weapons
        FROM wars w
        JOIN war_participants p ON p.war_id = w.id
        LEFT JOIN players m ON m.guild_id = $2 AND m.id = p.player_id
+       LEFT JOIN LATERAL (${CARRIED}) carried ON true
       WHERE w.guild_id = $2
         AND EXISTS (
           SELECT 1 FROM war_participants mine
@@ -288,6 +310,7 @@ export async function warsFor(playerId) {
       side: row.side,
       lane: row.lane,
       stats: row.stats ?? {},
+      weapons: row.weapons ?? [],
     });
   }
   return [...wars.values()].slice(0, 30);

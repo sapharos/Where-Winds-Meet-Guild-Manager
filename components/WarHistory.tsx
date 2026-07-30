@@ -1,12 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../services/authService';
-import { impactOf, impactShade } from '../services/impact';
+import { expectationOf, impactOf, impactShade } from '../services/impact';
 import {
   WAR_MATCH_TYPE_LABELS,
   WAR_OUTCOME_LABELS,
   WAR_SIDE_LABELS,
   WarLane,
-  PlayerBuild,
   WarMatchType,
   WarOutcome,
   WarSide,
@@ -34,6 +33,12 @@ interface Participant {
   lane: WarLane;
   /** The build the war froze for them, if one was chosen before it started. */
   buildId: string | null;
+  /**
+   * What they actually fought with, resolved on the server from that frozen
+   * build and falling back to their primary. Resolved there rather than here
+   * so the crests and the score can never disagree about what someone carried.
+   */
+  weapons: string[];
   contribution: number | null;
   stats: Record<string, number>;
 }
@@ -89,8 +94,6 @@ async function shrink(file: Blob): Promise<string> {
 
 interface Props {
   canEdit: boolean;
-  /** Every build in the guild, to resolve what each member carried that war. */
-  builds: PlayerBuild[];
   weaponSets: WeaponSet[];
   onClose: () => void;
   /**
@@ -106,7 +109,7 @@ interface Props {
  * What the wars left behind: who was there, what they did, and the screens the
  * game showed at the end.
  */
-const WarHistory: React.FC<Props> = ({ canEdit, builds, weaponSets, onClose, onChanged }) => {
+const WarHistory: React.FC<Props> = ({ canEdit, weaponSets, onClose, onChanged }) => {
   const [wars, setWars] = useState<WarRow[] | null>(null);
   const [chosen, setChosen] = useState<string | null>(null);
   const [detail, setDetail] = useState<Detail | null>(null);
@@ -185,33 +188,34 @@ const WarHistory: React.FC<Props> = ({ canEdit, builds, weaponSets, onClose, onC
   };
 
   /**
-   * The weapon sets a member fought with, from the build the war recorded for
-   * them -- or the one they usually play, if the war never named one.
+   * The crests for what somebody carried.
    *
    * Distinct sets rather than one icon per weapon: a build of four weapons is
    * two pairs, and showing the same crest twice says nothing extra.
    */
-  const setsCarried = useMemo(() => {
-    const byId = new Map<string, PlayerBuild>(builds.map((b) => [b.id, b]));
-    const primary = new Map<string, PlayerBuild>();
-    for (const b of builds) if (b.isPrimary || !primary.has(b.playerId)) primary.set(b.playerId, b);
-
-    return (playerId: string, buildId: string | null): WeaponSet[] => {
-      const build = (buildId ? byId.get(buildId) : undefined) ?? primary.get(playerId);
-      const found = new Map<string, WeaponSet>();
-      for (const weapon of build?.weapons ?? []) {
-        const set = weaponSets.find((s) => s.weapons.includes(weapon));
-        if (set) found.set(set.id, set);
-      }
-      return [...found.values()];
-    };
-  }, [builds, weaponSets]);
+  const setsCarried = useMemo(
+    () =>
+      (weapons: string[]): WeaponSet[] => {
+        const found = new Map<string, WeaponSet>();
+        for (const weapon of weapons ?? []) {
+          const set = weaponSets.find((s) => s.weapons.includes(weapon));
+          if (set) found.set(set.id, set);
+        }
+        return [...found.values()];
+      },
+    [weaponSets],
+  );
 
   // Recomputed as figures are typed, so a correction shows its effect at once.
-  const scores = useMemo(
-    () => new Map(impactOf(detail?.participants ?? []).map((row) => [row.playerId, row.score])),
-    [detail],
-  );
+  // Also as the sets change, since what a set is expected to reach is part of
+  // the sum now.
+  const scores = useMemo(() => {
+    const rows = (detail?.participants ?? []).map((p) => ({
+      ...p,
+      expects: expectationOf(p.weapons, weaponSets),
+    }));
+    return new Map(impactOf(rows).map((row) => [row.playerId, row.score]));
+  }, [detail, weaponSets]);
 
   /**
    * The rows in the order asked for.
@@ -587,7 +591,7 @@ const WarHistory: React.FC<Props> = ({ canEdit, builds, weaponSets, onClose, onC
                           <td className="py-1 pr-3 text-slate-200">
                             <span className="flex items-center gap-1.5">
                               <span className="flex items-center gap-1 w-9 shrink-0">
-                                {setsCarried(p.playerId, p.buildId).map((set) => (
+                                {setsCarried(p.weapons).map((set) => (
                                   <SetBadge key={set.id} set={set} size={14} />
                                 ))}
                               </span>

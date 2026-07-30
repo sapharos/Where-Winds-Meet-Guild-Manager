@@ -14,13 +14,46 @@
  * bringing a hybrid, and the reason not to average.
  */
 
-import type { WarSide } from '../types';
+import type { WarSide, WeaponSet } from '../types';
 
 export interface Contribution {
   playerId: string;
   name: string;
   side: WarSide;
   stats: Record<string, number | undefined>;
+  /**
+   * What the weapons this member carried are expected to reach on each axis,
+   * as a fraction of the war's best. Absent, or 1, means no allowance.
+   */
+  expects?: Record<string, number>;
+}
+
+/**
+ * The allowance for a set of weapons, from the sets the guild has configured.
+ *
+ * Averaged across the sets someone is carrying rather than taking the most
+ * generous of them, because a pair that mixes a single-target weapon with an
+ * AoE one really is expected to land somewhere between the two.
+ *
+ * Nothing here is hard-coded to a weapon name. New weapons arrive with the
+ * game, get dropped into a set in the settings, and are scored the same day.
+ */
+export function expectationOf(
+  weapons: string[] | undefined,
+  sets: WeaponSet[],
+): Record<string, number> {
+  const carried = sets.filter((set) => weapons?.some((w) => set.weapons.includes(w)));
+  if (!carried.length) return {};
+
+  const out: Record<string, number> = {};
+  for (const { key, weight } of WEIGHTS) {
+    if (weight <= 0) continue;
+    // A set that says nothing about an axis is saying it expects the full
+    // measure on it, so it must count as 1 in the average rather than drop out.
+    const mean = carried.reduce((n, set) => n + (set.impact?.[key] ?? 1), 0) / carried.length;
+    if (mean !== 1) out[key] = mean;
+  }
+  return out;
 }
 
 /**
@@ -54,6 +87,16 @@ export const WEIGHTS: { key: string; label: string; weight: number }[] = [
   { key: 'coin', label: 'Monedas', weight: 0.2 },
   { key: 'deaths', label: 'Muertes', weight: -0.3 },
 ];
+
+/**
+ * The axes a weapon set may be given an allowance on.
+ *
+ * Not all of them: monedas is about taking objectives rather than about what
+ * you carry, and muertes is a penalty, where an allowance would amount to
+ * paying people for dying. Mirrored by TUNABLE in server/weapons.js, which is
+ * what actually enforces it.
+ */
+export const TUNABLE_AXES = WEIGHTS.filter((axis) => axis.weight > 0 && axis.key !== 'coin');
 
 /**
  * How hard a lead on one axis is allowed to shout.
@@ -153,8 +196,13 @@ export function impactOf(rows: Contribution[]): Impact[] {
   const raw = measured.map(({ row, axis }) => {
     const parts: Record<string, number> = {};
     for (const { key, weight } of WEIGHTS) {
+      // What the weapons carried are asked for, which is the whole of the
+      // war's best unless the guild has said otherwise. Capped, because
+      // beating your own allowance cannot be worth more than being the best
+      // in the war outright.
+      const target = best[key] * (weight > 0 ? (row.expects?.[key] ?? 1) : 1);
       // Nobody reached it, so nobody is measured against it.
-      const share = best[key] > 0 ? axis[key] / best[key] : 0;
+      const share = target > 0 ? Math.min(1, axis[key] / target) : 0;
       // Only what you earn is bent. A penalty that got easier the larger it
       // grew would be no penalty at all.
       parts[key] = weight > 0 ? Math.pow(share, CURVE) : share;

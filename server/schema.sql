@@ -190,6 +190,18 @@ CREATE TABLE IF NOT EXISTS weapon_sets (
 
 CREATE INDEX IF NOT EXISTS weapon_sets_guild_idx ON weapon_sets (guild_id, sort_order);
 
+-- What this set is expected to put on the results screen, as a fraction of the
+-- war's best on each axis: { "damage": 0.6 } means a set that kills one target
+-- at a time reaching 60% of the night's best damage has done as much as its
+-- weapons allow, and is scored as full marks on that axis.
+--
+-- Sparse and empty by default, so a weapon nobody has tuned yet is measured
+-- exactly as it is today and a new one costs nothing until somebody decides it
+-- needs an allowance. Kept here rather than in the scoring code because the
+-- game keeps adding weapons and the guild should not wait on a deploy to say
+-- what they are for. Validated in weapons.js against the axes in impact.ts.
+ALTER TABLE weapon_sets ADD COLUMN IF NOT EXISTS impact JSONB NOT NULL DEFAULT '{}'::jsonb;
+
 -- A member carries several builds, and a build fills more than one role: a
 -- weapon pair played as tank and healer at once is why a single combat role on
 -- the roster was never enough. Never captured from the game -- these are chosen

@@ -883,7 +883,6 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
       {history && (
         <WarHistory
           canEdit={canEdit}
-          builds={builds}
           weaponSets={weaponSets}
           onClose={() => setHistory(false)}
           onChanged={() => void load()}

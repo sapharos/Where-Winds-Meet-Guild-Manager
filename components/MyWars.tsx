@@ -7,15 +7,18 @@ import {
   WarMatchType,
   WarOutcome,
   WarSide,
+  WeaponSet,
 } from '../types';
 import { FIGURES } from './WarHistory';
-import { Impact, WEIGHTS, impactOf, impactShade } from '../services/impact';
+import { Impact, WEIGHTS, expectationOf, impactOf, impactShade } from '../services/impact';
 
 interface Participation {
   playerId: string;
   name: string;
   side: WarSide;
   stats: Record<string, number | undefined>;
+  /** What they fought with, resolved on the server from the build the war froze. */
+  weapons: string[];
 }
 
 interface War {
@@ -33,6 +36,8 @@ const when = (iso: string) =>
 
 interface Props {
   playerId: string;
+  /** Needed to score, not to draw: a set can be given an allowance per axis. */
+  weaponSets: WeaponSet[];
 }
 
 /**
@@ -41,7 +46,7 @@ interface Props {
  * Their figures next to everyone else's, because a number on its own says
  * nothing: what tells you how the night went is where it sat among the rest.
  */
-const MyWars: React.FC<Props> = ({ playerId }) => {
+const MyWars: React.FC<Props> = ({ playerId, weaponSets }) => {
   const [wars, setWars] = useState<War[] | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   // A failed request used to be shown as an empty record, which reads as "you
@@ -82,7 +87,9 @@ const MyWars: React.FC<Props> = ({ playerId }) => {
 
       <div className="space-y-3">
         {(wars ?? []).map((war) => {
-          const ranked = impactOf(war.participants);
+          const ranked = impactOf(
+            war.participants.map((p) => ({ ...p, expects: expectationOf(p.weapons, weaponSets) })),
+          );
           const mine = ranked.find((r) => r.playerId === playerId);
           const place = ranked.findIndex((r) => r.playerId === playerId) + 1;
           const showing = open === war.id;

@@ -222,7 +222,7 @@ const MyProfile: React.FC<Props> = ({ player, weaponSets, onEditBuilds }) => {
         )}
       </section>
 
-      <MyWars playerId={player.id} />
+      <MyWars playerId={player.id} weaponSets={weaponSets} />
     </div>
   );
 };

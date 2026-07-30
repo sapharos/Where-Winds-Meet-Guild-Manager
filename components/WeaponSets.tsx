@@ -3,6 +3,7 @@ import { api } from '../services/authService';
 import { WeaponSet } from '../types';
 import { SetBadge } from './BuildEditor';
 import { ICON_GROUPS } from './iconCatalog';
+import { TUNABLE_AXES } from '../services/impact';
 
 /** Picks an icon by eye. Names alone mean nothing until you see the glyph. */
 export const IconPicker: React.FC<{
@@ -67,6 +68,69 @@ export const IconPicker: React.FC<{
   );
 };
 
+/**
+ * What a set is expected to put on the results screen.
+ *
+ * Phrased as a percentage of the war's best rather than as a weight, because
+ * "de este conjunto esperamos el 60% del mejor daño de la noche" is a claim
+ * about the weapons that anyone who plays them can argue with, while "daño
+ * x0.6" is a knob. The score still compares people to each other; this only
+ * moves the bar each set is asked to clear.
+ */
+const ImpactTuning: React.FC<{
+  set: WeaponSet;
+  canEdit: boolean;
+  onChange: (impact: Record<string, number>) => void;
+}> = ({ set, canEdit, onChange }) => {
+  const at = (key: string) => Math.round((set.impact?.[key] ?? 1) * 100);
+  const put = (key: string, pct: number) => {
+    const next = { ...(set.impact ?? {}) };
+    // A hundred is the default, so it is stored as nothing at all -- otherwise
+    // an untouched set looks deliberately tuned to whoever reads it next.
+    if (pct === 100) delete next[key];
+    else next[key] = Math.min(2, Math.max(0.3, pct / 100));
+    onChange(next);
+  };
+
+  return (
+    <div className="border-t border-slate-800/70 pt-2 space-y-2">
+      <p className="text-[10px] text-slate-500">
+        Qué se le pide a este conjunto en cada apartado, como % del mejor de la guerra. Al 100% se
+        mide contra el mejor sin más. Bájalo donde las armas no puedan llegar —{' '}
+        <span className="text-slate-400">
+          un conjunto de objetivo único al 60% de daño marca el máximo con 60% del mejor daño
+        </span>
+        .
+      </p>
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+        {TUNABLE_AXES.map((axis) => {
+          const pct = at(axis.key);
+          return (
+            <label key={axis.key} className="flex items-center gap-2 text-[11px]">
+              <span className={`flex-1 truncate ${pct === 100 ? 'text-slate-500' : 'text-amber-400'}`}>
+                {axis.label}
+              </span>
+              <input
+                type="number"
+                min={30}
+                max={200}
+                step={5}
+                value={pct}
+                disabled={!canEdit}
+                onChange={(e) => put(axis.key, Number(e.target.value))}
+                className={`w-16 bg-slate-900 border rounded px-1.5 py-1 text-right tabular-nums outline-none focus:ring-1 focus:ring-amber-500 ${
+                  pct === 100 ? 'border-slate-800 text-slate-400' : 'border-amber-700/60 text-amber-300'
+                }`}
+              />
+              <span className="text-slate-600">%</span>
+            </label>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
 const blank = (): WeaponSet => ({
   id: `set-${Date.now()}`,
   name: '',
@@ -80,6 +144,7 @@ const WeaponSets: React.FC<{ canEdit: boolean }> = ({ canEdit }) => {
   const [message, setMessage] = useState<{ text: string; ok: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
   const [picking, setPicking] = useState<string | null>(null);
+  const [tuning, setTuning] = useState<string | null>(null);
 
   useEffect(() => {
     api<WeaponSet[]>('/weapon-sets')
@@ -218,6 +283,27 @@ const WeaponSets: React.FC<{ canEdit: boolean }> = ({ canEdit }) => {
               }
               className="w-full bg-slate-900 border border-slate-800 rounded p-2 text-xs outline-none focus:ring-1 focus:ring-amber-500"
             />
+
+            <button
+              onClick={() => setTuning((prev) => (prev === set.id ? null : set.id))}
+              className="text-[11px] text-slate-500 hover:text-amber-500 transition-all flex items-center gap-2"
+            >
+              <i className={`fa-solid ${tuning === set.id ? 'fa-chevron-down' : 'fa-chevron-right'}`}></i>
+              Puntaje de impacto
+              {Object.keys(set.impact ?? {}).length > 0 && (
+                <span className="text-[9px] uppercase tracking-wider text-amber-500 border border-amber-700/60 rounded px-1 py-0.5">
+                  ajustado
+                </span>
+              )}
+            </button>
+
+            {tuning === set.id && (
+              <ImpactTuning
+                set={set}
+                canEdit={canEdit}
+                onChange={(impact) => update(set.id, { impact })}
+              />
+            )}
           </div>
         ))}
       </div>

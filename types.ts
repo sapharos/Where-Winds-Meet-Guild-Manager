@@ -123,6 +123,14 @@ export interface WeaponSet {
   color: string;
   icon?: string | null;
   sortOrder?: number;
+  /**
+   * What this set is expected to reach on each impact axis, as a fraction of
+   * the war's best: { damage: 0.6 } asks a single-target set for 60% of the
+   * night's best damage before calling it full marks. Sparse -- an axis that
+   * is not listed is expected in full, so an untuned set scores as it always
+   * has and a new weapon costs nothing until somebody decides otherwise.
+   */
+  impact?: Record<string, number> | null;
 }
 
 export interface PlayerBuild {
