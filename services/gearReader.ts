@@ -194,10 +194,10 @@ function slice(
 
 const tidy = (text: string) => text.replace(/\s+/g, ' ').trim();
 
-/** Levenshtein as a ratio, for snapping a misread name onto one we know. */
-function closeness(a: string, b: string): number {
-  if (!a || !b) return 0;
-  if (a === b) return 1;
+/** How many single-character edits separate two names. */
+function distance(a: string, b: string): number {
+  if (a === b) return 0;
+  if (!a || !b) return Math.max(a.length, b.length);
   const rows = Array.from({ length: b.length + 1 }, (_, i) => [i, ...Array(a.length).fill(0)]);
   for (let j = 1; j <= a.length; j++) rows[0][j] = j;
   for (let i = 1; i <= b.length; i++) {
@@ -209,8 +209,21 @@ function closeness(a: string, b: string): number {
       );
     }
   }
-  return 1 - rows[b.length][a.length] / Math.max(a.length, b.length);
+  return rows[b.length][a.length];
 }
+
+/**
+ * How much damage a name of this length may carry and still be recognised.
+ *
+ * Counted in edits rather than as a share of the name, which was the mistake
+ * before. A share treats the same single misread letter as trivial in a long
+ * name and fatal in a short one: "Habiidad" inside a fifty-six character
+ * attribute scores 0.98 and passed, while "IImpulso" -- the engine's reading of
+ * "[Girar]Impulso" -- scored 0.875 on eight letters and was rejected, leaving a
+ * stat nobody could match. One edit is allowed always, and one more for every
+ * dozen characters, which still keeps "Mínimo" two edits away from "Máximo".
+ */
+const allowance = (length: number) => Math.max(1, Math.floor(length / 12));
 
 const bare = (s: string) =>
   s
@@ -228,22 +241,6 @@ const bare = (s: string) =>
  * bar is still there, and the value comes back from it once the attribute's
  * ceiling is known.
  */
-/**
- * How close a reading must sit to a name we know before it is snapped onto it.
- *
- * Measured against the real confusables rather than picked by feel. At the 0.82
- * this started at, "Aumento de Daño en Habilidad Mística de Ataque" scored
- * 0.825 against the Control version and was silently relabelled -- two
- * different attributes merged into one, which is the worst thing this code
- * could do, since it also merges their ceilings. Genuine OCR damage on the same
- * name ("Habiidad", "Páñacea") lands at 0.98 or better, so there is a wide gap
- * to sit in.
- */
-const SNAP = 0.93;
-
-/** And it must beat the runner-up by this, so near-twins are left as read. */
-const SNAP_MARGIN = 0.04;
-
 function parseRow(raw: string, position: number, vocabulary: Vocabulary): ReadLine | null {
   let text = tidy(raw).replace(/\s*\/\s*/g, ' ');
   if (!text) return null;
@@ -275,16 +272,20 @@ function parseRow(raw: string, position: number, vocabulary: Vocabulary): ReadLi
 
   // Snap onto a name the guild already uses, so one blurry reading does not
   // start a second ceiling for an attribute that already had one.
-  let best: { known: VocabEntry | null; score: number } = { known: null, score: 0 };
-  let second = 0;
+  const read = bare(name);
+  let best: { known: VocabEntry | null; gap: number } = { known: null, gap: Infinity };
+  let second = Infinity;
   for (const known of vocabulary) {
-    const score = closeness(bare(name), bare(known.name));
-    if (score > best.score) {
-      second = best.score;
-      best = { known, score };
-    } else if (score > second) second = score;
+    const gap = distance(read, bare(known.name));
+    if (gap < best.gap) {
+      second = best.gap;
+      best = { known, gap };
+    } else if (gap < second) second = gap;
   }
-  if (best.score >= SNAP && best.score - second >= SNAP_MARGIN && best.known) {
+  // Strictly closer than the runner-up, so a name the engine damaged into the
+  // middle of two attributes is left exactly as read rather than assigned to
+  // whichever happened to sort first.
+  if (best.known && best.gap <= allowance(read.length) && best.gap < second) {
     name = best.known.name;
     // The unit belongs to the attribute, not to the roll. Tasa Crítica is a
     // percentage whether or not the "%" survived the engine, and a per-piece
