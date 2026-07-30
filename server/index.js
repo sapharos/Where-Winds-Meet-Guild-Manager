@@ -5,6 +5,7 @@ import { pool, migrate, replaceAll, replacePlayers, GUILD_ID } from './db.js';
 import { ROLES, PERMISSIONS } from './permissions.js';
 import { matchEntries, commitScan, historyFor, scanSummary } from './scans.js';
 import { listBuilds, saveBuilds, mayEditBuilds } from './builds.js';
+import { listGear, listCeilings, saveGearPiece, deleteGearPiece, mayEditGear } from './gear.js';
 import { listWeaponSets, saveWeaponSets, seedWeaponSets } from './weapons.js';
 import {
   getDeployments,
@@ -604,6 +605,39 @@ app.put('/api/players/:id/builds', requireAuth, asHandler(async (req, res) => {
     return res.status(403).json({ error: 'you may only edit your own builds' });
   }
   res.json(await saveBuilds(req.params.id, req.body?.builds));
+}));
+
+/* ------------------------------------------------------------------ gear */
+
+// Readable by the whole guild, like builds and war records: the point of
+// keeping this is comparing notes on what people are wearing.
+app.get('/api/gear', requireAuth, asHandler(async (_req, res) => {
+  res.json(await listGear());
+}));
+
+app.get('/api/players/:id/gear', requireAuth, asHandler(async (req, res) => {
+  res.json(await listGear(req.params.id));
+}));
+
+// How high each attribute rolls, learned from everything uploaded so far.
+// Guild-wide rather than per member -- one person's helm teaches everybody
+// what a helm can reach.
+app.get('/api/gear/ceilings', requireAuth, asHandler(async (_req, res) => {
+  res.json(await listCeilings());
+}));
+
+app.put('/api/players/:id/gear/:slot', requireAuth, asHandler(async (req, res) => {
+  if (!(await mayEditGear(req, req.params.id))) {
+    return res.status(403).json({ error: 'you may only edit your own gear' });
+  }
+  res.json(await saveGearPiece(req.params.id, { ...req.body, slot: req.params.slot }));
+}));
+
+app.delete('/api/players/:id/gear/:slot', requireAuth, asHandler(async (req, res) => {
+  if (!(await mayEditGear(req, req.params.id))) {
+    return res.status(403).json({ error: 'you may only edit your own gear' });
+  }
+  res.json(await deleteGearPiece(req.params.id, req.params.slot));
 }));
 
 // Which roster entry an account belongs to, which is what lets a member edit
