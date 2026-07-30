@@ -15,6 +15,8 @@ interface Props {
   canManageUsers: boolean;
   canManagePermissions: boolean;
   canManageBuilds: boolean;
+  /** The impact score reads the sets, so a change here has to reach the rest. */
+  onWeaponSetsChanged: () => void;
 }
 
 /** A pending Discord claim, waiting for somebody to approve or reject it. */
@@ -25,7 +27,13 @@ interface Registration {
   playerName: string | null;
 }
 
-const AdminPanel: React.FC<Props> = ({ currentUser, canManageUsers, canManagePermissions, canManageBuilds }) => {
+const AdminPanel: React.FC<Props> = ({
+  currentUser,
+  canManageUsers,
+  canManagePermissions,
+  canManageBuilds,
+  onWeaponSetsChanged,
+}) => {
   const [users, setUsers] = useState<ManagedUser[]>([]);
   const [catalog, setCatalog] = useState<PermissionCatalog | null>(null);
   const [matrix, setMatrix] = useState<Record<string, string[]>>({});
@@ -280,7 +288,7 @@ const AdminPanel: React.FC<Props> = ({ currentUser, canManageUsers, canManagePer
         </section>
       )}
 
-      <WeaponSets canEdit={canManageBuilds} />
+      <WeaponSets canEdit={canManageBuilds} onSaved={onWeaponSetsChanged} />
 
       {canManageUsers && (
         <section className="bg-slate-900/60 border border-slate-800 rounded-xl p-6">

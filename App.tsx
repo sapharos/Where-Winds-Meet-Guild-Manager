@@ -30,6 +30,22 @@ const App: React.FC = () => {
   const [builds, setBuilds] = useState<PlayerBuild[]>([]);
   const [weaponSets, setWeaponSets] = useState<WeaponSet[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+
+  /**
+   * Re-read the weapon sets after somebody edits them.
+   *
+   * They are loaded once with everything else, which was fine while a set was
+   * only a name and a crest. Now a set also carries what it is expected to
+   * produce, and the impact score is worked out from that every time it is
+   * drawn -- so an allowance changed in Administración has to reach the rest
+   * of the app, or the tables go on scoring against the old one until a
+   * reload and it reads as though the setting did nothing.
+   */
+  const reloadWeaponSets = () => {
+    void api<WeaponSet[]>('/weapon-sets')
+      .then(setWeaponSets)
+      .catch(() => undefined);
+  };
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -619,6 +635,7 @@ const App: React.FC = () => {
             canManageUsers={can('users.manage')}
             canManagePermissions={can('permissions.manage')}
             canManageBuilds={can('builds.manage')}
+            onWeaponSetsChanged={reloadWeaponSets}
           />
         ) : activeTab === 'roster' ? (
           <MemberManager

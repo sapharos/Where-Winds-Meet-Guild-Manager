@@ -139,7 +139,7 @@ const blank = (): WeaponSet => ({
   icon: null,
 });
 
-const WeaponSets: React.FC<{ canEdit: boolean }> = ({ canEdit }) => {
+const WeaponSets: React.FC<{ canEdit: boolean; onSaved: () => void }> = ({ canEdit, onSaved }) => {
   const [sets, setSets] = useState<WeaponSet[] | null>(null);
   const [message, setMessage] = useState<{ text: string; ok: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -170,7 +170,10 @@ const WeaponSets: React.FC<{ canEdit: boolean }> = ({ canEdit }) => {
     setBusy(true);
     try {
       await api('/weapon-sets', { method: 'PUT', body: JSON.stringify({ sets }) });
-      setMessage({ text: 'Conjuntos guardados.', ok: true });
+      // The impact score is worked out from these every time a war table is
+      // drawn, so a saved allowance has to reach the rest of the app at once.
+      onSaved();
+      setMessage({ text: 'Conjuntos guardados. Los puntajes de impacto ya usan estos valores.', ok: true });
     } catch (err) {
       setMessage({ text: err instanceof Error ? err.message : 'No se pudo guardar', ok: false });
     } finally {
