@@ -47,6 +47,15 @@ export interface ReadLine {
 export interface ReadPiece {
   name: string | null;
   level: number | null;
+  /**
+   * Carried up from an older set, which freezes every line.
+   *
+   * The game says so itself: the level chip reads "Retransmisión · Nivel 66"
+   * instead of plain "Nivel 91". Worth taking from the picture rather than
+   * asking for, because it is the difference between a piece with advice worth
+   * giving and one there is nothing to say about.
+   */
+  relayed: boolean;
   /** Days the screen says are left before this piece can be tuned again. */
   days: number | null;
   /** The account the screenshot was taken on, printed in its bottom corner. */
@@ -79,8 +88,6 @@ function frame(img: HTMLImageElement) {
 interface Bar {
   y: number;
   fill: number;
-  /** The first line's bar is drawn in violet; the rerollable ones in gold. */
-  fixed: boolean;
 }
 
 /**
@@ -132,12 +139,12 @@ function bars(img: HTMLImageElement): Bar[] {
       } else if (++gap > 10) break;
     }
 
-    const at = (y * w + Math.round((left + filled) / 2)) * 4;
-    return {
-      y,
-      fill: Math.min(1, (filled - left) / Math.max(1, track - left)),
-      fixed: data[at + 2] > data[at] + 12,
-    };
+    // The bars come in gold and violet, and it is not what it looked like. On
+    // the Afinación screen only the first was violet, which read as "the line
+    // that cannot be rerolled"; on a relayed piece four of the six are. So the
+    // colour is not read at all -- position already says what a line allows,
+    // and a guess about the colour would be worse than no guess.
+    return { y, fill: Math.min(1, (filled - left) / Math.max(1, track - left)) };
   });
 }
 
@@ -381,6 +388,7 @@ export async function readPiece(
     return {
       name: tidy(name.replace(/^[^\p{L}]+/u, '')) || null,
       level: level ? Number(level[1]) : null,
+      relayed: /retransmisi/i.test(levelText),
       days: days ? Number(days[1]) : null,
       uid: uid ? uid[1] : null,
       lines,

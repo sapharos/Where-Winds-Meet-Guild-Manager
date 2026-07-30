@@ -11,6 +11,8 @@ import type { GearCeiling, GearLine, GearPiece } from '../types';
  * database rather than in a constant.
  */
 export const KNOWN_STATS: { name: string; unit?: GearLine['unit'] }[] = [
+  { name: 'Impulso', unit: 'flat' },
+  { name: 'Ataque de campana máximo', unit: 'flat' },
   { name: 'Ataque Físico Máximo', unit: 'flat' },
   { name: 'Ataque Físico Mínimo', unit: 'flat' },
   { name: 'Ataque Máx de Atadura de Seda', unit: 'flat' },

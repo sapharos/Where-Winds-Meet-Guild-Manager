@@ -307,6 +307,7 @@ const PieceEditor: React.FC<{
       if (got.name) setName(got.name);
       if (got.level) setLevel(String(got.level));
       if (got.days !== null) setDays(String(got.days));
+      if (got.relayed) setRelayed(true);
 
       const next: Draft[] = [1, 2, 3, 4, 5, 6].map(blankDraft);
       for (const line of got.lines) {
@@ -327,6 +328,7 @@ const PieceEditor: React.FC<{
       setNote(
         [
           `Leídas ${got.lines.length} líneas.`,
+          got.relayed ? 'La pieza es reenviada: sus líneas están congeladas.' : '',
           clipped ? `${clipped} venía recortada por el juego: su valor sale de la barra.` : '',
           odd ? `${odd} no cuadra con su barra, están marcadas.` : '',
           'Revisa antes de guardar.',
