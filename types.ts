@@ -166,8 +166,14 @@ export const GEAR_SLOT_LABELS: Record<GearSlot, string> = {
  */
 export interface GearLine {
   position: 1 | 2 | 3 | 4 | 5 | 6;
-  /** As read, before it is matched against the known attributes. */
+  /**
+   * The attribute, folded to a key everyone's readings agree on: accents and
+   * case stripped, and the game's "[Girar]" marker removed so a line keys the
+   * same before and after somebody rerolls it. Computed on the server.
+   */
   stat: string;
+  /** The name as the member reads it on their own screen. */
+  label: string;
   /** Null when the game clipped the line and no ceiling is known yet to infer it. */
   value: number | null;
   unit: 'flat' | 'percent';

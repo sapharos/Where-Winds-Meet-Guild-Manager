@@ -84,6 +84,31 @@ const num = (value, min, max) => {
 };
 
 /**
+ * The key two members' readings of the same attribute have to agree on.
+ *
+ * The names are typed, or read off a screenshot, so they arrive with stray
+ * case, accents and spacing -- and the game itself is inconsistent, printing
+ * "Ataque físico máximo" on one line and "Ataque Físico Máximo" on the next of
+ * the same piece. Left alone, each spelling would become its own attribute and
+ * the ceilings would never gather enough samples to be worth anything.
+ *
+ * The name as typed is kept alongside as the label, because that is what the
+ * member recognises on their own screen.
+ */
+const keyOf = (name) =>
+  name
+    // "[Girar]" is the game marking the line already rerolled, not part of
+    // the attribute's name. Left in, the same attribute would key differently
+    // before and after somebody commits to it, and its ceiling would be split
+    // across two entries that never gather enough samples between them.
+    .replace(/^\s*\[[^\]]*\]\s*/, '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+
+/**
  * One attribute line, trimmed to what the schema promises.
  *
  * A line with neither a value nor a bar is dropped: it says nothing, and
@@ -95,12 +120,14 @@ function cleanLine(line) {
 
   const value = line?.value === null || line?.value === undefined ? null : num(line.value, -1e9, 1e9);
   const fill = line?.fill === null || line?.fill === undefined ? null : num(line.fill, 0, 1);
-  const stat = String(line?.stat ?? '').trim();
+  const label = String(line?.label ?? line?.stat ?? '').trim().slice(0, 120);
+  const stat = keyOf(label);
   if (!stat || (value === null && fill === null)) return null;
 
   const out = {
     position: Math.round(position),
     stat,
+    label,
     value,
     unit: line?.unit === 'percent' ? 'percent' : 'flat',
     fill,

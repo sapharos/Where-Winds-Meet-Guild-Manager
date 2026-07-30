@@ -13,6 +13,7 @@ import {
 import { ROLE_NAMES, buildColours } from './PlayerCard';
 import { SetBadge } from './BuildEditor';
 import MyWars from './MyWars';
+import GearSheet from './GearSheet';
 
 const ROLE_STYLE: Record<Role, string> = {
   [Role.TANK]: 'border-blue-500 text-blue-300 bg-blue-500/15',
@@ -221,6 +222,8 @@ const MyProfile: React.FC<Props> = ({ player, weaponSets, onEditBuilds }) => {
           </div>
         )}
       </section>
+
+      <GearSheet playerId={player.id} canEdit />
 
       <MyWars playerId={player.id} weaponSets={weaponSets} />
     </div>
