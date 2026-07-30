@@ -215,6 +215,8 @@ const GearSheet: React.FC<Props> = ({ playerId, canEdit }) => {
         ))}
       </div>
 
+      {canEdit && <Cleanup seen={seen} onDone={() => void load()} />}
+
       {chosen && (
         <PieceEditor
           key={chosen}
@@ -231,6 +233,92 @@ const GearSheet: React.FC<Props> = ({ playerId, canEdit }) => {
         />
       )}
     </section>
+  );
+};
+
+/**
+ * The attribute names only one line uses, and a way to correct them.
+ *
+ * A name that appears once is either a genuinely rare attribute or a misreading
+ * somebody saved without looking. They cannot be told apart automatically, so
+ * they are simply put in front of whoever runs the guild. Correcting one
+ * rewrites every piece that carries it, which matters because otherwise the
+ * only remedy is finding the helm it came from -- and nobody does that for
+ * somebody else's gear.
+ */
+const Cleanup: React.FC<{
+  seen: { stat: string; label: string; seen: number }[];
+  onDone: () => void;
+}> = ({ seen, onDone }) => {
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const lonely = seen.filter((s) => s.seen === 1);
+  if (!lonely.length) return null;
+
+  const apply = async (stat: string, label: string) => {
+    setBusy(stat);
+    try {
+      await api(`/gear/stats/${encodeURIComponent(stat)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ label }),
+      });
+      onDone();
+    } catch {
+      /* the list simply stays as it was */
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div className="mb-4">
+      <button
+        onClick={() => setOpen(!open)}
+        className="text-[11px] text-slate-500 hover:text-amber-500 transition-all flex items-center gap-2"
+      >
+        <i className={`fa-solid ${open ? 'fa-chevron-down' : 'fa-chevron-right'}`}></i>
+        {lonely.length} {lonely.length === 1 ? 'nombre aparece' : 'nombres aparecen'} una sola vez
+      </button>
+
+      {open && (
+        <div className="border border-slate-800 rounded p-3 mt-2 space-y-2">
+          <p className="text-[11px] text-slate-500">
+            Puede ser un atributo poco común o una mala lectura que alguien guardó. Corrige el
+            nombre y se arregla en todas las piezas del gremio; déjalo vacío y se quita la línea.
+          </p>
+          {lonely.map((s) => (
+            <div key={s.stat} className="flex items-center gap-2">
+              <span className="text-xs text-slate-300 flex-1 truncate" title={s.stat}>
+                {s.label}
+              </span>
+              <input
+                value={draft[s.stat] ?? s.label}
+                onChange={(e) => setDraft((prev) => ({ ...prev, [s.stat]: e.target.value }))}
+                autoComplete="off"
+                className="w-56 bg-slate-900 border border-slate-800 rounded p-1.5 text-xs outline-none focus:ring-1 focus:ring-amber-500"
+              />
+              <button
+                onClick={() => apply(s.stat, draft[s.stat] ?? s.label)}
+                disabled={busy === s.stat || (draft[s.stat] ?? s.label) === s.label}
+                className="text-xs text-amber-500 hover:text-amber-400 disabled:text-slate-700 transition-all"
+              >
+                Corregir
+              </button>
+              <button
+                onClick={() => apply(s.stat, '')}
+                disabled={busy === s.stat}
+                className="text-xs text-slate-500 hover:text-red-400 transition-all"
+                title="Quitar esta línea de las piezas que la llevan"
+              >
+                <i className="fa-solid fa-trash-can"></i>
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 };
 
@@ -504,18 +592,21 @@ const PieceEditor: React.FC<{
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Nombre de la pieza"
+              autoComplete="off"
               className="sm:col-span-2 bg-slate-900 border border-slate-800 rounded p-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
             />
             <input
               value={level}
               onChange={(e) => setLevel(e.target.value)}
               placeholder="Nivel"
+              autoComplete="off"
               className="bg-slate-900 border border-slate-800 rounded p-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
             />
             <input
               value={days}
               onChange={(e) => setDays(e.target.value)}
               placeholder="Días para sintonizar"
+              autoComplete="off"
               title="Los días que muestra el juego abajo a la derecha"
               className="bg-slate-900 border border-slate-800 rounded p-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
             />
@@ -563,6 +654,11 @@ const PieceEditor: React.FC<{
                   value={row.label}
                   onChange={(e) => put(at, { label: e.target.value })}
                   placeholder="Atributo"
+                  // The browser keeps its own history of what was typed into a
+                  // field and offers it alongside the list, which is why a
+                  // misreading went on being suggested after it was cleaned out
+                  // of the database. Only the guild's vocabulary belongs here.
+                  autoComplete="off"
                   className="flex-1 min-w-[150px] bg-slate-900 border border-slate-800 rounded p-1.5 text-xs outline-none focus:ring-1 focus:ring-amber-500"
                 />
                 <input

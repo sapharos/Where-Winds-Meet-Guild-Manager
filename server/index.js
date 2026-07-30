@@ -9,6 +9,7 @@ import {
   listGear,
   listCeilings,
   listStatLabels,
+  renameStat,
   saveGearPiece,
   deleteGearPiece,
   mayEditGear,
@@ -638,6 +639,12 @@ app.get('/api/gear/ceilings', requireAuth, asHandler(async (_req, res) => {
 // sixth line's pool changes with the weapons a spec plays.
 app.get('/api/gear/stats', requireAuth, asHandler(async (_req, res) => {
   res.json(await listStatLabels());
+}));
+
+// Correcting an attribute's name touches everybody's pieces, so it needs the
+// permission that covers anybody's builds -- not just your own gear.
+app.patch('/api/gear/stats/:key', requireAuth, requirePermission('builds.manage'), asHandler(async (req, res) => {
+  res.json(await renameStat(req.params.key, req.body?.label ?? ''));
 }));
 
 app.put('/api/players/:id/gear/:slot', requireAuth, asHandler(async (req, res) => {

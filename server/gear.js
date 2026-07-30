@@ -111,6 +111,73 @@ export async function listStatLabels() {
   return rows;
 }
 
+/**
+ * Rename one attribute everywhere it appears, or drop the lines that carry it.
+ *
+ * A misreading somebody saved without noticing becomes part of the guild's
+ * vocabulary and shows up in everyone's suggestions. "llmpulso" -- the engine's
+ * reading of "[Girar]Impulso", two lowercase L's that look like capital I's --
+ * is the case this was written for. Without a way to fix it, the only remedy is
+ * finding whichever piece carries it and editing that field, which nobody will
+ * do for somebody else's helm.
+ *
+ * The ceiling under the old name is deleted rather than carried across. It was
+ * derived from readings filed under a name now agreed to be wrong, and letting
+ * it re-learn from the corrected lines costs one upload and cannot be subtly
+ * wrong in a way nobody would ever notice.
+ */
+export async function renameStat(fromKey, toLabel) {
+  const label = String(toLabel ?? '').trim().slice(0, 120);
+  const key = keyOf(label);
+  if (!String(fromKey ?? '').trim()) {
+    throw Object.assign(new Error('falta el atributo a corregir'), { status: 400 });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // An empty new name means the line was junk: take it off the pieces.
+    const { rows } = label
+      ? await client.query(
+          `UPDATE gear_pieces SET lines = COALESCE((
+             SELECT jsonb_agg(
+                      CASE WHEN line->>'stat' = $2
+                           THEN line || jsonb_build_object('stat', $3::text, 'label', $4::text)
+                           ELSE line END)
+               FROM jsonb_array_elements(lines) line
+           ), '[]'::jsonb), updated_at = now()
+           WHERE guild_id = $1
+             AND lines @> jsonb_build_array(jsonb_build_object('stat', $2::text))
+           RETURNING id`,
+          [GUILD_ID, fromKey, key, label],
+        )
+      : await client.query(
+          `UPDATE gear_pieces SET lines = COALESCE((
+             SELECT jsonb_agg(line) FROM jsonb_array_elements(lines) line
+              WHERE line->>'stat' <> $2
+           ), '[]'::jsonb), updated_at = now()
+           WHERE guild_id = $1
+             AND lines @> jsonb_build_array(jsonb_build_object('stat', $2::text))
+           RETURNING id`,
+          [GUILD_ID, fromKey],
+        );
+
+    await client.query(`DELETE FROM gear_stat_ceilings WHERE guild_id = $1 AND stat = $2`, [
+      GUILD_ID,
+      fromKey,
+    ]);
+
+    await client.query('COMMIT');
+    return { pieces: rows.length, renamedTo: label || null };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 export async function listCeilings() {
   const { rows } = await pool.query(
     `SELECT stat, level, ceiling::float8 AS ceiling, samples
