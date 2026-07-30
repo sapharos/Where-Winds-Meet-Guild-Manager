@@ -202,6 +202,16 @@ export interface GearLine {
   tuning?: 'normal' | 'arena';
   /** Position 6 only: which of the two is switched on. Only the active one is captured. */
   active?: boolean;
+  /**
+   * The colour the game draws this line's bar in, gold or violet.
+   *
+   * Recorded and reproduced without being interpreted. An earlier guess that
+   * violet meant "cannot be rerolled" held on the Afinación screen, where only
+   * the first line was violet, and fell apart on a relayed piece where four of
+   * the six are. So it is drawn because the game draws it, and nothing is
+   * inferred from it.
+   */
+  hue?: 'gold' | 'violet';
 }
 
 export interface GearPiece {

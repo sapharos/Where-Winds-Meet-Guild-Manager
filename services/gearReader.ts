@@ -31,6 +31,8 @@ export interface ReadLine {
   committed: boolean;
   truncated: boolean;
   tuning?: 'normal' | 'arena';
+  /** Gold or violet, as drawn. Carried through, not interpreted. */
+  hue?: 'gold' | 'violet';
   /** What the engine actually returned, for when the tidied name looks wrong. */
   raw: string;
   /**
@@ -88,6 +90,7 @@ function frame(img: HTMLImageElement) {
 interface Bar {
   y: number;
   fill: number;
+  hue: 'gold' | 'violet';
 }
 
 /**
@@ -139,12 +142,16 @@ function bars(img: HTMLImageElement): Bar[] {
       } else if (++gap > 10) break;
     }
 
-    // The bars come in gold and violet, and it is not what it looked like. On
-    // the Afinación screen only the first was violet, which read as "the line
-    // that cannot be rerolled"; on a relayed piece four of the six are. So the
-    // colour is not read at all -- position already says what a line allows,
-    // and a guess about the colour would be worse than no guess.
-    return { y, fill: Math.min(1, (filled - left) / Math.max(1, track - left)) };
+    // Read and passed on, but never interpreted. On the Afinación screen only
+    // the first bar was violet, which read as "the line that cannot be
+    // rerolled"; on a relayed piece four of six are. So it is carried through
+    // to be drawn the way the game draws it, and nothing is inferred from it.
+    const mid = (y * w + Math.round(left + (filled - left) / 2)) * 4;
+    return {
+      y,
+      fill: Math.min(1, (filled - left) / Math.max(1, track - left)),
+      hue: data[mid + 2] > data[mid] + 12 ? 'violet' : 'gold',
+    };
   });
 }
 
@@ -218,12 +225,19 @@ function distance(a: string, b: string): number {
  * Counted in edits rather than as a share of the name, which was the mistake
  * before. A share treats the same single misread letter as trivial in a long
  * name and fatal in a short one: "Habiidad" inside a fifty-six character
- * attribute scores 0.98 and passed, while "IImpulso" -- the engine's reading of
- * "[Girar]Impulso" -- scored 0.875 on eight letters and was rejected, leaving a
- * stat nobody could match. One edit is allowed always, and one more for every
- * dozen characters, which still keeps "Mínimo" two edits away from "Máximo".
+ * attribute scores 0.98 and passed, while the engine's reading of
+ * "[Girar]Impulso" -- "llmpulso", two lowercase L's that look like capital I's
+ * -- scored 0.875 on eight letters and was rejected, leaving a stat nobody
+ * could match.
+ *
+ * Two edits are allowed always, plus one for every dozen characters. Two rather
+ * than one because the damage clusters at the ends of a name, where the
+ * bracketed marker and the first capital sit: that one reading lost two
+ * characters there. A clean reading is never at risk from the wider floor,
+ * since it sits at distance nought from its own name and the winner must be
+ * strictly closer than the runner-up.
  */
-const allowance = (length: number) => Math.max(1, Math.floor(length / 12));
+const allowance = (length: number) => Math.max(2, Math.floor(length / 12));
 
 const bare = (s: string) =>
   s
@@ -340,6 +354,7 @@ export async function readPiece(
       );
       if (row) {
         row.fill = found[i].fill;
+        row.hue = found[i].hue;
         lines.push(row);
       }
     }

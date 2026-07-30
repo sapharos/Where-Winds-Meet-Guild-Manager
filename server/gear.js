@@ -178,6 +178,9 @@ function cleanLine(line) {
     committed: Math.round(position) !== 1 && Boolean(line?.committed),
     truncated: Boolean(line?.truncated),
   };
+  // Gold or violet as the game drew it. Stored to be redrawn, not read for
+  // meaning -- what it means changed between two screens of the same game.
+  if (line?.hue === 'violet' || line?.hue === 'gold') out.hue = line.hue;
   if (Math.round(position) === 6) {
     out.tuning = line?.tuning === 'arena' ? 'arena' : 'normal';
     out.active = line?.active !== false;

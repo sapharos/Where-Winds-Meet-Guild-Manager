@@ -23,6 +23,17 @@ interface Draft {
   unit: GearLine['unit'];
   committed: boolean;
   tuning?: 'normal' | 'arena';
+  /**
+   * How full the game drew this line's bar, and in which colour.
+   *
+   * Carried through the form rather than shown as a field, because nobody can
+   * eyeball a bar as a percentage. It was missing here at first, so every
+   * screenshot's measurement was discarded on save -- which quietly disabled
+   * the whole point of reading the picture, since the ceilings are learned from
+   * value / fill and nothing ever arrived with a fill.
+   */
+  fill?: number | null;
+  hue?: 'gold' | 'violet';
   /** Read from a screenshot, and the bar disagreed with the printed figure. */
   suspect?: number | null;
 }
@@ -47,6 +58,8 @@ function draftsFrom(piece: GearPiece | undefined): Draft[] {
       value: line.value === null ? '' : String(line.value),
       unit: line.unit,
       committed: line.committed,
+      fill: line.fill,
+      hue: line.hue,
       ...(line.position === 6 ? { tuning: line.tuning ?? 'normal' } : {}),
     };
     if (at === -1) rows.push(draft);
@@ -88,21 +101,45 @@ const GearSheet: React.FC<Props> = ({ playerId, canEdit }) => {
   };
 
   /**
-   * The names offered while typing, and the ones a screenshot is matched
-   * against.
+   * Every name to offer while typing.
    *
-   * Everything the guild has already written down, plus the handful seeded in
-   * code. That order matters: the game has forty-six attributes on the first
-   * five lines alone and the sixth draws from a pool that changes with the
-   * weapons a spec plays, so no hand-written constant will ever cover it. What
-   * one member types becomes everybody's suggestion.
+   * Everything the guild has written down, plus the handful seeded in code. The
+   * game has forty-six attributes on the first five lines alone and the sixth
+   * draws from a pool that changes with the weapons a spec plays, so no
+   * hand-written constant will ever cover it: what one member types becomes
+   * everybody's suggestion.
    */
-  const vocabulary = useMemo<VocabEntry[]>(() => {
+  const suggestions = useMemo<VocabEntry[]>(() => {
     const byKey = new Map<string, VocabEntry>();
     for (const s of KNOWN_STATS) byKey.set(statKey(s.name), s);
     for (const s of seen) if (!byKey.has(s.stat)) byKey.set(s.stat, { name: s.label });
     return [...byKey.values()];
   }, [seen]);
+
+  /**
+   * The narrower set a screenshot's reading is allowed to be matched against.
+   *
+   * Not the same list, and the difference matters. A name that has been written
+   * down exactly once is as likely to be a misreading somebody saved as a real
+   * attribute -- and once saved it sits at distance nought from the next
+   * identical misreading, so it captures it, and the mistake reinforces itself
+   * for good. That is exactly what happened to "llmpulso", the engine's reading
+   * of "[Girar]Impulso": saved once, and from then on every reading of that
+   * line matched the wrong name perfectly.
+   *
+   * So matching only trusts a name that was seeded here or that two separate
+   * lines agree on. Everything else is still suggested while typing, and still
+   * saved exactly as written -- it simply does not get to pull other readings
+   * onto itself until something else confirms it.
+   */
+  const trusted = useMemo<VocabEntry[]>(() => {
+    const seeded = new Set(KNOWN_STATS.map((s) => statKey(s.name)));
+    return suggestions.filter((v) => {
+      const key = statKey(v.name);
+      if (seeded.has(key)) return true;
+      return (seen.find((s) => s.stat === key)?.seen ?? 0) >= 2;
+    });
+  }, [suggestions, seen]);
 
   useEffect(() => {
     void load();
@@ -186,7 +223,8 @@ const GearSheet: React.FC<Props> = ({ playerId, canEdit }) => {
           ceilings={ceilings}
           canEdit={canEdit}
           busy={busy}
-          vocabulary={vocabulary}
+          suggestions={suggestions}
+          trusted={trusted}
           onSave={(body) => save(chosen, body)}
           onRemove={() => remove(chosen)}
           onClose={() => setChosen(null)}
@@ -266,13 +304,14 @@ const PieceEditor: React.FC<{
   slot: GearSlot;
   piece?: GearPiece;
   ceilings: GearCeiling[];
-  vocabulary: VocabEntry[];
+  suggestions: VocabEntry[];
+  trusted: VocabEntry[];
   canEdit: boolean;
   busy: boolean;
   onSave: (body: unknown) => void;
   onRemove: () => void;
   onClose: () => void;
-}> = ({ slot, piece, ceilings, vocabulary, canEdit, busy, onSave, onRemove, onClose }) => {
+}> = ({ slot, piece, ceilings, suggestions, trusted, canEdit, busy, onSave, onRemove, onClose }) => {
   const [name, setName] = useState(piece?.name ?? '');
   const [level, setLevel] = useState(piece?.level ? String(piece.level) : '91');
   const [relayed, setRelayed] = useState(piece?.relayed ?? false);
@@ -301,7 +340,7 @@ const PieceEditor: React.FC<{
         i.onerror = () => rej(new Error('No se pudo abrir la imagen'));
         i.src = URL.createObjectURL(blob);
       });
-      const got = await readPiece(img, setReading, ceilings, vocabulary);
+      const got = await readPiece(img, setReading, ceilings, trusted);
       if (!got.lines.length) throw new Error('No encontré líneas de atributo. ¿Es la pantalla de Afinación?');
 
       if (got.name) setName(got.name);
@@ -317,6 +356,8 @@ const PieceEditor: React.FC<{
           value: line.value === null ? '' : String(line.value),
           unit: line.unit,
           committed: line.committed,
+          fill: line.fill,
+          hue: line.hue,
           suspect: line.suspect,
           ...(line.position === 6 ? { tuning: line.tuning ?? 'normal' } : {}),
         };
@@ -360,7 +401,7 @@ const PieceEditor: React.FC<{
     };
     window.addEventListener('paste', onPaste);
     return () => window.removeEventListener('paste', onPaste);
-  }, [canEdit, ceilings, vocabulary]);
+  }, [canEdit, ceilings, trusted]);
 
   const put = (at: number, patch: Partial<Draft>) =>
     setRows((prev) => prev.map((r, i) => (i === at ? { ...r, ...patch } : r)));
@@ -393,6 +434,8 @@ const PieceEditor: React.FC<{
           value: r.value.trim() === '' ? null : Number(r.value.replace(',', '.')),
           unit: r.unit,
           committed: r.committed,
+          fill: r.fill ?? null,
+          hue: r.hue,
           truncated: r.value.trim() === '',
           ...(r.position === 6 ? { tuning: r.tuning ?? 'normal', active: r.tuning !== 'arena' } : {}),
         })),
@@ -489,7 +532,7 @@ const PieceEditor: React.FC<{
           </label>
 
           <datalist id="gear-stats">
-            {vocabulary.map((s) => (
+            {suggestions.map((s) => (
               <option key={s.name} value={s.name} />
             ))}
           </datalist>
@@ -524,7 +567,15 @@ const PieceEditor: React.FC<{
                 />
                 <input
                   value={row.value}
-                  onChange={(e) => put(at, { value: e.target.value, suspect: null })}
+                  onChange={(e) =>
+                    put(at, {
+                      value: e.target.value,
+                      suspect: null,
+                      // Typing over the figure the bar measured makes the two
+                      // disagree, and the bar is the one that is now wrong.
+                      fill: null,
+                    })
+                  }
                   placeholder="valor"
                   title={row.suspect != null ? `La barra dice ${row.suspect}. Clic para aceptarlo.` : undefined}
                   onDoubleClick={() =>
@@ -697,7 +748,9 @@ const Row: React.FC<{ reading: Reading }> = ({ reading }) => {
             className="block h-full rounded"
             style={{
               width: `${Math.round(share * 100)}%`,
-              backgroundColor: share >= 0.9 ? '#fbbf24' : share >= 0.7 ? '#a3e635' : '#60a5fa',
+              // The game's own two colours where it told us which one, so the
+              // row reads like the screen it came from.
+              backgroundColor: line.hue === 'violet' ? '#a78bfa' : '#d6c396',
             }}
           />
         )}
