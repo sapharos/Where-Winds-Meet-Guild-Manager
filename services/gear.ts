@@ -10,20 +10,21 @@ import type { GearCeiling, GearLine, GearPiece } from '../types';
  * from what members type, which is the same reason weapon sets live in the
  * database rather than in a constant.
  */
-export const KNOWN_STATS = [
-  'Ataque Físico Máximo',
-  'Ataque Físico Mínimo',
-  'Ataque Máx de Atadura de Seda',
-  'Ataque Mínimo de Atadura de Seda',
-  'Tasa Crítica',
-  'Vida Máxima',
-  'Poder',
-  'Agilidad',
-  'Resistencia Física',
-  'Penetración Sin Forma',
-  'Penetración Física',
-  'Aumento de Daño en Habilidad Mística de Control',
-  'Impulso de Curación de Habilidad de Arte Marcial de Abanico Panacea',
+export const KNOWN_STATS: { name: string; unit?: GearLine['unit'] }[] = [
+  { name: 'Ataque Físico Máximo', unit: 'flat' },
+  { name: 'Ataque Físico Mínimo', unit: 'flat' },
+  { name: 'Ataque Máx de Atadura de Seda', unit: 'flat' },
+  { name: 'Ataque Mínimo de Atadura de Seda', unit: 'flat' },
+  { name: 'Tasa Crítica', unit: 'percent' },
+  { name: 'Vida Máxima', unit: 'flat' },
+  { name: 'Poder', unit: 'flat' },
+  { name: 'Agilidad', unit: 'flat' },
+  { name: 'Resistencia Física', unit: 'percent' },
+  { name: 'Penetración Sin Forma', unit: 'flat' },
+  // Never yet seen on a screenshot, so no unit is claimed for it.
+  { name: 'Penetración Física' },
+  { name: 'Aumento de Daño en Habilidad Mística de Control', unit: 'percent' },
+  { name: 'Impulso de Curación de Habilidad de Arte Marcial de Abanico Panacea', unit: 'percent' },
 ];
 
 /** The same folding the server does, so the client can look a ceiling up. */

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { api } from '../services/authService';
 import { GEAR_SLOTS, GEAR_SLOT_LABELS, GearCeiling, GearLine, GearPiece, GearSlot } from '../types';
 import { KNOWN_STATS, Reading, candidates, daysUntil, read, show, stateOf } from '../services/gear';
+import { readPiece } from '../services/gearReader';
 
 const SLOT_ICONS: Record<GearSlot, string> = {
   leftWeapon: 'fa-khanda',
@@ -22,6 +23,8 @@ interface Draft {
   unit: GearLine['unit'];
   committed: boolean;
   tuning?: 'normal' | 'arena';
+  /** Read from a screenshot, and the bar disagreed with the printed figure. */
+  suspect?: number | null;
 }
 
 const blankDraft = (position: number): Draft => ({
@@ -256,6 +259,84 @@ const PieceEditor: React.FC<{
     return d === null ? '' : String(d);
   });
   const [rows, setRows] = useState<Draft[]>(() => draftsFrom(piece));
+  const [reading, setReading] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+
+  /**
+   * Fill the form from a screenshot of the Afinación screen.
+   *
+   * It fills the form rather than saving, because the form is the review: the
+   * engine confuses this font's 1 with a 7 often enough that anything it reads
+   * should pass under a human eye before it becomes somebody's gear.
+   */
+  const scan = async (blob: Blob) => {
+    setNote(null);
+    setReading('Preparando...');
+    try {
+      const img = await new Promise<HTMLImageElement>((res, rej) => {
+        const i = new Image();
+        i.onload = () => res(i);
+        i.onerror = () => rej(new Error('No se pudo abrir la imagen'));
+        i.src = URL.createObjectURL(blob);
+      });
+      const got = await readPiece(img, setReading, ceilings);
+      if (!got.lines.length) throw new Error('No encontré líneas de atributo. ¿Es la pantalla de Afinación?');
+
+      if (got.name) setName(got.name);
+      if (got.level) setLevel(String(got.level));
+      if (got.days !== null) setDays(String(got.days));
+
+      const next: Draft[] = [1, 2, 3, 4, 5, 6].map(blankDraft);
+      for (const line of got.lines) {
+        next[line.position - 1] = {
+          position: line.position,
+          label: line.label,
+          value: line.value === null ? '' : String(line.value),
+          unit: line.unit,
+          committed: line.committed,
+          suspect: line.suspect,
+          ...(line.position === 6 ? { tuning: line.tuning ?? 'normal' } : {}),
+        };
+      }
+      setRows(next);
+
+      const clipped = got.lines.filter((l) => l.truncated).length;
+      const odd = got.lines.filter((l) => l.suspect !== null).length;
+      setNote(
+        [
+          `Leídas ${got.lines.length} líneas.`,
+          clipped ? `${clipped} venía recortada por el juego: su valor sale de la barra.` : '',
+          odd ? `${odd} no cuadra con su barra, están marcadas.` : '',
+          'Revisa antes de guardar.',
+        ]
+          .filter(Boolean)
+          .join(' '),
+      );
+    } catch (err) {
+      setNote(err instanceof Error ? err.message : 'No se pudo leer la captura');
+    } finally {
+      setReading(null);
+    }
+  };
+
+  // Pegar es como llega una captura de verdad: se toma con el teclado y se
+  // suelta aquí, sin que ningún fichero toque el disco.
+  useEffect(() => {
+    if (!canEdit) return;
+    const onPaste = (event: ClipboardEvent) => {
+      for (const item of event.clipboardData?.items ?? []) {
+        if (!item.type.startsWith('image/')) continue;
+        const blob = item.getAsFile();
+        if (blob) {
+          event.preventDefault();
+          void scan(blob);
+        }
+        return;
+      }
+    };
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+  }, [canEdit, ceilings]);
 
   const put = (at: number, patch: Partial<Draft>) =>
     setRows((prev) => prev.map((r, i) => (i === at ? { ...r, ...patch } : r)));
@@ -317,6 +398,40 @@ const PieceEditor: React.FC<{
 
       {canEdit && (
         <>
+          <div className="flex items-center gap-3 flex-wrap border border-dashed border-slate-800 rounded p-2.5">
+            <label className="text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 py-1.5 px-3 rounded cursor-pointer transition-all">
+              <i className="fa-solid fa-image mr-1.5"></i>
+              Leer captura
+              <input
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) void scan(file);
+                  e.target.value = '';
+                }}
+              />
+            </label>
+            <span className="text-[11px] text-slate-500">
+              {reading ? (
+                <>
+                  <i className="fa-solid fa-circle-notch fa-spin mr-1.5"></i>
+                  {reading}
+                </>
+              ) : (
+                'O pega la captura aquí con Ctrl+V. Rellena el formulario; nada se guarda hasta que lo revises.'
+              )}
+            </span>
+          </div>
+
+          {note && (
+            <p className="text-[11px] text-amber-300 bg-amber-500/10 border border-amber-800/50 rounded px-3 py-2">
+              <i className="fa-solid fa-circle-info mr-1.5"></i>
+              {note}
+            </p>
+          )}
+
           <div className="grid sm:grid-cols-4 gap-2">
             <input
               value={name}
@@ -351,7 +466,7 @@ const PieceEditor: React.FC<{
 
           <datalist id="gear-stats">
             {KNOWN_STATS.map((s) => (
-              <option key={s} value={s} />
+              <option key={s.name} value={s.name} />
             ))}
           </datalist>
 
@@ -385,9 +500,15 @@ const PieceEditor: React.FC<{
                 />
                 <input
                   value={row.value}
-                  onChange={(e) => put(at, { value: e.target.value })}
+                  onChange={(e) => put(at, { value: e.target.value, suspect: null })}
                   placeholder="valor"
-                  className="w-20 bg-slate-900 border border-slate-800 rounded p-1.5 text-xs text-right tabular-nums outline-none focus:ring-1 focus:ring-amber-500"
+                  title={row.suspect != null ? `La barra dice ${row.suspect}. Clic para aceptarlo.` : undefined}
+                  onDoubleClick={() =>
+                    row.suspect != null && put(at, { value: String(row.suspect), suspect: null })
+                  }
+                  className={`w-20 bg-slate-900 border rounded p-1.5 text-xs text-right tabular-nums outline-none focus:ring-1 focus:ring-amber-500 ${
+                    row.suspect != null ? 'border-amber-600 text-amber-300' : 'border-slate-800'
+                  }`}
                 />
                 <select
                   value={row.unit}
