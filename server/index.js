@@ -5,7 +5,14 @@ import { pool, migrate, replaceAll, replacePlayers, GUILD_ID } from './db.js';
 import { ROLES, PERMISSIONS } from './permissions.js';
 import { matchEntries, commitScan, historyFor, scanSummary } from './scans.js';
 import { listBuilds, saveBuilds, mayEditBuilds } from './builds.js';
-import { listGear, listCeilings, saveGearPiece, deleteGearPiece, mayEditGear } from './gear.js';
+import {
+  listGear,
+  listCeilings,
+  listStatLabels,
+  saveGearPiece,
+  deleteGearPiece,
+  mayEditGear,
+} from './gear.js';
 import { listWeaponSets, saveWeaponSets, seedWeaponSets } from './weapons.js';
 import {
   getDeployments,
@@ -624,6 +631,13 @@ app.get('/api/players/:id/gear', requireAuth, asHandler(async (req, res) => {
 // what a helm can reach.
 app.get('/api/gear/ceilings', requireAuth, asHandler(async (_req, res) => {
   res.json(await listCeilings());
+}));
+
+// The attribute names in use, which is the only workable suggestion list: the
+// game has far more attributes than anyone will translate by hand, and the
+// sixth line's pool changes with the weapons a spec plays.
+app.get('/api/gear/stats', requireAuth, asHandler(async (_req, res) => {
+  res.json(await listStatLabels());
 }));
 
 app.put('/api/players/:id/gear/:slot', requireAuth, asHandler(async (req, res) => {

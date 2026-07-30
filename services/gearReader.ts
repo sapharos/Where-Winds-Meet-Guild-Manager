@@ -1,6 +1,13 @@
 import type { GearCeiling } from '../types';
 import { KNOWN_STATS, statKey } from './gear';
 
+/** A name the guild already uses, and its unit where anyone has seen one. */
+export interface VocabEntry {
+  name: string;
+  unit?: 'flat' | 'percent';
+}
+export type Vocabulary = readonly VocabEntry[];
+
 /**
  * Reading a piece off the game's Afinación screen.
  *
@@ -214,7 +221,23 @@ const bare = (s: string) =>
  * bar is still there, and the value comes back from it once the attribute's
  * ceiling is known.
  */
-function parseRow(raw: string, position: number): ReadLine | null {
+/**
+ * How close a reading must sit to a name we know before it is snapped onto it.
+ *
+ * Measured against the real confusables rather than picked by feel. At the 0.82
+ * this started at, "Aumento de Daño en Habilidad Mística de Ataque" scored
+ * 0.825 against the Control version and was silently relabelled -- two
+ * different attributes merged into one, which is the worst thing this code
+ * could do, since it also merges their ceilings. Genuine OCR damage on the same
+ * name ("Habiidad", "Páñacea") lands at 0.98 or better, so there is a wide gap
+ * to sit in.
+ */
+const SNAP = 0.93;
+
+/** And it must beat the runner-up by this, so near-twins are left as read. */
+const SNAP_MARGIN = 0.04;
+
+function parseRow(raw: string, position: number, vocabulary: Vocabulary): ReadLine | null {
   let text = tidy(raw).replace(/\s*\/\s*/g, ' ');
   if (!text) return null;
 
@@ -245,12 +268,16 @@ function parseRow(raw: string, position: number): ReadLine | null {
 
   // Snap onto a name the guild already uses, so one blurry reading does not
   // start a second ceiling for an attribute that already had one.
-  let best: { known: (typeof KNOWN_STATS)[number] | null; score: number } = { known: null, score: 0 };
-  for (const known of KNOWN_STATS) {
+  let best: { known: VocabEntry | null; score: number } = { known: null, score: 0 };
+  let second = 0;
+  for (const known of vocabulary) {
     const score = closeness(bare(name), bare(known.name));
-    if (score > best.score) best = { known, score };
+    if (score > best.score) {
+      second = best.score;
+      best = { known, score };
+    } else if (score > second) second = score;
   }
-  if (best.score >= 0.82 && best.known) {
+  if (best.score >= SNAP && best.score - second >= SNAP_MARGIN && best.known) {
     name = best.known.name;
     // The unit belongs to the attribute, not to the roll. Tasa Crítica is a
     // percentage whether or not the "%" survived the engine, and a per-piece
@@ -276,6 +303,7 @@ export async function readPiece(
   img: HTMLImageElement,
   say: (step: string) => void = () => {},
   ceilings: GearCeiling[] = [],
+  vocabulary: Vocabulary = KNOWN_STATS,
 ): Promise<ReadPiece> {
   const found = bars(img);
   const { w, h } = frame(img);
@@ -297,7 +325,11 @@ export async function readPiece(
     for (let i = 0; i < found.length && lines.length < 6; i++) {
       say(`Leyendo la línea ${i + 1}...`);
       const top = i === 0 ? h * 0.3 : found[i - 1].y + 6;
-      const row = parseRow(await read(slice(img, w * 0.1, top, w * 0.3, found[i].y - 3)), lines.length + 1);
+      const row = parseRow(
+        await read(slice(img, w * 0.1, top, w * 0.3, found[i].y - 3)),
+        lines.length + 1,
+        vocabulary,
+      );
       if (row) {
         row.fill = found[i].fill;
         lines.push(row);
@@ -312,6 +344,7 @@ export async function readPiece(
       const tail = parseRow(
         await read(slice(img, w * 0.1, found[found.length - 1].y + 6, w * 0.3, h * 0.88)),
         lines.length + 1,
+        vocabulary,
       );
       if (tail && tail.label.length > 3) lines.push(tail);
     }

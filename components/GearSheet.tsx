@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { api } from '../services/authService';
 import { GEAR_SLOTS, GEAR_SLOT_LABELS, GearCeiling, GearLine, GearPiece, GearSlot } from '../types';
-import { KNOWN_STATS, Reading, candidates, daysUntil, read, show, stateOf } from '../services/gear';
-import { readPiece } from '../services/gearReader';
+import { KNOWN_STATS, Reading, candidates, daysUntil, read, show, stateOf, statKey } from '../services/gear';
+import { readPiece, VocabEntry } from '../services/gearReader';
 
 const SLOT_ICONS: Record<GearSlot, string> = {
   leftWeapon: 'fa-khanda',
@@ -71,18 +71,38 @@ interface Props {
 const GearSheet: React.FC<Props> = ({ playerId, canEdit }) => {
   const [pieces, setPieces] = useState<GearPiece[] | null>(null);
   const [ceilings, setCeilings] = useState<GearCeiling[]>([]);
+  const [seen, setSeen] = useState<{ stat: string; label: string; seen: number }[]>([]);
   const [chosen, setChosen] = useState<GearSlot | null>(null);
   const [message, setMessage] = useState<{ text: string; ok: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
 
   const load = async () => {
-    const [got, learned] = await Promise.all([
+    const [got, learned, names] = await Promise.all([
       api<GearPiece[]>(`/players/${playerId}/gear`).catch(() => []),
       api<GearCeiling[]>('/gear/ceilings').catch(() => []),
+      api<{ stat: string; label: string; seen: number }[]>('/gear/stats').catch(() => []),
     ]);
     setPieces(got);
     setCeilings(learned);
+    setSeen(names);
   };
+
+  /**
+   * The names offered while typing, and the ones a screenshot is matched
+   * against.
+   *
+   * Everything the guild has already written down, plus the handful seeded in
+   * code. That order matters: the game has forty-six attributes on the first
+   * five lines alone and the sixth draws from a pool that changes with the
+   * weapons a spec plays, so no hand-written constant will ever cover it. What
+   * one member types becomes everybody's suggestion.
+   */
+  const vocabulary = useMemo<VocabEntry[]>(() => {
+    const byKey = new Map<string, VocabEntry>();
+    for (const s of KNOWN_STATS) byKey.set(statKey(s.name), s);
+    for (const s of seen) if (!byKey.has(s.stat)) byKey.set(s.stat, { name: s.label });
+    return [...byKey.values()];
+  }, [seen]);
 
   useEffect(() => {
     void load();
@@ -166,6 +186,7 @@ const GearSheet: React.FC<Props> = ({ playerId, canEdit }) => {
           ceilings={ceilings}
           canEdit={canEdit}
           busy={busy}
+          vocabulary={vocabulary}
           onSave={(body) => save(chosen, body)}
           onRemove={() => remove(chosen)}
           onClose={() => setChosen(null)}
@@ -245,12 +266,13 @@ const PieceEditor: React.FC<{
   slot: GearSlot;
   piece?: GearPiece;
   ceilings: GearCeiling[];
+  vocabulary: VocabEntry[];
   canEdit: boolean;
   busy: boolean;
   onSave: (body: unknown) => void;
   onRemove: () => void;
   onClose: () => void;
-}> = ({ slot, piece, ceilings, canEdit, busy, onSave, onRemove, onClose }) => {
+}> = ({ slot, piece, ceilings, vocabulary, canEdit, busy, onSave, onRemove, onClose }) => {
   const [name, setName] = useState(piece?.name ?? '');
   const [level, setLevel] = useState(piece?.level ? String(piece.level) : '91');
   const [relayed, setRelayed] = useState(piece?.relayed ?? false);
@@ -279,7 +301,7 @@ const PieceEditor: React.FC<{
         i.onerror = () => rej(new Error('No se pudo abrir la imagen'));
         i.src = URL.createObjectURL(blob);
       });
-      const got = await readPiece(img, setReading, ceilings);
+      const got = await readPiece(img, setReading, ceilings, vocabulary);
       if (!got.lines.length) throw new Error('No encontré líneas de atributo. ¿Es la pantalla de Afinación?');
 
       if (got.name) setName(got.name);
@@ -336,7 +358,7 @@ const PieceEditor: React.FC<{
     };
     window.addEventListener('paste', onPaste);
     return () => window.removeEventListener('paste', onPaste);
-  }, [canEdit, ceilings]);
+  }, [canEdit, ceilings, vocabulary]);
 
   const put = (at: number, patch: Partial<Draft>) =>
     setRows((prev) => prev.map((r, i) => (i === at ? { ...r, ...patch } : r)));
@@ -465,7 +487,7 @@ const PieceEditor: React.FC<{
           </label>
 
           <datalist id="gear-stats">
-            {KNOWN_STATS.map((s) => (
+            {vocabulary.map((s) => (
               <option key={s.name} value={s.name} />
             ))}
           </datalist>

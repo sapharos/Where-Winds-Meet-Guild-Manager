@@ -162,7 +162,14 @@ export const GEAR_SLOT_LABELS: Record<GearSlot, string> = {
  *
  * Position is what decides what can be done with it, so it is not decoration:
  * 1 never changes, 2 to 5 are the four candidates of which only ever one gets
- * chosen, and 6 is the unlimited slot with its own short list per slot.
+ * chosen, and 6 is the unlimited one.
+ *
+ * The pools differ too. Lines 1 to 5 draw from one long list -- forty-six
+ * attributes -- shared by every slot. Line 6 draws from a short list that
+ * depends on the piece: three penetration and resistance figures on a weapon,
+ * disc or pendant, and six skill-damage boosts on a helm, armour, greaves or
+ * bracer, those tied to the weapons the build actually plays. Which is why the
+ * vocabulary cannot be a constant here and is gathered from use instead.
  */
 export interface GearLine {
   position: 1 | 2 | 3 | 4 | 5 | 6;

@@ -69,6 +69,48 @@ export async function listGear(playerId = null) {
   return rows;
 }
 
+/**
+ * Every attribute name the guild has actually written down, commonest first.
+ *
+ * The suggestion list has to come from here rather than from a constant. The
+ * game has forty-six attributes available on the first five lines alone, and
+ * the sixth draws from a different pool that changes with the weapons a spec
+ * plays -- three penetration and resistance figures on a weapon, six skill
+ * boosts on armour. Nobody is going to hand-translate all of that into Spanish
+ * correctly, and a guessed translation is worse than a missing one: it sits in
+ * the list looking official and never matches what anybody's screen says.
+ *
+ * So the vocabulary grows from use. The first member to write down "Impulso de
+ * Curación de Habilidad de Arte Marcial de Sombrilla" makes it available to
+ * everyone, spelled the way the game spells it for them.
+ */
+export async function listStatLabels() {
+  // One attribute can arrive spelled several ways -- the game itself prints
+  // "Ataque físico máximo" on one line and "Ataque Físico Máximo" on the next.
+  // They all fold to one stat, and the spelling shown back is the one most
+  // people wrote, preferring mixed case over somebody's SHOUTED version and
+  // the shorter of two otherwise equal spellings.
+  const { rows } = await pool.query(
+    `WITH counted AS (
+       SELECT line->>'stat' AS stat, line->>'label' AS label, count(*)::int AS n
+         FROM gear_pieces p, jsonb_array_elements(p.lines) line
+        WHERE p.guild_id = $1 AND coalesce(line->>'label', '') <> ''
+        GROUP BY 1, 2
+     ), best AS (
+       SELECT DISTINCT ON (stat) stat, label
+         FROM counted
+        ORDER BY stat, n DESC, (label ~ '[[:lower:]]') DESC, length(label)
+     ), totals AS (
+       SELECT stat, sum(n)::int AS seen FROM counted GROUP BY stat
+     )
+     SELECT b.stat, b.label, t.seen
+       FROM best b JOIN totals t USING (stat)
+      ORDER BY t.seen DESC, b.label`,
+    [GUILD_ID],
+  );
+  return rows;
+}
+
 export async function listCeilings() {
   const { rows } = await pool.query(
     `SELECT stat, level, ceiling::float8 AS ceiling, samples
