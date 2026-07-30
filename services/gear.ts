@@ -1,33 +1,21 @@
 import type { GearCeiling, GearLine, GearPiece } from '../types';
+import { BY_KEY } from './gearCatalog';
 
 /**
- * The attributes seen on real pieces so far, as the game spells them.
+ * The Spanish name to draw for one line, whatever it was stored as.
  *
- * Only names read off actual screenshots are in here. The game has far more --
- * forty-six can appear on lines one to five alone -- but a guessed translation
- * is worse than a missing one: it would sit in the suggestion list looking
- * official and never match what anybody's screen actually says. The list grows
- * from what members type, which is the same reason weapon sets live in the
- * database rather than in a constant.
+ * The catalogue's Spanish wins over the label saved on the piece, so correcting
+ * a translation fixes every piece already recorded without touching any of
+ * them. The saved label is the fallback, which is what keeps lines recorded
+ * before the catalogue existed readable rather than blank.
  */
-export const KNOWN_STATS: { name: string; unit?: GearLine['unit'] }[] = [
-  { name: 'Impulso', unit: 'flat' },
-  { name: 'Ataque de campana máximo', unit: 'flat' },
-  { name: 'Ataque Físico Máximo', unit: 'flat' },
-  { name: 'Ataque Físico Mínimo', unit: 'flat' },
-  { name: 'Ataque Máx de Atadura de Seda', unit: 'flat' },
-  { name: 'Ataque Mínimo de Atadura de Seda', unit: 'flat' },
-  { name: 'Tasa Crítica', unit: 'percent' },
-  { name: 'Vida Máxima', unit: 'flat' },
-  { name: 'Poder', unit: 'flat' },
-  { name: 'Agilidad', unit: 'flat' },
-  { name: 'Resistencia Física', unit: 'percent' },
-  { name: 'Penetración Sin Forma', unit: 'flat' },
-  // Never yet seen on a screenshot, so no unit is claimed for it.
-  { name: 'Penetración Física' },
-  { name: 'Aumento de Daño en Habilidad Mística de Control', unit: 'percent' },
-  { name: 'Impulso de Curación de Habilidad de Arte Marcial de Abanico Panacea', unit: 'percent' },
-];
+export const labelFor = (
+  line: Pick<GearLine, 'stat' | 'label'>,
+  overrides?: ReadonlyMap<string, string>,
+): string => {
+  const entry = BY_STAT.get(line.stat);
+  return entry ? overrides?.get(entry.key) ?? entry.es : line.label || line.stat;
+};
 
 /** The same folding the server does, so the client can look a ceiling up. */
 export const statKey = (name: string): string =>
@@ -38,6 +26,18 @@ export const statKey = (name: string): string =>
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, ' ')
     .trim();
+
+/** The catalogue keyed the way a stored line keys, for looking one back up. */
+const BY_STAT = new Map([...BY_KEY.values()].map((e) => [statKey(e.key), e]));
+
+/**
+ * The catalogue entry a stored line names, if it still names one.
+ *
+ * Undefined for a line recorded before the catalogue existed under a name
+ * nobody could map -- the form shows those with nothing selected, so the member
+ * picks the real attribute the next time they open the piece.
+ */
+export const entryFor = (stat: string) => BY_STAT.get(stat);
 
 export interface Reading {
   line: GearLine;

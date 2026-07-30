@@ -7,11 +7,17 @@ import { matchEntries, commitScan, historyFor, scanSummary } from './scans.js';
 import { listBuilds, saveBuilds, mayEditBuilds } from './builds.js';
 import {
   listGear,
+  listGearSets,
+  saveGearSet,
+  deleteGearSet,
   listCeilings,
   listStatLabels,
+  listStatOverrides,
+  setStatOverride,
   renameStat,
   saveGearPiece,
   deleteGearPiece,
+  migrateLegacyStats,
   mayEditGear,
 } from './gear.js';
 import { listWeaponSets, saveWeaponSets, seedWeaponSets } from './weapons.js';
@@ -634,9 +640,11 @@ app.get('/api/gear/ceilings', requireAuth, asHandler(async (_req, res) => {
   res.json(await listCeilings());
 }));
 
-// The attribute names in use, which is the only workable suggestion list: the
-// game has far more attributes than anyone will translate by hand, and the
-// sixth line's pool changes with the weapons a spec plays.
+// The attribute names actually sitting on pieces right now. No longer the
+// suggestion list -- that is a closed catalogue in services/gearCatalog.ts --
+// but still the way to find what the old free-text field left behind: anything
+// here that is not a catalogue key is a line somebody has to re-pick, and
+// renameStat below is how the junk ones get taken off.
 app.get('/api/gear/stats', requireAuth, asHandler(async (_req, res) => {
   res.json(await listStatLabels());
 }));
@@ -647,18 +655,50 @@ app.patch('/api/gear/stats/:key', requireAuth, requirePermission('builds.manage'
   res.json(await renameStat(req.params.key, req.body?.label ?? ''));
 }));
 
-app.put('/api/players/:id/gear/:slot', requireAuth, asHandler(async (req, res) => {
-  if (!(await mayEditGear(req, req.params.id))) {
-    return res.status(403).json({ error: 'you may only edit your own gear' });
-  }
-  res.json(await saveGearPiece(req.params.id, { ...req.body, slot: req.params.slot }));
+// The Spanish names, and the corrections to them. Readable by everybody
+// because the screenshot reader needs them to match at all, not just to draw.
+app.get('/api/gear/labels', requireAuth, asHandler(async (_req, res) => {
+  res.json(await listStatOverrides());
 }));
 
-app.delete('/api/players/:id/gear/:slot', requireAuth, asHandler(async (req, res) => {
+// Correcting a name changes what every member sees and what their screenshots
+// match against, so it needs the permission that covers anybody's gear.
+app.put('/api/gear/labels/:key', requireAuth, requirePermission('builds.manage'), asHandler(async (req, res) => {
+  res.json(await setStatOverride(req.params.key, req.body?.label ?? ''));
+}));
+
+/* ------------------------------------------------------------- gear sets */
+
+app.get('/api/players/:id/gear-sets', requireAuth, asHandler(async (req, res) => {
+  res.json(await listGearSets(req.params.id));
+}));
+
+app.put('/api/players/:id/gear-sets', requireAuth, asHandler(async (req, res) => {
   if (!(await mayEditGear(req, req.params.id))) {
     return res.status(403).json({ error: 'you may only edit your own gear' });
   }
-  res.json(await deleteGearPiece(req.params.id, req.params.slot));
+  res.json(await saveGearSet(req.params.id, req.body ?? {}));
+}));
+
+app.delete('/api/players/:id/gear-sets/:setId', requireAuth, asHandler(async (req, res) => {
+  if (!(await mayEditGear(req, req.params.id))) {
+    return res.status(403).json({ error: 'you may only edit your own gear' });
+  }
+  res.json(await deleteGearSet(req.params.id, req.params.setId));
+}));
+
+app.put('/api/players/:id/gear-sets/:setId/:slot', requireAuth, asHandler(async (req, res) => {
+  if (!(await mayEditGear(req, req.params.id))) {
+    return res.status(403).json({ error: 'you may only edit your own gear' });
+  }
+  res.json(await saveGearPiece(req.params.id, req.params.setId, { ...req.body, slot: req.params.slot }));
+}));
+
+app.delete('/api/players/:id/gear-sets/:setId/:slot', requireAuth, asHandler(async (req, res) => {
+  if (!(await mayEditGear(req, req.params.id))) {
+    return res.status(403).json({ error: 'you may only edit your own gear' });
+  }
+  res.json(await deleteGearPiece(req.params.id, req.params.setId, req.params.slot));
 }));
 
 // Which roster entry an account belongs to, which is what lets a member edit
@@ -680,6 +720,7 @@ app.patch('/api/users/:id/player', requireAuth, requirePermission('users.manage'
 migrate()
   .then(initAuth)
   .then(seedWeaponSets)
+  .then(migrateLegacyStats)
   .then(() => {
     app.listen(PORT, () => console.log(`API listening on ${PORT}`));
   })

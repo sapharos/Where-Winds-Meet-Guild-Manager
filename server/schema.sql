@@ -414,3 +414,87 @@ CREATE TABLE IF NOT EXISTS war_images (
 );
 
 CREATE INDEX IF NOT EXISTS war_images_war_idx ON war_images (war_id, uploaded_at);
+
+-- A set: eight pieces built together, for one path, with one of your builds.
+--
+-- Gear used to be one row per slot per member, which quietly asserted that a
+-- member has one helm. They do not -- they have the set they take to guild war
+-- and the set they farm in, and the same piece is a keeper in one and a wasted
+-- slot in the other. Worse, without knowing what a set is *for*, every one of
+-- the game's forty-six attributes is equally plausible on every line, so there
+-- was nothing to check a screenshot's reading against.
+--
+-- spec is one of the nine paths, an id from services/gearCatalog.ts. It is what
+-- turns the attribute fields from free text into closed dropdowns, which is the
+-- whole reason this table exists.
+CREATE TABLE IF NOT EXISTS gear_sets (
+  id         TEXT PRIMARY KEY,
+  guild_id   TEXT NOT NULL REFERENCES guilds(id) ON DELETE CASCADE,
+  player_id  TEXT NOT NULL,
+  -- Which build in the member's profile this set is for. Nullable and ON DELETE
+  -- SET NULL by hand in builds.js rather than by constraint: deleting a build
+  -- must not take the record of eight pieces down with it.
+  build_id   TEXT,
+  name       TEXT NOT NULL,
+  spec       TEXT NOT NULL,
+  is_primary BOOLEAN NOT NULL DEFAULT false,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  FOREIGN KEY (guild_id, player_id) REFERENCES players (guild_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS gear_sets_owner_idx ON gear_sets (guild_id, player_id);
+
+ALTER TABLE gear_pieces ADD COLUMN IF NOT EXISTS set_id TEXT REFERENCES gear_sets(id) ON DELETE CASCADE;
+
+-- Everything already recorded belongs to a set that did not exist when it was
+-- saved. One per member who has any pieces at all, named for what it is and
+-- left without a path -- nobody can be told which of the nine they were aiming
+-- at, and inventing one would put wrong recommendations in front of them.
+-- Their first visit picks it, and until then the set opens with the path
+-- selector waiting.
+INSERT INTO gear_sets (id, guild_id, player_id, build_id, name, spec, is_primary)
+SELECT DISTINCT 'set-legacy-' || p.guild_id || '-' || p.player_id, p.guild_id, p.player_id,
+       NULL, 'Mi equipo', '', true
+  FROM gear_pieces p
+ WHERE p.set_id IS NULL
+   AND NOT EXISTS (SELECT 1 FROM gear_sets s WHERE s.guild_id = p.guild_id AND s.player_id = p.player_id);
+
+UPDATE gear_pieces p
+   SET set_id = s.id
+  FROM gear_sets s
+ WHERE p.set_id IS NULL AND s.guild_id = p.guild_id AND s.player_id = p.player_id AND s.is_primary;
+
+-- One piece per slot per set, replacing one piece per slot per member. The old
+-- constraint has to go first or the second set anybody builds cannot hold a
+-- helm.
+ALTER TABLE gear_pieces DROP CONSTRAINT IF EXISTS gear_pieces_guild_id_player_id_slot_key;
+CREATE UNIQUE INDEX IF NOT EXISTS gear_pieces_set_slot_idx ON gear_pieces (set_id, slot);
+
+-- Corrected Spanish names for the attribute catalogue.
+--
+-- The catalogue's keys are the English names from the analyzer, which are the
+-- only complete list published. The Spanish shown next to them is fifteen names
+-- read off real screenshots and about fifty translations that are mine. Those
+-- fifty are good enough to match a screenshot and to recognise on a screen, and
+-- some of them are certainly not what the game prints.
+--
+-- Rather than pretend otherwise, they are correctable, and a correction lands
+-- here. It reaches both the label and the screenshot matcher -- correcting only
+-- the display would leave a name that goes on failing to match forever, which
+-- is the more annoying half of being wrong.
+CREATE TABLE IF NOT EXISTS gear_stat_labels (
+  guild_id   TEXT NOT NULL REFERENCES guilds(id) ON DELETE CASCADE,
+  -- The catalogue's English name, verbatim. Not folded: this is a pointer into
+  -- a list in the source, not a key readings are grouped by.
+  stat_key   TEXT NOT NULL,
+  label      TEXT NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (guild_id, stat_key)
+);
+
+-- Now that every piece has been attached to one. Required rather than merely
+-- backfilled because saveGearPiece infers its ON CONFLICT target from the index
+-- above, and a nullable column there is a slot a piece could quietly fall
+-- through: a NULL never conflicts, so the same helm would insert twice.
+ALTER TABLE gear_pieces ALTER COLUMN set_id SET NOT NULL;

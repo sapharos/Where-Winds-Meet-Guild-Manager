@@ -165,11 +165,16 @@ export const GEAR_SLOT_LABELS: Record<GearSlot, string> = {
  * chosen, and 6 is the unlimited one.
  *
  * The pools differ too. Lines 1 to 5 draw from one long list -- forty-six
- * attributes -- shared by every slot. Line 6 draws from a short list that
- * depends on the piece: three penetration and resistance figures on a weapon,
- * disc or pendant, and six skill-damage boosts on a helm, armour, greaves or
- * bracer, those tied to the weapons the build actually plays. Which is why the
- * vocabulary cannot be a constant here and is gathered from use instead.
+ * attributes -- shared by every slot and every spec. Line 6 draws from a short
+ * list that depends on the piece: three penetration and resistance figures on a
+ * weapon, disc or pendant, and the skill-damage boosts tied to the spec's own
+ * weapons on a helm, armour, greaves or bracer.
+ *
+ * Both pools are closed lists now, in services/gearCatalog.ts. They used to be
+ * gathered from whatever members typed, which was honest about not knowing the
+ * list but had a failure with no bottom to it: a misreading saved once joined
+ * everybody's suggestions and then matched every later copy of itself
+ * perfectly.
  */
 export interface GearLine {
   position: 1 | 2 | 3 | 4 | 5 | 6;
@@ -177,6 +182,10 @@ export interface GearLine {
    * The attribute, folded to a key everyone's readings agree on: accents and
    * case stripped, and the game's "[Girar]" marker removed so a line keys the
    * same before and after somebody rerolls it. Computed on the server.
+   *
+   * Folded from the catalogue's English name rather than from what the member
+   * saw, so a Spanish and an English client agree on one key for one attribute
+   * -- which is what the shared ceilings rest on.
    */
   stat: string;
   /** The name as the member reads it on their own screen. */
@@ -214,9 +223,34 @@ export interface GearLine {
   hue?: 'gold' | 'violet';
 }
 
+/**
+ * A whole set of eight pieces, built for one path with one of your builds.
+ *
+ * A member does not have "their gear" -- they have the set they take to war and
+ * the set they farm in, and the same helm is a good piece in one and a wasted
+ * slot in the other. So a piece belongs to a set, and a set belongs to a build
+ * and declares which of the nine paths it is aiming at. That declaration is the
+ * whole reason the dropdowns can be closed lists: without knowing the path,
+ * every attribute in the game is equally plausible on every line.
+ */
+export interface GearSet {
+  id: string;
+  playerId: string;
+  /** Which build in the member's profile this set is for. */
+  buildId: string | null;
+  name: string;
+  /** A Spec id from services/gearCatalog.ts. Decides every dropdown's pool. */
+  spec: string;
+  /** The one that opens when the member has not picked. */
+  isPrimary: boolean;
+  updatedAt: string;
+}
+
 export interface GearPiece {
   id: string;
   playerId: string;
+  /** The set this piece belongs to. One piece per slot per set. */
+  setId: string;
   slot: GearSlot;
   name: string | null;
   level: number | null;

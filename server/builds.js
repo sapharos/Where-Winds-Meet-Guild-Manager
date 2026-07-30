@@ -89,6 +89,17 @@ export async function saveBuilds(playerId, builds) {
       );
     }
 
+    // A gear set points at the build it was assembled for, without a foreign
+    // key: deleting a build must not take a record of eight tuned pieces down
+    // with it. So the pointer is cleared by hand and the set survives, asking
+    // to be pointed at something again.
+    await client.query(
+      `UPDATE gear_sets SET build_id = NULL, updated_at = now()
+        WHERE guild_id = $1 AND player_id = $2
+          AND build_id IS NOT NULL AND NOT (build_id = ANY($3::text[]))`,
+      [GUILD_ID, playerId, rows.map((b) => b.id)],
+    );
+
     if (primary?.roles.length) {
       await client.query(`UPDATE players SET role = $1 WHERE guild_id = $2 AND id = $3`, [
         primary.roles[0],

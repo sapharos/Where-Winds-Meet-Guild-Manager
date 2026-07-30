@@ -1,8 +1,18 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { api } from '../services/authService';
-import { GEAR_SLOTS, GEAR_SLOT_LABELS, GearCeiling, GearLine, GearPiece, GearSlot } from '../types';
-import { KNOWN_STATS, Reading, candidates, daysUntil, read, show, stateOf, statKey } from '../services/gear';
-import { readPiece, VocabEntry } from '../services/gearReader';
+import {
+  GEAR_SLOTS,
+  GEAR_SLOT_LABELS,
+  GearCeiling,
+  GearLine,
+  GearPiece,
+  GearSet,
+  GearSlot,
+  PlayerBuild,
+} from '../types';
+import { Reading, candidates, daysUntil, entryFor, labelFor, read, show, stateOf } from '../services/gear';
+import { CatalogEntry, Option, SPECS, Spec, optionsFor, specById } from '../services/gearCatalog';
+import { readPiece } from '../services/gearReader';
 
 const SLOT_ICONS: Record<GearSlot, string> = {
   leftWeapon: 'fa-khanda',
@@ -18,7 +28,15 @@ const SLOT_ICONS: Record<GearSlot, string> = {
 /** A line as it is being edited, before anything is sent. */
 interface Draft {
   position: number;
-  label: string;
+  /**
+   * The catalogue's English name for the attribute, or empty for a blank line.
+   *
+   * This used to be free text and is the reason for the whole change: whatever
+   * the reader made of a blurry frame went straight into the field, was saved,
+   * and then joined everybody's suggestions -- where it matched the next
+   * identical misreading perfectly. A key from a closed list cannot do that.
+   */
+  key: string;
   value: string;
   unit: GearLine['unit'];
   committed: boolean;
@@ -27,20 +45,25 @@ interface Draft {
    * How full the game drew this line's bar, and in which colour.
    *
    * Carried through the form rather than shown as a field, because nobody can
-   * eyeball a bar as a percentage. It was missing here at first, so every
-   * screenshot's measurement was discarded on save -- which quietly disabled
-   * the whole point of reading the picture, since the ceilings are learned from
-   * value / fill and nothing ever arrived with a fill.
+   * eyeball a bar as a percentage. The ceilings are learned from value / fill,
+   * so dropping it here would quietly disable the point of reading the picture.
    */
   fill?: number | null;
   hue?: 'gold' | 'violet';
   /** Read from a screenshot, and the bar disagreed with the printed figure. */
   suspect?: number | null;
+  /**
+   * The reader had to pick between two attributes that looked alike.
+   *
+   * It still landed on a real one -- there is nowhere else to land -- but not
+   * cleanly enough that anybody should save it without looking.
+   */
+  unsure?: boolean;
 }
 
 const blankDraft = (position: number): Draft => ({
   position,
-  label: '',
+  key: '',
   value: '',
   unit: 'flat',
   committed: false,
@@ -54,7 +77,10 @@ function draftsFrom(piece: GearPiece | undefined): Draft[] {
     const at = line.position === 6 && line.tuning === 'arena' ? -1 : line.position - 1;
     const draft: Draft = {
       position: line.position,
-      label: line.label ?? line.stat,
+      // A line saved before the catalogue existed under a name nobody could
+      // map comes back with nothing selected, so the member picks the real
+      // attribute rather than the piece carrying a name forever.
+      key: entryFor(line.stat)?.key ?? '',
       value: line.value === null ? '' : String(line.value),
       unit: line.unit,
       committed: line.committed,
@@ -74,90 +100,83 @@ interface Props {
 }
 
 /**
- * What a member is wearing, and the one decision each piece still allows.
+ * The sets a member has built, and the one decision each piece still allows.
  *
- * The advice is deliberately thin: nothing here models damage or claims one
- * attribute is worth more than another. All it says is how far a roll sits
- * from what that attribute can reach, which the game itself reports and the
- * guild works out between them.
+ * Gear hangs off a set rather than off the member, because a member does not
+ * have "their helm" -- they have the set they take to guild war and the set
+ * they farm in, and the same piece is a keeper in one and a wasted slot in the
+ * other. A set names the build it is for and which of the nine paths it is
+ * aiming at, and that second answer is what makes every attribute field a
+ * closed dropdown instead of a text box: without it, all forty-six attributes
+ * are equally plausible on every line and a screenshot's reading has nothing to
+ * be checked against.
+ *
+ * The advice stays deliberately thin. Nothing here models damage. It says how
+ * far a roll sits from what that attribute can reach, which the game itself
+ * reports, and which of them the path wants, which the analyzer publishes.
  */
 const GearSheet: React.FC<Props> = ({ playerId, canEdit }) => {
-  const [pieces, setPieces] = useState<GearPiece[] | null>(null);
+  const [sets, setSets] = useState<GearSet[] | null>(null);
+  const [pieces, setPieces] = useState<GearPiece[]>([]);
+  const [builds, setBuilds] = useState<PlayerBuild[]>([]);
   const [ceilings, setCeilings] = useState<GearCeiling[]>([]);
-  const [seen, setSeen] = useState<{ stat: string; label: string; seen: number }[]>([]);
+  const [overrides, setOverrides] = useState<{ key: string; label: string }[]>([]);
+  const [openSet, setOpenSet] = useState<string | null>(null);
+  const [editingSet, setEditingSet] = useState<GearSet | 'new' | null>(null);
   const [chosen, setChosen] = useState<GearSlot | null>(null);
   const [message, setMessage] = useState<{ text: string; ok: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
 
   const load = async () => {
-    const [got, learned, names] = await Promise.all([
+    const [gotSets, got, myBuilds, learned, labels] = await Promise.all([
+      api<GearSet[]>(`/players/${playerId}/gear-sets`).catch(() => []),
       api<GearPiece[]>(`/players/${playerId}/gear`).catch(() => []),
+      api<PlayerBuild[]>(`/players/${playerId}/builds`).catch(() => []),
       api<GearCeiling[]>('/gear/ceilings').catch(() => []),
-      api<{ stat: string; label: string; seen: number }[]>('/gear/stats').catch(() => []),
+      api<{ key: string; label: string }[]>('/gear/labels').catch(() => []),
     ]);
+    setSets(gotSets);
     setPieces(got);
+    setBuilds(myBuilds);
     setCeilings(learned);
-    setSeen(names);
+    setOverrides(labels);
+    setOpenSet((prev) =>
+      prev && gotSets.some((s) => s.id === prev)
+        ? prev
+        : (gotSets.find((s) => s.isPrimary) ?? gotSets[0])?.id ?? null,
+    );
   };
-
-  /**
-   * Every name to offer while typing.
-   *
-   * Everything the guild has written down, plus the handful seeded in code. The
-   * game has forty-six attributes on the first five lines alone and the sixth
-   * draws from a pool that changes with the weapons a spec plays, so no
-   * hand-written constant will ever cover it: what one member types becomes
-   * everybody's suggestion.
-   */
-  const suggestions = useMemo<VocabEntry[]>(() => {
-    const byKey = new Map<string, VocabEntry>();
-    for (const s of KNOWN_STATS) byKey.set(statKey(s.name), s);
-    for (const s of seen) if (!byKey.has(s.stat)) byKey.set(s.stat, { name: s.label });
-    return [...byKey.values()];
-  }, [seen]);
-
-  /**
-   * The narrower set a screenshot's reading is allowed to be matched against.
-   *
-   * Not the same list, and the difference matters. A name that has been written
-   * down exactly once is as likely to be a misreading somebody saved as a real
-   * attribute -- and once saved it sits at distance nought from the next
-   * identical misreading, so it captures it, and the mistake reinforces itself
-   * for good. That is exactly what happened to "llmpulso", the engine's reading
-   * of "[Girar]Impulso": saved once, and from then on every reading of that
-   * line matched the wrong name perfectly.
-   *
-   * So matching only trusts a name that was seeded here or that two separate
-   * lines agree on. Everything else is still suggested while typing, and still
-   * saved exactly as written -- it simply does not get to pull other readings
-   * onto itself until something else confirms it.
-   */
-  const trusted = useMemo<VocabEntry[]>(() => {
-    const seeded = new Set(KNOWN_STATS.map((s) => statKey(s.name)));
-    return suggestions.filter((v) => {
-      const key = statKey(v.name);
-      if (seeded.has(key)) return true;
-      return (seen.find((s) => s.stat === key)?.seen ?? 0) >= 2;
-    });
-  }, [suggestions, seen]);
 
   useEffect(() => {
     void load();
   }, [playerId]);
 
-  const bySlot = useMemo(
-    () => new Map<GearSlot, GearPiece>((pieces ?? []).map((p) => [p.slot, p])),
-    [pieces],
+  /** The corrected Spanish names, which the matcher needs as well as the eye. */
+  const corrections = useMemo(
+    () => new Map(overrides.map((o) => [o.key, o.label])),
+    [overrides],
   );
 
-  if (!pieces) return null;
+  const set = useMemo(() => (sets ?? []).find((s) => s.id === openSet), [sets, openSet]);
+  const spec = specById(set?.spec);
+
+  const bySlot = useMemo(
+    () => new Map<GearSlot, GearPiece>(pieces.filter((p) => p.setId === openSet).map((p) => [p.slot, p])),
+    [pieces, openSet],
+  );
+
+  if (!sets) return null;
   const piece = chosen ? bySlot.get(chosen) : undefined;
 
-  const save = async (slot: GearSlot, body: unknown) => {
+  const savePiece = async (slot: GearSlot, body: unknown) => {
+    if (!openSet) return;
     setBusy(true);
     setMessage(null);
     try {
-      await api(`/players/${playerId}/gear/${slot}`, { method: 'PUT', body: JSON.stringify(body) });
+      await api(`/players/${playerId}/gear-sets/${openSet}/${slot}`, {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      });
       await load();
       setMessage({ text: 'Pieza guardada.', ok: true });
     } catch (err) {
@@ -167,17 +186,46 @@ const GearSheet: React.FC<Props> = ({ playerId, canEdit }) => {
     }
   };
 
-  const remove = async (slot: GearSlot) => {
-    if (!window.confirm('¿Borrar lo registrado de esta pieza?')) return;
-    await api(`/players/${playerId}/gear/${slot}`, { method: 'DELETE' }).catch(() => undefined);
+  const removePiece = async (slot: GearSlot) => {
+    if (!openSet || !window.confirm('¿Borrar lo registrado de esta pieza?')) return;
+    await api(`/players/${playerId}/gear-sets/${openSet}/${slot}`, { method: 'DELETE' }).catch(
+      () => undefined,
+    );
     setChosen(null);
+    await load();
+  };
+
+  const saveSet = async (draft: Partial<GearSet>) => {
+    setBusy(true);
+    setMessage(null);
+    try {
+      const saved = await api<{ id: string }>(`/players/${playerId}/gear-sets`, {
+        method: 'PUT',
+        body: JSON.stringify(draft),
+      });
+      setOpenSet(saved.id);
+      setEditingSet(null);
+      await load();
+    } catch (err) {
+      setMessage({ text: err instanceof Error ? err.message : 'No se pudo guardar', ok: false });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const removeSet = async (id: string) => {
+    if (!window.confirm('¿Borrar este set entero, con sus piezas?')) return;
+    await api(`/players/${playerId}/gear-sets/${id}`, { method: 'DELETE' }).catch(() => undefined);
+    setChosen(null);
+    setEditingSet(null);
+    setOpenSet(null);
     await load();
   };
 
   return (
     <section className="bg-slate-900/60 border border-slate-800 rounded-xl p-6">
       <div className="flex items-baseline justify-between gap-3 flex-wrap mb-1">
-        <h2 className="cinzel text-xl font-bold text-amber-500">Mi equipo</h2>
+        <h2 className="cinzel text-xl font-bold text-amber-500">Mis sets</h2>
         <span className="text-[11px] text-slate-500">
           {ceilings.length
             ? `${ceilings.length} atributos con techo conocido, aprendidos del gremio`
@@ -185,8 +233,8 @@ const GearSheet: React.FC<Props> = ({ playerId, canEdit }) => {
         </span>
       </div>
       <p className="text-xs text-slate-500 mb-4">
-        Registra una pieza cuando te caiga algo nuevo, no hace falta hacerlas todas de golpe. Con el
-        techo de un atributo conocido, el sistema dice cuánto margen te queda en cada línea.
+        Un set son ocho piezas montadas para un camino concreto. Elige el camino al crearlo: es lo que
+        decide qué atributos te ofrece cada línea y contra qué se comparan tus capturas.
       </p>
 
       {message && (
@@ -202,66 +250,265 @@ const GearSheet: React.FC<Props> = ({ playerId, canEdit }) => {
         </div>
       )}
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
-        {GEAR_SLOTS.map((slot) => (
-          <SlotCard
-            key={slot}
-            slot={slot}
-            piece={bySlot.get(slot)}
-            ceilings={ceilings}
-            active={chosen === slot}
-            onPick={() => setChosen(chosen === slot ? null : slot)}
-          />
+      <div className="flex items-center gap-2 flex-wrap mb-4">
+        {sets.map((s) => (
+          <button
+            key={s.id}
+            onClick={() => {
+              setOpenSet(s.id);
+              setChosen(null);
+              setEditingSet(null);
+            }}
+            className={`text-left px-3 py-1.5 rounded-lg border transition-all ${
+              openSet === s.id
+                ? 'border-amber-600 bg-amber-500/10'
+                : 'border-slate-800 bg-slate-950 hover:border-slate-600'
+            }`}
+          >
+            <span className="text-xs font-bold text-slate-200 block">{s.name}</span>
+            <span className={`text-[10px] ${s.spec ? 'text-slate-500' : 'text-amber-500'}`}>
+              {specById(s.spec)?.name ?? 'sin camino'}
+            </span>
+          </button>
         ))}
+        {canEdit && (
+          <button
+            onClick={() => setEditingSet('new')}
+            className="text-xs px-3 py-2 rounded-lg border border-dashed border-slate-700 text-slate-400 hover:border-amber-700 hover:text-amber-500 transition-all"
+          >
+            <i className="fa-solid fa-plus mr-1.5"></i>
+            Nuevo set
+          </button>
+        )}
       </div>
 
-      {canEdit && <Cleanup seen={seen} onDone={() => void load()} />}
-
-      {chosen && (
-        <PieceEditor
-          key={chosen}
-          slot={chosen}
-          piece={piece}
-          ceilings={ceilings}
-          canEdit={canEdit}
+      {editingSet && canEdit && (
+        <SetEditor
+          set={editingSet === 'new' ? null : editingSet}
+          builds={builds}
           busy={busy}
-          suggestions={suggestions}
-          trusted={trusted}
-          onSave={(body) => save(chosen, body)}
-          onRemove={() => remove(chosen)}
-          onClose={() => setChosen(null)}
+          onSave={saveSet}
+          onCancel={() => setEditingSet(null)}
         />
       )}
+
+      {!sets.length && !editingSet && (
+        <p className="text-sm text-slate-500">
+          Todavía no tienes ningún set. Crea uno, dile para qué build es y qué camino sigues, y a
+          partir de ahí cada línea te ofrece solo los atributos que existen en ese camino.
+        </p>
+      )}
+
+      {set && !editingSet && (
+        <>
+          <div className="flex items-center justify-between gap-3 flex-wrap mb-3">
+            <p className="text-xs text-slate-400">
+              <i className="fa-solid fa-route text-amber-600 mr-1.5"></i>
+              {spec ? spec.name : 'Sin camino elegido'}
+              {set.buildId && builds.find((b) => b.id === set.buildId) && (
+                <span className="text-slate-600"> · {builds.find((b) => b.id === set.buildId)!.name}</span>
+              )}
+            </p>
+            {canEdit && (
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setEditingSet(set)}
+                  className="text-xs text-slate-500 hover:text-amber-500 transition-all"
+                >
+                  <i className="fa-solid fa-pen mr-1"></i>Editar set
+                </button>
+                <button
+                  onClick={() => removeSet(set.id)}
+                  className="text-xs text-slate-500 hover:text-red-400 transition-all"
+                >
+                  <i className="fa-solid fa-trash-can mr-1"></i>Borrar set
+                </button>
+              </div>
+            )}
+          </div>
+
+          {!spec && (
+            <p className="text-[11px] text-amber-300 bg-amber-500/10 border border-amber-800/50 rounded px-3 py-2 mb-3">
+              <i className="fa-solid fa-circle-info mr-1.5"></i>
+              Este set no tiene camino. Sin él no se puede saber qué atributos ofrece cada línea ni
+              leer capturas: edítalo y elige uno de los nueve.
+            </p>
+          )}
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
+            {GEAR_SLOTS.map((slot) => (
+              <SlotCard
+                key={slot}
+                slot={slot}
+                piece={bySlot.get(slot)}
+                active={chosen === slot}
+                onPick={() => setChosen(chosen === slot ? null : slot)}
+              />
+            ))}
+          </div>
+
+          {chosen && (
+            <PieceEditor
+              key={`${set.id}-${chosen}`}
+              slot={chosen}
+              piece={piece}
+              spec={spec}
+              ceilings={ceilings}
+              corrections={corrections}
+              canEdit={canEdit}
+              busy={busy}
+              onSave={(body) => savePiece(chosen, body)}
+              onRemove={() => removePiece(chosen)}
+              onClose={() => setChosen(null)}
+            />
+          )}
+        </>
+      )}
+
+      {canEdit && <Translations corrections={corrections} onDone={() => void load()} />}
     </section>
   );
 };
 
 /**
- * The attribute names only one line uses, and a way to correct them.
+ * Naming a set, pointing it at a build, and choosing its path.
  *
- * A name that appears once is either a genuinely rare attribute or a misreading
- * somebody saved without looking. They cannot be told apart automatically, so
- * they are simply put in front of whoever runs the guild. Correcting one
- * rewrites every piece that carries it, which matters because otherwise the
- * only remedy is finding the helm it came from -- and nobody does that for
- * somebody else's gear.
+ * The path is the field that matters and it is the one that cannot be changed
+ * carelessly afterwards: it decides which attributes every line of every piece
+ * may hold, so switching it on a set full of recorded pieces leaves lines
+ * holding attributes the new path does not offer. Allowed anyway -- people do
+ * respec -- but said out loud.
  */
-const Cleanup: React.FC<{
-  seen: { stat: string; label: string; seen: number }[];
+const SetEditor: React.FC<{
+  set: GearSet | null;
+  builds: PlayerBuild[];
+  busy: boolean;
+  onSave: (draft: Partial<GearSet>) => void;
+  onCancel: () => void;
+}> = ({ set, builds, busy, onSave, onCancel }) => {
+  const [name, setName] = useState(set?.name ?? '');
+  const [buildId, setBuildId] = useState(set?.buildId ?? '');
+  const [spec, setSpec] = useState(set?.spec ?? '');
+
+  const chosen = specById(spec);
+
+  return (
+    <div className="border border-amber-800/50 bg-amber-500/5 rounded-lg p-4 space-y-3 mb-4">
+      <h3 className="text-sm font-bold text-slate-200">
+        {set ? 'Editar set' : 'Nuevo set'}
+      </h3>
+
+      <div className="grid sm:grid-cols-3 gap-2">
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Nombre del set (p. ej. Guerra de gremio)"
+          autoComplete="off"
+          className="bg-slate-900 border border-slate-800 rounded p-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
+        />
+        <select
+          value={buildId}
+          onChange={(e) => setBuildId(e.target.value)}
+          className="bg-slate-900 border border-slate-800 rounded p-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
+        >
+          <option value="">Sin build asignada</option>
+          {builds.map((b) => (
+            <option key={b.id} value={b.id}>
+              {b.name}
+              {b.isPrimary ? ' (principal)' : ''}
+            </option>
+          ))}
+        </select>
+        <select
+          value={spec}
+          onChange={(e) => setSpec(e.target.value)}
+          className="bg-slate-900 border border-slate-800 rounded p-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
+        >
+          <option value="">Elige un camino…</option>
+          {SPECS.map((s) => (
+            <option key={s.id} value={s.id} disabled={s.pending}>
+              {s.name}
+              {s.pending ? ' — opciones pendientes' : ''}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {!builds.length && (
+        <p className="text-[11px] text-slate-500">
+          No tienes builds registradas todavía. Puedes crear el set igualmente y asignarle una build
+          más adelante desde aquí mismo.
+        </p>
+      )}
+
+      {chosen && (
+        <p className="text-[11px] text-slate-500">
+          {chosen.recommendedStats.length
+            ? `${chosen.recommendedStats.length} atributos recomendados en las líneas 1 a 5, y ${chosen.armorAttunements.length} sintonizaciones propias en la línea 6 de las piezas de armadura.`
+            : 'Este camino todavía no tiene sus listas cargadas.'}
+        </p>
+      )}
+
+      {set && spec && spec !== set.spec && (
+        <p className="text-[11px] text-amber-300">
+          <i className="fa-solid fa-triangle-exclamation mr-1.5"></i>
+          Cambias el camino de un set ya montado: las líneas que guardaste con atributos que el nuevo
+          camino no ofrece se quedarán sin seleccionar hasta que las vuelvas a elegir.
+        </p>
+      )}
+
+      <div className="flex items-center gap-3">
+        <button
+          onClick={() => onSave({ ...(set ?? {}), name, buildId: buildId || null, spec })}
+          disabled={busy || !name.trim()}
+          className="bg-amber-600 hover:bg-amber-500 disabled:bg-slate-800 disabled:text-slate-600 text-white text-sm font-bold py-2 px-4 rounded transition-all"
+        >
+          <i className={`fa-solid ${busy ? 'fa-circle-notch fa-spin' : 'fa-floppy-disk'} mr-2`}></i>
+          {set ? 'Guardar cambios' : 'Crear set'}
+        </button>
+        <button onClick={onCancel} className="text-xs text-slate-500 hover:text-amber-500 transition-all">
+          Cancelar
+        </button>
+      </div>
+    </div>
+  );
+};
+
+/**
+ * The Spanish names, and a way to correct the ones that are wrong.
+ *
+ * Fifteen of the attribute names here were read off real screenshots. The other
+ * fifty-odd are translations of the English list the analyzer publishes, made
+ * by me, and the game is not consistent enough with itself for a pattern drawn
+ * from fifteen to get fifty right. Rather than pretend otherwise, they are
+ * marked and they are editable.
+ *
+ * A correction reaches the screenshot matcher, not just the label. Fixing only
+ * what is drawn would leave a name that goes on failing to match forever, which
+ * is the more annoying half of being wrong.
+ */
+const Translations: React.FC<{
+  corrections: ReadonlyMap<string, string>;
   onDone: () => void;
-}> = ({ seen, onDone }) => {
+}> = ({ corrections, onDone }) => {
   const [open, setOpen] = useState(false);
+  const [filter, setFilter] = useState('');
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
 
-  const lonely = seen.filter((s) => s.seen === 1);
-  if (!lonely.length) return null;
+  const shown = useMemo(() => {
+    const needle = filter.trim().toLowerCase();
+    if (!needle) return CATALOGUE;
+    return CATALOGUE.filter(
+      (e) => e.es.toLowerCase().includes(needle) || e.key.toLowerCase().includes(needle),
+    );
+  }, [filter]);
 
-  const apply = async (stat: string, label: string) => {
-    setBusy(stat);
+  const apply = async (key: string, label: string) => {
+    setBusy(key);
     try {
-      await api(`/gear/stats/${encodeURIComponent(stat)}`, {
-        method: 'PATCH',
+      await api(`/gear/labels/${encodeURIComponent(key)}`, {
+        method: 'PUT',
         body: JSON.stringify({ label }),
       });
       onDone();
@@ -273,54 +520,101 @@ const Cleanup: React.FC<{
   };
 
   return (
-    <div className="mb-4">
+    <div className="mt-4">
       <button
         onClick={() => setOpen(!open)}
         className="text-[11px] text-slate-500 hover:text-amber-500 transition-all flex items-center gap-2"
       >
         <i className={`fa-solid ${open ? 'fa-chevron-down' : 'fa-chevron-right'}`}></i>
-        {lonely.length} {lonely.length === 1 ? 'nombre aparece' : 'nombres aparecen'} una sola vez
+        Nombres en español de los atributos
+        {corrections.size > 0 && <span className="text-slate-600">· {corrections.size} corregidos</span>}
       </button>
 
       {open && (
         <div className="border border-slate-800 rounded p-3 mt-2 space-y-2">
           <p className="text-[11px] text-slate-500">
-            Puede ser un atributo poco común o una mala lectura que alguien guardó. Corrige el
-            nombre y se arregla en todas las piezas del gremio; déjalo vacío y se quita la línea.
+            Los marcados <span className="text-emerald-400">✓</span> se leyeron de capturas reales. El
+            resto son traducciones del listado en inglés y puede que el juego los llame de otra
+            forma: corrígelos aquí y se arregla en todas las piezas del gremio, y también en la
+            lectura de capturas.
           </p>
-          {lonely.map((s) => (
-            <div key={s.stat} className="flex items-center gap-2">
-              <span className="text-xs text-slate-300 flex-1 truncate" title={s.stat}>
-                {s.label}
-              </span>
-              <input
-                value={draft[s.stat] ?? s.label}
-                onChange={(e) => setDraft((prev) => ({ ...prev, [s.stat]: e.target.value }))}
-                autoComplete="off"
-                className="w-56 bg-slate-900 border border-slate-800 rounded p-1.5 text-xs outline-none focus:ring-1 focus:ring-amber-500"
-              />
-              <button
-                onClick={() => apply(s.stat, draft[s.stat] ?? s.label)}
-                disabled={busy === s.stat || (draft[s.stat] ?? s.label) === s.label}
-                className="text-xs text-amber-500 hover:text-amber-400 disabled:text-slate-700 transition-all"
-              >
-                Corregir
-              </button>
-              <button
-                onClick={() => apply(s.stat, '')}
-                disabled={busy === s.stat}
-                className="text-xs text-slate-500 hover:text-red-400 transition-all"
-                title="Quitar esta línea de las piezas que la llevan"
-              >
-                <i className="fa-solid fa-trash-can"></i>
-              </button>
-            </div>
-          ))}
+          <input
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            placeholder="Buscar atributo…"
+            autoComplete="off"
+            className="w-full bg-slate-900 border border-slate-800 rounded p-1.5 text-xs outline-none focus:ring-1 focus:ring-amber-500"
+          />
+          <div className="max-h-80 overflow-y-auto space-y-1.5 pr-1">
+            {shown.map((entry) => {
+              const current = corrections.get(entry.key) ?? entry.es;
+              const value = draft[entry.key] ?? current;
+              return (
+                <div key={entry.key} className="flex items-center gap-2">
+                  <span
+                    className="text-[10px] text-slate-600 w-44 shrink-0 truncate font-mono"
+                    title={entry.key}
+                  >
+                    {entry.key}
+                  </span>
+                  <span className="w-3 text-center shrink-0">
+                    {entry.confirmed && !corrections.has(entry.key) ? (
+                      <i className="fa-solid fa-check text-[9px] text-emerald-500" title="Leído de una captura real"></i>
+                    ) : corrections.has(entry.key) ? (
+                      <i className="fa-solid fa-pen text-[9px] text-amber-500" title="Corregido por el gremio"></i>
+                    ) : null}
+                  </span>
+                  <input
+                    value={value}
+                    onChange={(e) => setDraft((prev) => ({ ...prev, [entry.key]: e.target.value }))}
+                    autoComplete="off"
+                    className="flex-1 bg-slate-900 border border-slate-800 rounded p-1.5 text-xs outline-none focus:ring-1 focus:ring-amber-500"
+                  />
+                  <button
+                    onClick={() => apply(entry.key, value)}
+                    disabled={busy === entry.key || value === current}
+                    className="text-xs text-amber-500 hover:text-amber-400 disabled:text-slate-700 transition-all"
+                  >
+                    Guardar
+                  </button>
+                  {corrections.has(entry.key) && (
+                    <button
+                      onClick={() => apply(entry.key, '')}
+                      disabled={busy === entry.key}
+                      className="text-xs text-slate-500 hover:text-red-400 transition-all"
+                      title="Volver al nombre por defecto"
+                    >
+                      <i className="fa-solid fa-rotate-left"></i>
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>
   );
 };
+
+/**
+ * Every entry that exists anywhere, in one flat list for the corrections panel.
+ *
+ * Gathered by walking every path's pools rather than importing the three arrays
+ * directly, so a name added to any of them shows up here to be corrected
+ * without anybody remembering to add it in two places.
+ */
+const CATALOGUE: CatalogEntry[] = (() => {
+  const seen = new Map<string, CatalogEntry>();
+  for (const spec of SPECS) {
+    for (const position of [1, 6]) {
+      for (const slot of ['leftWeapon', 'helm'] as GearSlot[]) {
+        for (const { entry } of optionsFor(spec, slot, position)) seen.set(entry.key, entry);
+      }
+    }
+  }
+  return [...seen.values()].sort((a, b) => a.key.localeCompare(b.key));
+})();
 
 const STATE_LOOK: Record<string, { text: string; cls: string }> = {
   frozen: { text: 'reenviada', cls: 'border-slate-700 text-slate-400' },
@@ -332,7 +626,6 @@ const STATE_LOOK: Record<string, { text: string; cls: string }> = {
 const SlotCard: React.FC<{
   slot: GearSlot;
   piece?: GearPiece;
-  ceilings: GearCeiling[];
   active: boolean;
   onPick: () => void;
 }> = ({ slot, piece, active, onPick }) => {
@@ -380,26 +673,72 @@ const SlotCard: React.FC<{
   );
 };
 
+/** One line's dropdown: everything the path allows, the good ones first. */
+const StatSelect: React.FC<{
+  options: Option[];
+  value: string;
+  corrections: ReadonlyMap<string, string>;
+  onChange: (key: string) => void;
+  unsure?: boolean;
+}> = ({ options, value, corrections, onChange, unsure }) => {
+  const good = options.filter((o) => o.recommended);
+  const rest = options.filter((o) => !o.recommended);
+  const name = (o: Option) => corrections.get(o.entry.key) ?? o.entry.es;
+  // A line saved under a name the path does not offer -- an old free-text one,
+  // or one left behind by a respec. Shown as an option of its own so the field
+  // is not silently blank and so it does not vanish on the next save.
+  const stray = value && !options.some((o) => o.entry.key === value) ? value : null;
+
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className={`flex-1 min-w-[220px] bg-slate-900 border rounded p-1.5 text-xs outline-none focus:ring-1 focus:ring-amber-500 ${
+        unsure ? 'border-amber-600 text-amber-200' : 'border-slate-800'
+      }`}
+    >
+      <option value="">— sin atributo —</option>
+      {stray && <option value={stray}>{stray} (fuera de este camino)</option>}
+      {good.length > 0 && (
+        <optgroup label="Recomendados para este camino">
+          {good.map((o) => (
+            <option key={o.entry.key} value={o.entry.key}>
+              {name(o)}
+            </option>
+          ))}
+        </optgroup>
+      )}
+      <optgroup label={good.length ? 'Los demás' : 'Disponibles'}>
+        {rest.map((o) => (
+          <option key={o.entry.key} value={o.entry.key}>
+            {name(o)}
+          </option>
+        ))}
+      </optgroup>
+    </select>
+  );
+};
+
 /**
  * One piece: what it has, and what can still be done to it.
  *
  * The bar the game draws is not asked for. Nobody can eyeball a bar as a
  * percentage, and it is not needed by hand: with the ceiling known, the value
- * gives the share on its own. The bar is what the screenshot reader will
- * contribute later, and it is what rescues a line the game clipped.
+ * gives the share on its own. The bar is what the screenshot reader
+ * contributes, and it is what rescues a line the game clipped.
  */
 const PieceEditor: React.FC<{
   slot: GearSlot;
   piece?: GearPiece;
+  spec: Spec | undefined;
   ceilings: GearCeiling[];
-  suggestions: VocabEntry[];
-  trusted: VocabEntry[];
+  corrections: ReadonlyMap<string, string>;
   canEdit: boolean;
   busy: boolean;
   onSave: (body: unknown) => void;
   onRemove: () => void;
   onClose: () => void;
-}> = ({ slot, piece, ceilings, suggestions, trusted, canEdit, busy, onSave, onRemove, onClose }) => {
+}> = ({ slot, piece, spec, ceilings, corrections, canEdit, busy, onSave, onRemove, onClose }) => {
   const [name, setName] = useState(piece?.name ?? '');
   const [level, setLevel] = useState(piece?.level ? String(piece.level) : '91');
   const [relayed, setRelayed] = useState(piece?.relayed ?? false);
@@ -416,7 +755,9 @@ const PieceEditor: React.FC<{
    *
    * It fills the form rather than saving, because the form is the review: the
    * engine confuses this font's 1 with a 7 often enough that anything it reads
-   * should pass under a human eye before it becomes somebody's gear.
+   * should pass under a human eye before it becomes somebody's gear. What it
+   * can no longer do is invent an attribute -- every name it produces is one of
+   * the path's own, and the ones it was not sure about are marked.
    */
   const scan = async (blob: Blob) => {
     setNote(null);
@@ -428,7 +769,7 @@ const PieceEditor: React.FC<{
         i.onerror = () => rej(new Error('No se pudo abrir la imagen'));
         i.src = URL.createObjectURL(blob);
       });
-      const got = await readPiece(img, setReading, ceilings, trusted);
+      const got = await readPiece(img, setReading, { ceilings, spec, slot, overrides: corrections });
       if (!got.lines.length) throw new Error('No encontré líneas de atributo. ¿Es la pantalla de Afinación?');
 
       if (got.name) setName(got.name);
@@ -440,13 +781,14 @@ const PieceEditor: React.FC<{
       for (const line of got.lines) {
         next[line.position - 1] = {
           position: line.position,
-          label: line.label,
+          key: line.key ?? '',
           value: line.value === null ? '' : String(line.value),
           unit: line.unit,
           committed: line.committed,
           fill: line.fill,
           hue: line.hue,
           suspect: line.suspect,
+          unsure: !line.sure,
           ...(line.position === 6 ? { tuning: line.tuning ?? 'normal' } : {}),
         };
       }
@@ -454,12 +796,16 @@ const PieceEditor: React.FC<{
 
       const clipped = got.lines.filter((l) => l.truncated).length;
       const odd = got.lines.filter((l) => l.suspect !== null).length;
+      const shaky = got.lines.filter((l) => !l.sure).length;
       setNote(
         [
           `Leídas ${got.lines.length} líneas.`,
           got.relayed ? 'La pieza es reenviada: sus líneas están congeladas.' : '',
           clipped ? `${clipped} venía recortada por el juego: su valor sale de la barra.` : '',
           odd ? `${odd} no cuadra con su barra, están marcadas.` : '',
+          shaky
+            ? `${shaky} se parecía a más de un atributo del camino: elegí el más cercano y lo dejé marcado.`
+            : '',
           'Revisa antes de guardar.',
         ]
           .filter(Boolean)
@@ -475,7 +821,7 @@ const PieceEditor: React.FC<{
   // Pegar es como llega una captura de verdad: se toma con el teclado y se
   // suelta aquí, sin que ningún fichero toque el disco.
   useEffect(() => {
-    if (!canEdit) return;
+    if (!canEdit || !spec) return;
     const onPaste = (event: ClipboardEvent) => {
       for (const item of event.clipboardData?.items ?? []) {
         if (!item.type.startsWith('image/')) continue;
@@ -489,10 +835,25 @@ const PieceEditor: React.FC<{
     };
     window.addEventListener('paste', onPaste);
     return () => window.removeEventListener('paste', onPaste);
-  }, [canEdit, ceilings, trusted]);
+  }, [canEdit, spec, ceilings, corrections]);
 
   const put = (at: number, patch: Partial<Draft>) =>
     setRows((prev) => prev.map((r, i) => (i === at ? { ...r, ...patch } : r)));
+
+  const optionOf = (row: Draft, key: string): CatalogEntry | undefined =>
+    key ? optionsFor(spec, slot, row.position).find((o) => o.entry.key === key)?.entry : undefined;
+
+  /**
+   * Choosing an attribute takes its unit with it, where the catalogue knows one.
+   *
+   * The unit belongs to the attribute and not to the roll: Tasa Crítica is a
+   * percentage however it was typed, and leaving that to be set by hand is one
+   * more field to get wrong on every line of every piece.
+   */
+  const pick = (at: number, key: string) => {
+    const entry = optionOf(rows[at], key);
+    put(at, { key, unsure: false, ...(entry?.unit ? { unit: entry.unit } : {}) });
+  };
 
   // Only one of lines 2..5 can ever be the committed one, so choosing is
   // choosing -- picking a second silently clears the first, exactly as the
@@ -515,10 +876,11 @@ const PieceEditor: React.FC<{
         days.trim() === '' ? null : new Date(Date.now() + Number(days) * 86400000).toISOString(),
       capturedAt: new Date().toISOString(),
       lines: rows
-        .filter((r) => r.label.trim())
+        .filter((r) => r.key)
         .map((r) => ({
           position: r.position,
-          label: r.label.trim(),
+          key: r.key,
+          label: corrections.get(r.key) ?? optionOf(r, r.key)?.es ?? r.key,
           value: r.value.trim() === '' ? null : Number(r.value.replace(',', '.')),
           unit: r.unit,
           committed: r.committed,
@@ -549,18 +911,25 @@ const PieceEditor: React.FC<{
         </div>
       </div>
 
-      {piece && <Advice piece={piece} ceilings={ceilings} />}
+      {piece && <Advice piece={piece} ceilings={ceilings} corrections={corrections} />}
 
       {canEdit && (
         <>
           <div className="flex items-center gap-3 flex-wrap border border-dashed border-slate-800 rounded p-2.5">
-            <label className="text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 py-1.5 px-3 rounded cursor-pointer transition-all">
+            <label
+              className={`text-xs py-1.5 px-3 rounded transition-all ${
+                spec
+                  ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 cursor-pointer'
+                  : 'bg-slate-900 text-slate-600 cursor-not-allowed'
+              }`}
+            >
               <i className="fa-solid fa-image mr-1.5"></i>
               Leer captura
               <input
                 type="file"
                 accept="image/*"
                 className="hidden"
+                disabled={!spec}
                 onChange={(e) => {
                   const file = e.target.files?.[0];
                   if (file) void scan(file);
@@ -569,7 +938,9 @@ const PieceEditor: React.FC<{
               />
             </label>
             <span className="text-[11px] text-slate-500">
-              {reading ? (
+              {!spec ? (
+                'Elige el camino del set para poder leer capturas: sin él no hay lista contra la que comprobar lo leído.'
+              ) : reading ? (
                 <>
                   <i className="fa-solid fa-circle-notch fa-spin mr-1.5"></i>
                   {reading}
@@ -622,12 +993,6 @@ const PieceEditor: React.FC<{
             Pieza reenviada de un set anterior — todas sus líneas quedan congeladas
           </label>
 
-          <datalist id="gear-stats">
-            {suggestions.map((s) => (
-              <option key={s.name} value={s.name} />
-            ))}
-          </datalist>
-
           <div className="space-y-1.5">
             {rows.map((row, at) => (
               <div key={at} className="flex items-center gap-1.5 flex-wrap">
@@ -649,17 +1014,12 @@ const PieceEditor: React.FC<{
                 >
                   {row.position}
                 </span>
-                <input
-                  list="gear-stats"
-                  value={row.label}
-                  onChange={(e) => put(at, { label: e.target.value })}
-                  placeholder="Atributo"
-                  // The browser keeps its own history of what was typed into a
-                  // field and offers it alongside the list, which is why a
-                  // misreading went on being suggested after it was cleaned out
-                  // of the database. Only the guild's vocabulary belongs here.
-                  autoComplete="off"
-                  className="flex-1 min-w-[150px] bg-slate-900 border border-slate-800 rounded p-1.5 text-xs outline-none focus:ring-1 focus:ring-amber-500"
+                <StatSelect
+                  options={optionsFor(spec, slot, row.position)}
+                  value={row.key}
+                  corrections={corrections}
+                  unsure={row.unsure}
+                  onChange={(key) => pick(at, key)}
                 />
                 <input
                   value={row.value}
@@ -673,7 +1033,7 @@ const PieceEditor: React.FC<{
                     })
                   }
                   placeholder="valor"
-                  title={row.suspect != null ? `La barra dice ${row.suspect}. Clic para aceptarlo.` : undefined}
+                  title={row.suspect != null ? `La barra dice ${row.suspect}. Doble clic para aceptarlo.` : undefined}
                   onDoubleClick={() =>
                     row.suspect != null && put(at, { value: String(row.suspect), suspect: null })
                   }
@@ -681,14 +1041,23 @@ const PieceEditor: React.FC<{
                     row.suspect != null ? 'border-amber-600 text-amber-300' : 'border-slate-800'
                   }`}
                 />
-                <select
-                  value={row.unit}
-                  onChange={(e) => put(at, { unit: e.target.value as GearLine['unit'] })}
-                  className="bg-slate-900 border border-slate-800 rounded p-1.5 text-xs outline-none"
-                >
-                  <option value="flat">plano</option>
-                  <option value="percent">%</option>
-                </select>
+                {optionOf(row, row.key)?.unit ? (
+                  // The catalogue settles this attribute's unit, so it is shown
+                  // rather than asked: a per-piece answer would have half the
+                  // guild's readings of one attribute disagreeing about it.
+                  <span className="w-14 text-[10px] text-slate-600 text-center">
+                    {row.unit === 'percent' ? '%' : 'plano'}
+                  </span>
+                ) : (
+                  <select
+                    value={row.unit}
+                    onChange={(e) => put(at, { unit: e.target.value as GearLine['unit'] })}
+                    className="w-14 bg-slate-900 border border-slate-800 rounded p-1.5 text-xs outline-none"
+                  >
+                    <option value="flat">plano</option>
+                    <option value="percent">%</option>
+                  </select>
+                )}
                 {row.position === 6 ? (
                   <select
                     value={row.tuning ?? 'normal'}
@@ -743,7 +1112,11 @@ const PieceEditor: React.FC<{
 };
 
 /** What there is to say about this piece, which depends entirely on its state. */
-const Advice: React.FC<{ piece: GearPiece; ceilings: GearCeiling[] }> = ({ piece, ceilings }) => {
+const Advice: React.FC<{
+  piece: GearPiece;
+  ceilings: GearCeiling[];
+  corrections: ReadonlyMap<string, string>;
+}> = ({ piece, ceilings, corrections }) => {
   const state = stateOf(piece);
   const days = daysUntil(piece.tuneReadyAt);
   const sixth = piece.lines.filter((l) => l.position === 6).map((l) => read(l, piece.level, ceilings));
@@ -763,9 +1136,9 @@ const Advice: React.FC<{ piece: GearPiece; ceilings: GearCeiling[] }> = ({ piece
   return (
     <div className="space-y-2">
       {done ? (
-        <Committed reading={read(done, piece.level, ceilings)} days={days} />
+        <Committed reading={read(done, piece.level, ceilings)} days={days} corrections={corrections} />
       ) : (
-        <Open readings={candidates(piece, ceilings)} days={days} />
+        <Open readings={candidates(piece, ceilings)} days={days} corrections={corrections} />
       )}
       {sixth.length > 0 && (
         <div className="border border-slate-800 rounded p-3">
@@ -773,7 +1146,7 @@ const Advice: React.FC<{ piece: GearPiece; ceilings: GearCeiling[] }> = ({ piece
             Línea 6 — sin límite de sintonizaciones, siempre conviene empujarla
           </p>
           {sixth.map((r) => (
-            <Row key={`${r.line.stat}-${r.line.tuning}`} reading={r} />
+            <Row key={`${r.line.stat}-${r.line.tuning}`} reading={r} corrections={corrections} />
           ))}
         </div>
       )}
@@ -781,7 +1154,11 @@ const Advice: React.FC<{ piece: GearPiece; ceilings: GearCeiling[] }> = ({ piece
   );
 };
 
-const Committed: React.FC<{ reading: Reading; days: number | null }> = ({ reading, days }) => (
+const Committed: React.FC<{
+  reading: Reading;
+  days: number | null;
+  corrections: ReadonlyMap<string, string>;
+}> = ({ reading, days, corrections }) => (
   <div className="border border-amber-800/50 bg-amber-500/5 rounded p-3">
     <p className="text-[11px] text-amber-400 mb-1.5">
       <i className="fa-solid fa-anchor mr-1.5"></i>
@@ -789,11 +1166,15 @@ const Committed: React.FC<{ reading: Reading; days: number | null }> = ({ readin
       {days !== null &&
         (days === 0 ? ' Puedes volver a tirarla ya.' : ` Puedes volver a tirarla en ${days} días.`)}
     </p>
-    <Row reading={reading} />
+    <Row reading={reading} corrections={corrections} />
   </div>
 );
 
-const Open: React.FC<{ readings: Reading[]; days: number | null }> = ({ readings, days }) => {
+const Open: React.FC<{
+  readings: Reading[];
+  days: number | null;
+  corrections: ReadonlyMap<string, string>;
+}> = ({ readings, days, corrections }) => {
   const usable = readings.filter((r) => r.margin !== null);
   return (
     <div className="border border-emerald-800/50 bg-emerald-500/5 rounded p-3">
@@ -806,10 +1187,10 @@ const Open: React.FC<{ readings: Reading[]; days: number | null }> = ({ readings
         <>
           <p className="text-[10px] text-slate-500 mb-1">
             Ordenadas por lo lejos que están de su propio tope. Mide sitio para mejorar, no cuánto
-            te conviene cada atributo: eso lo sabes tú.
+            te conviene cada atributo: para eso está lo que el camino recomienda.
           </p>
           {readings.map((r) => (
-            <Row key={r.line.position} reading={r} />
+            <Row key={r.line.position} reading={r} corrections={corrections} />
           ))}
         </>
       ) : (
@@ -822,12 +1203,15 @@ const Open: React.FC<{ readings: Reading[]; days: number | null }> = ({ readings
   );
 };
 
-const Row: React.FC<{ reading: Reading }> = ({ reading }) => {
+const Row: React.FC<{ reading: Reading; corrections: ReadonlyMap<string, string> }> = ({
+  reading,
+  corrections,
+}) => {
   const { line, ceiling, value, share, margin } = reading;
   return (
     <div className="flex items-center gap-2 py-0.5 text-xs">
       <span className="flex-1 truncate text-slate-300">
-        {line.label ?? line.stat}
+        {labelFor(line, corrections)}
         {line.truncated && (
           <span className="text-[9px] text-amber-600 ml-1.5" title="El juego recortó esta línea; el valor sale de la barra">
             recuperada

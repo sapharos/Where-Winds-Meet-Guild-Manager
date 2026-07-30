@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { pool, GUILD_ID } from './db.js';
+import { LEGACY_SPANISH, SPEC_IDS, allowed } from './gearCatalog.js';
 
 // The eight places a piece can go. Mirrored by GEAR_SLOTS in types.ts.
 const SLOTS = [
@@ -58,7 +59,7 @@ export async function mayEditGear(req, playerId) {
 
 export async function listGear(playerId = null) {
   const { rows } = await pool.query(
-    `SELECT id, player_id AS "playerId", slot, name, level, relayed,
+    `SELECT id, player_id AS "playerId", set_id AS "setId", slot, name, level, relayed,
             tune_ready_at AS "tuneReadyAt", lines,
             captured_at AS "capturedAt", updated_at AS "updatedAt"
        FROM gear_pieces
@@ -67,6 +68,121 @@ export async function listGear(playerId = null) {
     [GUILD_ID, playerId],
   );
   return rows;
+}
+
+/* ------------------------------------------------------------------- sets */
+
+export async function listGearSets(playerId = null) {
+  const { rows } = await pool.query(
+    `SELECT id, player_id AS "playerId", build_id AS "buildId", name, spec,
+            is_primary AS "isPrimary", updated_at AS "updatedAt"
+       FROM gear_sets
+      WHERE guild_id = $1 AND ($2::text IS NULL OR player_id = $2)
+      ORDER BY is_primary DESC, name`,
+    [GUILD_ID, playerId],
+  );
+  return rows;
+}
+
+const MAX_SETS = 12;
+
+/**
+ * Create or rename one set.
+ *
+ * The path may be left empty, which is not laxness: every set that existed
+ * before this feature was migrated without one, because nobody can be told
+ * which of the nine they had been aiming at and inventing one would put wrong
+ * recommendations in front of them. A set without a path still holds pieces --
+ * it simply cannot read a screenshot, since there is no pool to match against.
+ */
+export async function saveGearSet(playerId, set) {
+  const spec = String(set?.spec ?? '').trim();
+  if (spec && !SPEC_IDS.includes(spec)) {
+    throw Object.assign(new Error('ese camino no existe'), { status: 400 });
+  }
+
+  const id = set?.id || randomUUID();
+  const name = String(set?.name ?? '').trim().slice(0, 80) || 'Sin nombre';
+  const buildId = set?.buildId ? String(set.buildId) : null;
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const { rows: mine } = await client.query(
+      `SELECT id, is_primary AS "isPrimary" FROM gear_sets WHERE guild_id = $1 AND player_id = $2`,
+      [GUILD_ID, playerId],
+    );
+    const existing = mine.find((r) => r.id === id);
+    if (mine.length >= MAX_SETS && !existing) {
+      throw Object.assign(new Error(`como mucho ${MAX_SETS} sets por miembro`), { status: 400 });
+    }
+
+    // The first set anybody makes is the one that opens, without them having to
+    // say so. After that it only changes deliberately -- and a caller that says
+    // nothing about it leaves it as it was, rather than quietly demoting the
+    // set it is editing and leaving the member with none to open.
+    const primary =
+      set?.isPrimary === undefined
+        ? existing?.isPrimary ?? mine.length === 0
+        : set.isPrimary === true || mine.length === 0;
+    if (primary) {
+      await client.query(
+        `UPDATE gear_sets SET is_primary = false WHERE guild_id = $1 AND player_id = $2`,
+        [GUILD_ID, playerId],
+      );
+    }
+
+    await client.query(
+      `INSERT INTO gear_sets (id, guild_id, player_id, build_id, name, spec, is_primary)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT (id) DO UPDATE
+          SET build_id = EXCLUDED.build_id, name = EXCLUDED.name, spec = EXCLUDED.spec,
+              is_primary = EXCLUDED.is_primary, updated_at = now()`,
+      [id, GUILD_ID, playerId, buildId, name, spec, primary],
+    );
+
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+
+  return { id, name, spec };
+}
+
+/** Deleting a set takes its eight pieces with it, by the foreign key. */
+export async function deleteGearSet(playerId, setId) {
+  const { rowCount } = await pool.query(
+    `DELETE FROM gear_sets WHERE guild_id = $1 AND player_id = $2 AND id = $3`,
+    [GUILD_ID, playerId, setId],
+  );
+  if (!rowCount) throw Object.assign(new Error('ese set no existe'), { status: 404 });
+
+  // Something has to open next, and leaving nobody primary means the sheet
+  // opens on nothing at all.
+  await pool.query(
+    `UPDATE gear_sets SET is_primary = true
+      WHERE guild_id = $1 AND player_id = $2
+        AND NOT EXISTS (SELECT 1 FROM gear_sets p
+                         WHERE p.guild_id = $1 AND p.player_id = $2 AND p.is_primary)
+        AND id = (SELECT id FROM gear_sets
+                   WHERE guild_id = $1 AND player_id = $2 ORDER BY updated_at DESC LIMIT 1)`,
+    [GUILD_ID, playerId],
+  );
+  return { removed: setId };
+}
+
+/** The set, if it is this member's. Everything writing a piece goes through it. */
+async function ownedSet(playerId, setId) {
+  const { rows } = await pool.query(
+    `SELECT id, spec FROM gear_sets WHERE guild_id = $1 AND player_id = $2 AND id = $3`,
+    [GUILD_ID, playerId, setId],
+  );
+  if (!rows.length) throw Object.assign(new Error('ese set no existe'), { status: 404 });
+  return rows[0];
 }
 
 /**
@@ -178,6 +294,40 @@ export async function renameStat(fromKey, toLabel) {
   }
 }
 
+/**
+ * The Spanish names the guild has corrected, by catalogue key.
+ *
+ * Small enough to send with every load of the gear sheet, and it has to be:
+ * the screenshot matcher needs them, not just the labels. A correction that
+ * only fixed the display would leave the reader hunting for a name the game
+ * never prints.
+ */
+export async function listStatOverrides() {
+  const { rows } = await pool.query(
+    `SELECT stat_key AS "key", label FROM gear_stat_labels WHERE guild_id = $1 ORDER BY stat_key`,
+    [GUILD_ID],
+  );
+  return rows;
+}
+
+/** Correct one attribute's Spanish name, or clear the correction. */
+export async function setStatOverride(key, label) {
+  const clean = String(label ?? '').trim().slice(0, 160);
+  if (!String(key ?? '').trim()) {
+    throw Object.assign(new Error('falta el atributo'), { status: 400 });
+  }
+  if (!clean) {
+    await pool.query(`DELETE FROM gear_stat_labels WHERE guild_id = $1 AND stat_key = $2`, [GUILD_ID, key]);
+    return { key, label: null };
+  }
+  await pool.query(
+    `INSERT INTO gear_stat_labels (guild_id, stat_key, label) VALUES ($1, $2, $3)
+     ON CONFLICT (guild_id, stat_key) DO UPDATE SET label = EXCLUDED.label, updated_at = now()`,
+    [GUILD_ID, key, clean],
+  );
+  return { key, label: clean };
+}
+
 export async function listCeilings() {
   const { rows } = await pool.query(
     `SELECT stat, level, ceiling::float8 AS ceiling, samples
@@ -218,25 +368,51 @@ const keyOf = (name) =>
     .trim();
 
 /**
- * One attribute line, trimmed to what the schema promises.
+ * One attribute line, trimmed to what the schema promises and checked against
+ * the closed list.
  *
- * A line with neither a value nor a bar is dropped: it says nothing, and
- * keeping it would only pad the piece with rows that can never be advised on.
+ * The check is the point of this whole change, and it belongs here rather than
+ * only in the form. A closed list that only the client respects is not a closed
+ * list -- it is a suggestion, and what went wrong before was precisely a name
+ * nobody could match reaching the database and then pulling later readings onto
+ * itself. So the attribute is named by its catalogue key, and a key that does
+ * not belong on this line of this piece on this path is refused rather than
+ * stored: loudly, because the client cannot produce one by accident, so it
+ * means something is actually wrong.
+ *
+ * A line with neither a value nor a bar is still dropped quietly: it says
+ * nothing, and keeping it would only pad the piece with rows that can never be
+ * advised on.
  */
-function cleanLine(line) {
+function cleanLine(line, spec, slot) {
   const position = num(line?.position, 1, 6);
   if (position === null) return null;
 
   const value = line?.value === null || line?.value === undefined ? null : num(line.value, -1e9, 1e9);
   const fill = line?.fill === null || line?.fill === undefined ? null : num(line.fill, 0, 1);
-  const label = String(line?.label ?? line?.stat ?? '').trim().slice(0, 120);
-  const stat = keyOf(label);
-  if (!stat || (value === null && fill === null)) return null;
+
+  const asked = String(line?.key ?? '').trim();
+  if (!asked) return null;
+  if (value === null && fill === null) return null;
+
+  const pool = allowed(spec, slot, Math.round(position));
+  const key = pool.find((k) => k === asked) ?? pool.find((k) => keyOf(k) === keyOf(asked));
+  if (!key) {
+    throw Object.assign(
+      new Error(`"${asked}" no está entre las opciones de la línea ${Math.round(position)}`),
+      { status: 400 },
+    );
+  }
 
   const out = {
     position: Math.round(position),
-    stat,
-    label,
+    // Folded from the English name, so a Spanish and an English client file the
+    // same attribute under one key -- which is what the shared ceilings need.
+    stat: keyOf(key),
+    // The name the member saw. Kept for the record, never matched against: the
+    // catalogue supplies what gets drawn, so correcting a translation fixes
+    // every piece already recorded without rewriting any of them.
+    label: String(line?.label ?? key).trim().slice(0, 120),
     value,
     unit: line?.unit === 'percent' ? 'percent' : 'flat',
     fill,
@@ -263,13 +439,13 @@ function cleanLine(line) {
  * piece claiming two would quietly tell a member that a shut line is still
  * open -- which is the one mistake in this feature that cannot be undone.
  */
-function cleanPiece(piece) {
+function cleanPiece(piece, spec) {
   if (!SLOTS.includes(piece?.slot)) {
     throw Object.assign(new Error('unknown gear slot'), { status: 400 });
   }
 
   const lines = (Array.isArray(piece.lines) ? piece.lines : [])
-    .map(cleanLine)
+    .map((line) => cleanLine(line, spec, piece.slot))
     .filter(Boolean)
     .slice(0, MAX_LINES);
 
@@ -334,22 +510,24 @@ async function learn(client, piece) {
 }
 
 /**
- * Record one piece, replacing whatever was in that slot.
+ * Record one piece, replacing whatever was in that slot of that set.
  *
- * One row per slot rather than a history: you wear one helm, and every question
- * this answers is about what to do with it next.
+ * One row per slot per set rather than a history: within one set you wear one
+ * helm, and every question this answers is about what to do with it next. The
+ * same member's other set has its own.
  */
-export async function saveGearPiece(playerId, piece) {
-  const row = cleanPiece(piece ?? {});
+export async function saveGearPiece(playerId, setId, piece) {
+  const set = await ownedSet(playerId, setId);
+  const row = cleanPiece(piece ?? {}, set.spec);
 
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     await client.query(
       `INSERT INTO gear_pieces
-         (id, guild_id, player_id, slot, name, level, relayed, tune_ready_at, lines, captured_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, now())
-       ON CONFLICT (guild_id, player_id, slot) DO UPDATE
+         (id, guild_id, player_id, set_id, slot, name, level, relayed, tune_ready_at, lines, captured_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, now())
+       ON CONFLICT (set_id, slot) DO UPDATE
           SET name = EXCLUDED.name, level = EXCLUDED.level, relayed = EXCLUDED.relayed,
               tune_ready_at = EXCLUDED.tune_ready_at, lines = EXCLUDED.lines,
               captured_at = EXCLUDED.captured_at, updated_at = now()`,
@@ -357,6 +535,7 @@ export async function saveGearPiece(playerId, piece) {
         row.id,
         GUILD_ID,
         playerId,
+        setId,
         row.slot,
         row.name,
         row.level,
@@ -367,6 +546,7 @@ export async function saveGearPiece(playerId, piece) {
       ],
     );
     await learn(client, row);
+    await client.query(`UPDATE gear_sets SET updated_at = now() WHERE id = $1`, [setId]);
     await client.query('COMMIT');
   } catch (err) {
     await client.query('ROLLBACK');
@@ -378,11 +558,65 @@ export async function saveGearPiece(playerId, piece) {
   return { saved: row.slot, lines: row.lines.length };
 }
 
-export async function deleteGearPiece(playerId, slot) {
+export async function deleteGearPiece(playerId, setId, slot) {
+  await ownedSet(playerId, setId);
   const { rowCount } = await pool.query(
-    `DELETE FROM gear_pieces WHERE guild_id = $1 AND player_id = $2 AND slot = $3`,
-    [GUILD_ID, playerId, slot],
+    `DELETE FROM gear_pieces WHERE guild_id = $1 AND set_id = $2 AND slot = $3`,
+    [GUILD_ID, setId, slot],
   );
   if (!rowCount) throw Object.assign(new Error('esa pieza no existe'), { status: 404 });
   return { removed: slot };
+}
+
+/**
+ * Carry pieces recorded before the catalogue onto the keys everything now uses.
+ *
+ * Those lines were filed under folded Spanish -- "ataque fisico maximo" -- and
+ * everything now keys off folded English. Left alone they would read as
+ * uncatalogued attributes and, worse, their hard-won ceilings would sit under
+ * keys nothing looks up again.
+ *
+ * Only the fifteen names that were read off real screenshots are mapped.
+ * Everything else people typed was free text and cannot be moved without
+ * guessing which attribute somebody meant, so it stays where it is and shows up
+ * as uncatalogued for its owner to pick again -- which is one dropdown, and
+ * honest, where a guess would be neither.
+ *
+ * Runs on every boot. After the first there is nothing left matching, so it
+ * costs two indexed queries that update no rows.
+ */
+export async function migrateLegacyStats() {
+  const pairs = Object.entries(LEGACY_SPANISH).map(([es, key]) => [keyOf(es), keyOf(key), key]);
+  let moved = 0;
+
+  for (const [from, to, label] of pairs) {
+    if (from === to) continue;
+
+    const { rowCount } = await pool.query(
+      `UPDATE gear_pieces SET lines = COALESCE((
+         SELECT jsonb_agg(
+                  CASE WHEN line->>'stat' = $2
+                       THEN line || jsonb_build_object('stat', $3::text, 'label', $4::text)
+                       ELSE line END)
+           FROM jsonb_array_elements(lines) line
+       ), '[]'::jsonb), updated_at = now()
+       WHERE guild_id = $1
+         AND lines @> jsonb_build_array(jsonb_build_object('stat', $2::text))`,
+      [GUILD_ID, from, to, label],
+    );
+    moved += rowCount;
+
+    // The ceilings move with them. They are the guild's own measurements and
+    // re-learning them would cost everybody another upload each.
+    await pool.query(
+      `UPDATE gear_stat_ceilings SET stat = $3
+        WHERE guild_id = $1 AND stat = $2
+          AND NOT EXISTS (SELECT 1 FROM gear_stat_ceilings c
+                           WHERE c.guild_id = $1 AND c.stat = $3 AND c.level = gear_stat_ceilings.level)`,
+      [GUILD_ID, from, to],
+    );
+    await pool.query(`DELETE FROM gear_stat_ceilings WHERE guild_id = $1 AND stat = $2`, [GUILD_ID, from]);
+  }
+
+  if (moved) console.log(`Gear: ${moved} pieces re-keyed onto the attribute catalogue`);
 }

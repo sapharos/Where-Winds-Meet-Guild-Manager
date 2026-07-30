@@ -1,12 +1,7 @@
-import type { GearCeiling } from '../types';
-import { KNOWN_STATS, statKey } from './gear';
-
-/** A name the guild already uses, and its unit where anyone has seen one. */
-export interface VocabEntry {
-  name: string;
-  unit?: 'flat' | 'percent';
-}
-export type Vocabulary = readonly VocabEntry[];
+import type { GearCeiling, GearSlot } from '../types';
+import { statKey } from './gear';
+import { Option, Spec, optionsFor } from './gearCatalog';
+import { snap } from './gearMatch';
 
 /**
  * Reading a piece off the game's Afinación screen.
@@ -24,7 +19,25 @@ const TESSERACT = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesserac
 
 export interface ReadLine {
   position: number;
+  /**
+   * The catalogue entry this line was snapped onto, by its English key.
+   *
+   * Null only when the row had no readable name at all. Anything with letters
+   * in it resolves to one of the pool's entries, because the pool is closed and
+   * "none of these" is not an available answer -- see `sure` for how much that
+   * answer is worth.
+   */
+  key: string | null;
+  /** The Spanish name of that entry, which is what the member sees. */
   label: string;
+  /**
+   * The reading landed on its entry cleanly and with daylight to the next one.
+   *
+   * False does not mean wrong, it means unchecked: the line still holds a real
+   * attribute from the real pool, and the form marks it so somebody confirms
+   * before it becomes their gear.
+   */
+  sure: boolean;
   value: number | null;
   unit: 'flat' | 'percent';
   fill: number | null;
@@ -201,51 +214,6 @@ function slice(
 
 const tidy = (text: string) => text.replace(/\s+/g, ' ').trim();
 
-/** How many single-character edits separate two names. */
-function distance(a: string, b: string): number {
-  if (a === b) return 0;
-  if (!a || !b) return Math.max(a.length, b.length);
-  const rows = Array.from({ length: b.length + 1 }, (_, i) => [i, ...Array(a.length).fill(0)]);
-  for (let j = 1; j <= a.length; j++) rows[0][j] = j;
-  for (let i = 1; i <= b.length; i++) {
-    for (let j = 1; j <= a.length; j++) {
-      rows[i][j] = Math.min(
-        rows[i - 1][j] + 1,
-        rows[i][j - 1] + 1,
-        rows[i - 1][j - 1] + (a[j - 1] === b[i - 1] ? 0 : 1),
-      );
-    }
-  }
-  return rows[b.length][a.length];
-}
-
-/**
- * How much damage a name of this length may carry and still be recognised.
- *
- * Counted in edits rather than as a share of the name, which was the mistake
- * before. A share treats the same single misread letter as trivial in a long
- * name and fatal in a short one: "Habiidad" inside a fifty-six character
- * attribute scores 0.98 and passed, while the engine's reading of
- * "[Girar]Impulso" -- "llmpulso", two lowercase L's that look like capital I's
- * -- scored 0.875 on eight letters and was rejected, leaving a stat nobody
- * could match.
- *
- * Two edits are allowed always, plus one for every dozen characters. Two rather
- * than one because the damage clusters at the ends of a name, where the
- * bracketed marker and the first capital sit: that one reading lost two
- * characters there. A clean reading is never at risk from the wider floor,
- * since it sits at distance nought from its own name and the winner must be
- * strictly closer than the runner-up.
- */
-const allowance = (length: number) => Math.max(2, Math.floor(length / 12));
-
-const bare = (s: string) =>
-  s
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, '');
-
 /**
  * One row's text, pulled apart into an attribute and what it rolled.
  *
@@ -255,7 +223,12 @@ const bare = (s: string) =>
  * bar is still there, and the value comes back from it once the attribute's
  * ceiling is known.
  */
-function parseRow(raw: string, position: number, vocabulary: Vocabulary): ReadLine | null {
+function parseRow(
+  raw: string,
+  position: number,
+  pool: Option[],
+  overrides?: ReadonlyMap<string, string>,
+): ReadLine | null {
   let text = tidy(raw).replace(/\s*\/\s*/g, ' ');
   if (!text) return null;
 
@@ -284,32 +257,24 @@ function parseRow(raw: string, position: number, vocabulary: Vocabulary): ReadLi
   name = tidy(name);
   if (!name && value === null) return null;
 
-  // Snap onto a name the guild already uses, so one blurry reading does not
-  // start a second ceiling for an attribute that already had one.
-  const read = bare(name);
-  let best: { known: VocabEntry | null; gap: number } = { known: null, gap: Infinity };
-  let second = Infinity;
-  for (const known of vocabulary) {
-    const gap = distance(read, bare(known.name));
-    if (gap < best.gap) {
-      second = best.gap;
-      best = { known, gap };
-    } else if (gap < second) second = gap;
-  }
-  // Strictly closer than the runner-up, so a name the engine damaged into the
-  // middle of two attributes is left exactly as read rather than assigned to
-  // whichever happened to sort first.
-  if (best.known && best.gap <= allowance(read.length) && best.gap < second) {
-    name = best.known.name;
+  // Snap onto the pool this line is allowed to hold. Whatever the engine made
+  // of the pixels, the answer is one of these or the line stays empty for the
+  // member to pick -- it is never a new attribute nobody can match again.
+  const hit = snap(name, pool, overrides);
+
+  if (hit) {
     // The unit belongs to the attribute, not to the roll. Tasa Crítica is a
     // percentage whether or not the "%" survived the engine, and a per-piece
-    // guess would have half the guild's readings disagreeing about it.
-    if (best.known.unit) unit = best.known.unit;
+    // guess would have half the guild's readings disagreeing about it. Where
+    // the catalogue does not claim one, what was read stands.
+    if (hit.entry.unit) unit = hit.entry.unit;
   }
 
   return {
     position,
-    label: name,
+    key: hit?.entry.key ?? null,
+    label: hit ? overrides?.get(hit.entry.key) ?? hit.entry.es : name,
+    sure: hit?.sure ?? false,
     value,
     unit,
     fill: null,
@@ -320,13 +285,31 @@ function parseRow(raw: string, position: number, vocabulary: Vocabulary): ReadLi
   };
 }
 
+export interface ReadOptions {
+  /** What the guild has learned about how high each attribute rolls. */
+  ceilings?: GearCeiling[];
+  /**
+   * The path this set is built for, which decides both dropdown pools.
+   *
+   * Required rather than optional, and it is the reason the set has to be
+   * created before a screenshot can be read into it: without a spec there is no
+   * pool, and without a pool the reader is back to believing the engine.
+   */
+  spec: Spec | undefined;
+  /** Which piece this is, which decides the line-six pool. */
+  slot: GearSlot;
+  /** Spanish names the guild has corrected, by English key. */
+  overrides?: ReadonlyMap<string, string>;
+}
+
 /** Everything one screenshot of the Afinación screen has to say. */
 export async function readPiece(
   img: HTMLImageElement,
   say: (step: string) => void = () => {},
-  ceilings: GearCeiling[] = [],
-  vocabulary: Vocabulary = KNOWN_STATS,
+  { ceilings = [], spec, slot, overrides }: ReadOptions,
 ): Promise<ReadPiece> {
+  const statPool = optionsFor(spec, slot, 1);
+  const sixthPool = optionsFor(spec, slot, 6);
   const found = bars(img);
   const { w, h } = frame(img);
 
@@ -347,10 +330,12 @@ export async function readPiece(
     for (let i = 0; i < found.length && lines.length < 6; i++) {
       say(`Leyendo la línea ${i + 1}...`);
       const top = i === 0 ? h * 0.3 : found[i - 1].y + 6;
+      const position = lines.length + 1;
       const row = parseRow(
         await read(slice(img, w * 0.1, top, w * 0.3, found[i].y - 3)),
-        lines.length + 1,
-        vocabulary,
+        position,
+        position === 6 ? sixthPool : statPool,
+        overrides,
       );
       if (row) {
         row.fill = found[i].fill;
@@ -364,10 +349,12 @@ export async function readPiece(
     // read without a bar, which costs it only its fill.
     if (lines.length < 6 && found.length) {
       say('Leyendo la última línea...');
+      const position = lines.length + 1;
       const tail = parseRow(
         await read(slice(img, w * 0.1, found[found.length - 1].y + 6, w * 0.3, h * 0.88)),
-        lines.length + 1,
-        vocabulary,
+        position,
+        position === 6 ? sixthPool : statPool,
+        overrides,
       );
       if (tail && tail.label.length > 3) lines.push(tail);
     }
@@ -383,8 +370,8 @@ export async function readPiece(
     const guessLevel = levelText.match(/(\d{2,3})/);
     const itemLevel = guessLevel ? Number(guessLevel[1]) : null;
     for (const line of lines) {
-      if (line.value === null || line.fill === null) continue;
-      const known = ceilings.find((c) => c.stat === statKey(line.label) && c.level === itemLevel);
+      if (line.value === null || line.fill === null || !line.key) continue;
+      const known = ceilings.find((c) => c.stat === statKey(line.key!) && c.level === itemLevel);
       if (!known) continue;
       // Rounded to the precision the game itself prints, because the bar is
       // only good to about a percent and offering "7.12" against a screen that
