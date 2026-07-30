@@ -82,8 +82,19 @@ const ImpactTuning: React.FC<{
   canEdit: boolean;
   onChange: (impact: Record<string, number>) => void;
 }> = ({ set, canEdit, onChange }) => {
+  // What is being typed, before it means anything. Without this the box is
+  // driven straight from the stored figure, so clearing it to retype reads as
+  // "0", clamps to the floor, and you find yourself typing 80 into a field
+  // that already says 30. Held only while the box is focused.
+  const [draft, setDraft] = useState<Record<string, string>>({});
+
   const at = (key: string) => Math.round((set.impact?.[key] ?? 1) * 100);
-  const put = (key: string, pct: number) => {
+  const put = (key: string, raw: string) => {
+    setDraft((prev) => ({ ...prev, [key]: raw }));
+    const pct = Number(raw);
+    // Half-typed is not the same as wrong: an empty box commits nothing and
+    // leaves the last good value standing.
+    if (raw.trim() === '' || !Number.isFinite(pct)) return;
     const next = { ...(set.impact ?? {}) };
     // A hundred is the default, so it is stored as nothing at all -- otherwise
     // an untouched set looks deliberately tuned to whoever reads it next.
@@ -91,6 +102,7 @@ const ImpactTuning: React.FC<{
     else next[key] = Math.min(2, Math.max(0.3, pct / 100));
     onChange(next);
   };
+  const settle = (key: string) => setDraft(({ [key]: _gone, ...rest }) => rest);
 
   return (
     <div className="border-t border-slate-800/70 pt-2 space-y-2">
@@ -115,9 +127,10 @@ const ImpactTuning: React.FC<{
                 min={30}
                 max={200}
                 step={5}
-                value={pct}
+                value={draft[axis.key] ?? pct}
                 disabled={!canEdit}
-                onChange={(e) => put(axis.key, Number(e.target.value))}
+                onChange={(e) => put(axis.key, e.target.value)}
+                onBlur={() => settle(axis.key)}
                 className={`w-16 bg-slate-900 border rounded px-1.5 py-1 text-right tabular-nums outline-none focus:ring-1 focus:ring-amber-500 ${
                   pct === 100 ? 'border-slate-800 text-slate-400' : 'border-amber-700/60 text-amber-300'
                 }`}
