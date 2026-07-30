@@ -202,6 +202,65 @@ CREATE INDEX IF NOT EXISTS weapon_sets_guild_idx ON weapon_sets (guild_id, sort_
 -- what they are for. Validated in weapons.js against the axes in impact.ts.
 ALTER TABLE weapon_sets ADD COLUMN IF NOT EXISTS impact JSONB NOT NULL DEFAULT '{}'::jsonb;
 
+-- What a member is actually wearing, one row per slot, read off the game's
+-- Afinación screen.
+--
+-- One row per slot rather than a history: you wear one helm, and the question
+-- being asked is always "what should I do next with this piece". updated_at is
+-- enough to know how stale it is.
+--
+-- relayed is the piece carried up from an older set. The game freezes every
+-- line on those, so it is not a detail -- it is the difference between a piece
+-- with advice worth giving and a piece there is nothing to say about.
+--
+-- tune_ready_at is an absolute moment, converted on the way in from the days
+-- the screen counts down ("puede ser reajustada una vez cada 5 día(s)" is five
+-- days REMAINING, not a five-day period). Storing the deadline rather than the
+-- countdown means a capture from last Tuesday still says something true today.
+CREATE TABLE IF NOT EXISTS gear_pieces (
+  id            TEXT PRIMARY KEY,
+  guild_id      TEXT NOT NULL REFERENCES guilds(id) ON DELETE CASCADE,
+  player_id     TEXT NOT NULL,
+  slot          TEXT NOT NULL,
+  name          TEXT,
+  level         INTEGER,
+  relayed       BOOLEAN NOT NULL DEFAULT false,
+  tune_ready_at TIMESTAMPTZ,
+  -- Up to six lines, and seven when the sixth holds both a normal and an arena
+  -- tuning. Each: { position, stat, value, unit, fill, committed, truncated,
+  -- tuning, active }. JSONB because the game keeps adding attributes and a
+  -- column per one would mean a migration every patch -- the same reason
+  -- war_participants.stats is JSONB.
+  lines         JSONB NOT NULL DEFAULT '[]'::jsonb,
+  captured_at   TIMESTAMPTZ,
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (guild_id, player_id, slot),
+  FOREIGN KEY (guild_id, player_id) REFERENCES players (guild_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS gear_pieces_owner_idx ON gear_pieces (guild_id, player_id);
+
+-- How high each attribute can roll, learned rather than looked up.
+--
+-- The game draws a bar under every line showing that roll as a fraction of its
+-- own maximum, so one reading gives the ceiling: value / fill. Two independent
+-- pieces put Tasa Crítica at 7.40 and 7.39, which is why this is trusted at
+-- all. Every capture the guild uploads sharpens it, and nobody has to find a
+-- table on a wiki that goes stale at the next patch.
+--
+-- Keyed by level because a level 81 piece and a level 91 piece do not share a
+-- ceiling. samples is kept so a figure resting on one blurry screenshot can be
+-- told apart from one that thirty members agree on.
+CREATE TABLE IF NOT EXISTS gear_stat_ceilings (
+  guild_id   TEXT NOT NULL REFERENCES guilds(id) ON DELETE CASCADE,
+  stat       TEXT NOT NULL,
+  level      INTEGER NOT NULL,
+  ceiling    NUMERIC NOT NULL,
+  samples    INTEGER NOT NULL DEFAULT 1,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (guild_id, stat, level)
+);
+
 -- A member carries several builds, and a build fills more than one role: a
 -- weapon pair played as tank and healer at once is why a single combat role on
 -- the roster was never enough. Never captured from the game -- these are chosen

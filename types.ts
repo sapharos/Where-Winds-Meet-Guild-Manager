@@ -133,6 +133,87 @@ export interface WeaponSet {
   impact?: Record<string, number> | null;
 }
 
+/** The eight places a piece can go, named as the game names them. */
+export const GEAR_SLOTS = [
+  'leftWeapon',
+  'rightWeapon',
+  'disc',
+  'pendant',
+  'helm',
+  'armor',
+  'greaves',
+  'bracer',
+] as const;
+export type GearSlot = (typeof GEAR_SLOTS)[number];
+
+export const GEAR_SLOT_LABELS: Record<GearSlot, string> = {
+  leftWeapon: 'Arma izquierda',
+  rightWeapon: 'Arma derecha',
+  disc: 'Disco',
+  pendant: 'Colgante',
+  helm: 'Yelmo',
+  armor: 'Armadura',
+  greaves: 'Grebas',
+  bracer: 'Brazal',
+};
+
+/**
+ * One attribute line on a piece.
+ *
+ * Position is what decides what can be done with it, so it is not decoration:
+ * 1 never changes, 2 to 5 are the four candidates of which only ever one gets
+ * chosen, and 6 is the unlimited slot with its own short list per slot.
+ */
+export interface GearLine {
+  position: 1 | 2 | 3 | 4 | 5 | 6;
+  /** As read, before it is matched against the known attributes. */
+  stat: string;
+  /** Null when the game clipped the line and no ceiling is known yet to infer it. */
+  value: number | null;
+  unit: 'flat' | 'percent';
+  /**
+   * How much of this attribute's maximum the roll reached, 0 to 1, measured off
+   * the bar the game draws. The whole point of reading the picture rather than
+   * just the text: it gives the ceiling without anyone looking anything up.
+   */
+  fill: number | null;
+  /**
+   * The one line of 2..5 already rerolled, which the game marks "[Girar]" and
+   * rings with a glow. Once one is set the other three are shut for good, so
+   * this is the single most consequential fact about a piece.
+   */
+  committed: boolean;
+  /** The name overflowed and the value never rendered. Recoverable from fill x ceiling. */
+  truncated: boolean;
+  /** Position 6 only: the two lists are separate and a piece may hold one of each. */
+  tuning?: 'normal' | 'arena';
+  /** Position 6 only: which of the two is switched on. Only the active one is captured. */
+  active?: boolean;
+}
+
+export interface GearPiece {
+  id: string;
+  playerId: string;
+  slot: GearSlot;
+  name: string | null;
+  level: number | null;
+  /** Carried up from an older set, which freezes every line. Nothing to advise. */
+  relayed: boolean;
+  /** When it can be tuned again, from the countdown the screen shows. */
+  tuneReadyAt: string | null;
+  lines: GearLine[];
+  capturedAt: string | null;
+  updatedAt: string;
+}
+
+/** How high one attribute rolls at one item level, learned from what people upload. */
+export interface GearCeiling {
+  stat: string;
+  level: number;
+  ceiling: number;
+  samples: number;
+}
+
 export interface PlayerBuild {
   id: string;
   playerId: string;
