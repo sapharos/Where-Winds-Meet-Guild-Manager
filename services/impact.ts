@@ -27,20 +27,61 @@ export interface Contribution {
  * What each axis is worth once normalised.
  *
  * Damage and healing carry the same weight on purpose: they are the two ways of
- * deciding a fight and neither is worth more than the other. Kills and assists
- * are counted together, because on this screen an assist is what a healer's
- * kill looks like. Deaths take a little away without ever deciding the ranking:
- * dying is often what tanking costs.
+ * deciding a fight and neither is worth more than the other.
+ *
+ * Kills and assists are counted SEPARATELY, which they were not at first. Added
+ * together they made one axis that was really the assist axis: across a thirty
+ * player war the assist counts ran 38 to 123 while the kills ran 1 to 30, so
+ * the sum moved with the assists and a duellist's thirty kills changed it by
+ * almost nothing. Anything that kills one target at a time -- Vinculación de
+ * Seda, Cortebambú, and the hybrids built on them -- produces exactly that
+ * shape: few big kills, ordinary damage. Given its own axis, killing is worth
+ * something again.
+ *
+ * Damage taken is 0.7 rather than the 0.4 it started at. Holding the front is
+ * the one job whose whole return was being measured on the narrowest axis on
+ * the board: the best damage dealer in that same war outscored the median by
+ * 0.74, and the best tank outscored theirs by 0.17. Tanking cost the damage
+ * axis outright and paid back a quarter of it.
  */
 export const WEIGHTS: { key: string; label: string; weight: number }[] = [
   { key: 'damage', label: 'Daño', weight: 1 },
   { key: 'healing', label: 'Curación', weight: 1 },
-  { key: 'takedowns', label: 'Kills y asistencias', weight: 0.8 },
+  { key: 'kills', label: 'Kills', weight: 0.8 },
+  { key: 'taken', label: 'Daño recibido', weight: 0.7 },
   { key: 'siege', label: 'Daño de asedio', weight: 0.6 },
-  { key: 'taken', label: 'Daño recibido', weight: 0.4 },
+  { key: 'assists', label: 'Asistencias', weight: 0.35 },
   { key: 'coin', label: 'Monedas', weight: 0.2 },
   { key: 'deaths', label: 'Muertes', weight: -0.3 },
 ];
+
+/**
+ * How hard a lead on one axis is allowed to shout.
+ *
+ * Measuring every axis as a straight share of the best sounds even-handed and
+ * is not, because the axes are not equally spread out. In a real war the damage
+ * ran 16x from bottom to top while the damage taken ran 3.6x, so the same
+ * "share of the best" was a cheap 58% for a middling tank and a brutal 26% for
+ * a middling damage dealer. The widest axis quietly decided the board.
+ *
+ * Bending the share (x^0.7) lifts the low end of a wide axis much further than
+ * it lifts the middle of a narrow one, which puts the axes back on comparable
+ * footing without pretending magnitude does not exist -- a healer who healed
+ * 21M still beats one who healed 11M, which a pure ranking would have flattened.
+ *
+ * It also, on purpose, pays hybrids better: two jobs at half measure now come
+ * to 1.28 where one job done fully comes to 1.00.
+ */
+const CURVE = 0.7;
+
+/**
+ * How much of the death penalty being the wall excuses.
+ *
+ * Dying at the front while soaking the war's damage is the job working; dying
+ * repeatedly having soaked nothing is being caught out. Whoever took the most
+ * damage has half the penalty waived, on a sliding scale.
+ */
+const DEATH_RELIEF = 0.5;
 
 /**
  * The axes, derived from what the results screen reports.
@@ -56,8 +97,8 @@ function axes(stats: Record<string, number | undefined>, side: WarSide): Record<
   return {
     damage: value('damage'),
     healing: value('healing'),
-    // An assist is what a healer's kill looks like, so they count as one thing.
-    takedowns: value('kills') + value('assists'),
+    kills: value('kills'),
+    assists: value('assists'),
     siege: side === 'attack' ? value('siege') : 0,
     taken: value('taken'),
     coin: value('coin'),
@@ -111,12 +152,23 @@ export function impactOf(rows: Contribution[]): Impact[] {
 
   const raw = measured.map(({ row, axis }) => {
     const parts: Record<string, number> = {};
-    let total = 0;
     for (const { key, weight } of WEIGHTS) {
       // Nobody reached it, so nobody is measured against it.
       const share = best[key] > 0 ? axis[key] / best[key] : 0;
-      parts[key] = share;
-      total += weight * share;
+      // Only what you earn is bent. A penalty that got easier the larger it
+      // grew would be no penalty at all.
+      parts[key] = weight > 0 ? Math.pow(share, CURVE) : share;
+    }
+
+    // Shares are all settled before anything is added up, because the death
+    // penalty reads the damage-taken share and must not depend on the order
+    // the axes happen to be listed in.
+    let total = 0;
+    for (const { key, weight } of WEIGHTS) {
+      total +=
+        key === 'deaths'
+          ? weight * parts.deaths * (1 - DEATH_RELIEF * parts.taken)
+          : weight * parts[key];
     }
     return { row, parts, total };
   });
