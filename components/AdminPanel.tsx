@@ -17,6 +17,14 @@ interface Props {
   canManageBuilds: boolean;
 }
 
+/** A pending Discord claim, waiting for somebody to approve or reject it. */
+interface Registration {
+  id: string;
+  discordUsername: string;
+  claimedUid: string;
+  playerName: string | null;
+}
+
 const AdminPanel: React.FC<Props> = ({ currentUser, canManageUsers, canManagePermissions, canManageBuilds }) => {
   const [users, setUsers] = useState<ManagedUser[]>([]);
   const [catalog, setCatalog] = useState<PermissionCatalog | null>(null);
@@ -27,9 +35,7 @@ const AdminPanel: React.FC<Props> = ({ currentUser, canManageUsers, canManagePer
   const [newUsername, setNewUsername] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [newRole, setNewRole] = useState<UserRole>('member');
-  const [requests, setRequests] = useState<
-    { id: string; discordUsername: string; claimedUid: string; playerName: string | null }[]
-  >([]);
+  const [requests, setRequests] = useState<Registration[]>([]);
 
   const report = (text: string, ok = true) => setMessage({ text, ok });
 
@@ -46,7 +52,7 @@ const AdminPanel: React.FC<Props> = ({ currentUser, canManageUsers, canManagePer
       setDirty(false);
       if (canManageUsers) {
         setUsers(await authService.listUsers());
-        setRequests(await api('/registrations').catch(() => []));
+        setRequests(await api<Registration[]>('/registrations').catch(() => []));
       }
     } catch (err) {
       report(err instanceof Error ? err.message : 'No se pudo cargar la configuración', false);

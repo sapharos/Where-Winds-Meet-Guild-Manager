@@ -121,7 +121,7 @@ const WarTimers: React.FC<Props> = ({ startedAt, offset, mayBeWarned }) => {
   const fired = useRef<Set<string>>(new Set());
   const audio = useRef<AudioContext | null>(null);
   const [toast, setToast] = useState<{ label: string; when: string; colour: string } | null>(null);
-  const clearing = useRef<number>();
+  const clearing = useRef<number | undefined>(undefined);
 
   useEffect(() => {
     const began = Date.parse(startedAt);
