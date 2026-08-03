@@ -265,6 +265,29 @@ button:not(.tap-suelto):not(:disabled) {
   align-items: center;
 }
 
+/**
+ * La respuesta al dedo, en todo lo que se pulsa.
+ *
+ * Va aquí y no clase por clase porque el reproche era general: se tocaba un
+ * botón y no pasaba nada visible hasta que volvía el servidor. Una escala del
+ * 2% en 100 ms no adorna nada, dice "te he oído" -- y 100 ms es el umbral por
+ * debajo del cual deja de percibirse como retardo.
+ *
+ * Sólo `transform`: no mueve a los vecinos ni obliga a recalcular la maqueta.
+ * Y en `:active`, que ocurre antes de que React se entere de nada.
+ */
+button:not(.tap-suelto):not(:disabled),
+summary:not(.tap-suelto),
+[role='button']:not(.tap-suelto) {
+  transition: transform var(--dur-tap) var(--ease-glaze);
+}
+
+button:not(.tap-suelto):not(:disabled):active,
+summary:not(.tap-suelto):active,
+[role='button']:not(.tap-suelto):active {
+  transform: scale(0.97);
+}
+
 /* La casilla nativa mide 13 px y no se puede agrandar sin deformarla, así que
    lo que crece es su zona de toque. */
 input[type='checkbox']:not(.tap-suelto),

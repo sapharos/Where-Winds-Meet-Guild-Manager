@@ -213,15 +213,40 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
 
   const strategy = strategies.find((s) => s.id === inForce[side] && s.side === side);
 
+  /**
+   * Colocar a alguien en una línea, o sacarlo del tablero.
+   *
+   * Se muestra antes de pedirlo y se deshace si el servidor dice que no. Es la
+   * acción más repetida de esta pantalla -- treinta personas por guerra, y a
+   * veces varias veces cada una -- y antes esperaba a la respuesta y encima
+   * recargaba el tablero entero: despliegues, estrategias y estado, tres
+   * peticiones más, para mover una tarjeta de sitio. Sobre una conexión
+   * inestable eso son segundos por persona, y en ese hueco no hay forma de
+   * saber si el toque llegó.
+   *
+   * El mismo trato que ya tenía `toggleUnit`, y por la misma razón: quien está
+   * ordenando una guerra toca deprisa, y la segunda orden no puede esperar a
+   * que vuelva la primera.
+   */
   const move = async (playerId: string, lane: WarLane | null) => {
+    const before = latest.current;
+    const after = [
+      ...before.filter((d) => !(d.side === side && d.playerId === playerId)),
+      ...(lane ? [{ side, lane, playerId, unitIds: [], buildId: null } as Deployment] : []),
+    ];
+
     setError(null);
+    latest.current = after;
+    setDeployments(after);
+
     try {
       await api(`/war/deployments/${side}/${playerId}`, {
         method: 'PUT',
         body: JSON.stringify({ lane }),
       });
-      await load();
     } catch (err) {
+      latest.current = before;
+      setDeployments(before);
       setError(err instanceof Error ? err.message : 'No se pudo mover');
     }
   };
@@ -306,15 +331,26 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
     }
   };
 
+  /** Igual que `move`: se pinta al momento y se revierte si falla. Cambia los
+   *  colores de la tarjeta, así que esperar se nota más que en otras. */
   const useBuild = async (playerId: string, build: string | null) => {
+    const before = latest.current;
+    const after = before.map((d) =>
+      d.side === side && d.playerId === playerId ? { ...d, buildId: build } : d,
+    );
+
     setError(null);
+    latest.current = after;
+    setDeployments(after);
+
     try {
       await api(`/war/deployments/${side}/${playerId}/build`, {
         method: 'PUT',
         body: JSON.stringify({ build }),
       });
-      await load();
     } catch (err) {
+      latest.current = before;
+      setDeployments(before);
       setError(err instanceof Error ? err.message : 'No se pudo cambiar la build');
     }
   };

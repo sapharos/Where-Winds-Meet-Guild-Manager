@@ -546,9 +546,13 @@ const MemberManager: React.FC<MemberManagerProps> = ({
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-          {visible.map((p) => (
+          {visible.map((p, at) => (
+            // El escalonado se detiene en el sexto: a partir de ahí el retardo
+            // deja de crecer y el resto entra a la vez. Escalonar cincuenta y
+            // ocho tarjetas serían dos segundos y medio de espera para ver una
+            // lista que ya estaba lista.
+            <div key={p.id} className="entra" style={{ '--paso': Math.min(at, 6) } as React.CSSProperties}>
             <PlayerCard
-              key={p.id}
               player={p}
               build={primaryOf.get(p.id)}
               weaponSets={weaponSets}
@@ -560,6 +564,7 @@ const MemberManager: React.FC<MemberManagerProps> = ({
               onCycleSide={isViewer ? undefined : onCycleSide}
               onToggleActive={isViewer ? undefined : onToggleActive}
             />
+            </div>
           ))}
         </div>
       )}

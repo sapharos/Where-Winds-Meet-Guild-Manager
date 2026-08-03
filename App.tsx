@@ -21,6 +21,7 @@ const App: React.FC = () => {
   const [session, setSession] = useState<Session | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
   const [activeTab, setActiveTab] = useState<'me' | 'roster' | 'war-room' | 'admin'>('roster');
+  const [haciaAtras, setHaciaAtras] = useState(false);
   const [historyFor, setHistoryFor] = useState<Player | null>(null);
   const [buildsFor, setBuildsFor] = useState<Player | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
@@ -418,6 +419,26 @@ const App: React.FC = () => {
     { id: 'admin' as const, label: 'Administración', corto: 'Admin', icon: 'fa-user-shield', show: canSeeAdmin },
   ].filter((t) => t.show);
 
+  /**
+   * Por qué lado entra la pantalla nueva.
+   *
+   * Moverse a la derecha en la barra trae el contenido desde la derecha, y
+   * volver lo trae desde la izquierda. Es la única señal de sentido que tiene
+   * una barra donde los cuatro destinos parecen igual de lejos.
+   *
+   * Se decide al pulsar y no al pintar. La primera versión guardaba la pestaña
+   * anterior en un ref y lo actualizaba durante el render, y siempre salía
+   * "adelante": en desarrollo React renderiza dos veces, y en la segunda el ref
+   * ya valía la pestaña nueva, así que la diferencia era cero. Comparar dos
+   * cosas mientras una de ellas se está escribiendo no funciona.
+   */
+  const irA = (destino: typeof activeTab) => {
+    const desde = tabs.findIndex((t) => t.id === activeTab);
+    const hasta = tabs.findIndex((t) => t.id === destino);
+    setHaciaAtras(hasta < desde);
+    setActiveTab(destino);
+  };
+
   const handleUpdateSession = (updatedSession: GuildWarSession) => {
     if (warLocked) return;
     const updated = sessions.map(s => s.id === updatedSession.id ? updatedSession : s);
@@ -444,7 +465,7 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-200">
+    <div className="recorta-rutas min-h-screen bg-slate-950 text-slate-200">
       {/* pad-safe-top: pegada arriba y sin ella, la fila de identidad se mete
           bajo el recorte de la pantalla en cuanto el teléfono tiene uno. */}
       <header className="border-b border-slate-800 bg-slate-900/80 backdrop-blur-md sticky top-0 z-50 pad-safe-top">
@@ -606,7 +627,7 @@ const App: React.FC = () => {
             {tabs.map((tab) => (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
+                onClick={() => irA(tab.id)}
                 className={`px-5 py-2 rounded-md text-sm font-semibold transition-all flex items-center gap-2 whitespace-nowrap ${
                   activeTab === tab.id
                     ? 'bg-amber-700 text-white shadow-lg'
@@ -630,7 +651,12 @@ const App: React.FC = () => {
 
       {/* 16 px de margen en el teléfono y 24 a partir de sm. Con 24 fijos se
           perdían 48 de los 375, el 12,8% del ancho, en no dibujar nada. */}
-      <main className="max-w-[1600px] mx-auto p-4 sm:p-6">
+      {/* `key` en la pestaña para que la animación vuelva a correr en cada
+          cambio: sin ella React reutiliza el nodo y la clase no dispara nada. */}
+      <main
+        key={activeTab}
+        className={`max-w-[1600px] mx-auto p-4 sm:p-6 ${haciaAtras ? 'ruta-atras' : 'ruta-adelante'}`}
+      >
         {isLoading ? (
           // Era una rueda centrada en una caja de 384 px de alto que después se
           // sustituía por contenido de otra altura, así que la página pegaba un
@@ -726,7 +752,7 @@ const App: React.FC = () => {
             return (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
+                onClick={() => irA(tab.id)}
                 aria-current={aqui ? 'page' : undefined}
                 className={`flex-1 min-w-0 min-h-tap flex flex-col items-center justify-center gap-0.5 pt-2 pb-1.5 transition-colors duration-micro ${
                   aqui ? 'text-amber-500' : 'text-slate-500'
