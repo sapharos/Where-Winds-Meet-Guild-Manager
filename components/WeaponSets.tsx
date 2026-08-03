@@ -258,9 +258,13 @@ const WeaponSets: React.FC<{ canEdit: boolean; onSaved: () => void }> = ({ canEd
                   >
                     Elegir icono
                   </button>
+                  {/* Sin `aria-label` eran dos botones que un lector de
+                      pantalla anuncia como "botón" y nada más: la flecha es un
+                      dibujo, no un nombre. */}
                   <button
                     onClick={() => move(set.id, -1)}
                     disabled={index === 0}
+                    aria-label={`Subir ${set.name || 'este conjunto'} en el orden`}
                     className="p-2 text-slate-500 hover:text-slate-200 disabled:text-slate-800 transition-all"
                   >
                     <i className="fa-solid fa-arrow-up"></i>
@@ -268,6 +272,7 @@ const WeaponSets: React.FC<{ canEdit: boolean; onSaved: () => void }> = ({ canEd
                   <button
                     onClick={() => move(set.id, 1)}
                     disabled={index === (sets?.length ?? 0) - 1}
+                    aria-label={`Bajar ${set.name || 'este conjunto'} en el orden`}
                     className="p-2 text-slate-500 hover:text-slate-200 disabled:text-slate-800 transition-all"
                   >
                     <i className="fa-solid fa-arrow-down"></i>

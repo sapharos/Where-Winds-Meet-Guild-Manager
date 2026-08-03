@@ -517,7 +517,10 @@ const App: React.FC = () => {
             {/* Below large screens the same tools live behind one button. A
                 native details element needs no state and closes itself. */}
             <details className="lg:hidden relative">
-              <summary className="list-none cursor-pointer p-2 rounded-lg bg-slate-950 border border-slate-800 text-slate-400 hover:text-amber-500 transition-all">
+              <summary
+                aria-label="Más herramientas"
+                className="list-none cursor-pointer p-2 rounded-lg bg-slate-950 border border-slate-800 text-slate-400 hover:text-amber-500 transition-all"
+              >
                 <i className="fa-solid fa-ellipsis"></i>
               </summary>
               <div className="absolute right-0 mt-2 w-60 bg-slate-900 border border-slate-800 rounded-lg shadow-2xl p-3 space-y-3 z-50">
