@@ -4,6 +4,7 @@ import { WeaponSet } from '../types';
 import { SetBadge } from './BuildEditor';
 import { ICON_GROUPS } from './iconCatalog';
 import { TUNABLE_AXES } from '../services/impact';
+import Sheet from './Sheet';
 
 /** Picks an icon by eye. Names alone mean nothing until you see the glyph. */
 export const IconPicker: React.FC<{
@@ -22,49 +23,44 @@ export const IconPicker: React.FC<{
   })).filter((g) => g.icons.length);
 
   return (
-    <div className="fixed inset-0 z-[70] bg-black/70 backdrop-blur-sm flex items-start justify-center p-6 overflow-y-auto">
-      <div className="bg-slate-900 border border-slate-800 rounded-xl w-full max-w-2xl my-8">
-        <div className="flex items-center justify-between p-5 border-b border-slate-800 gap-4">
-          <h3 className="cinzel text-xl font-bold text-amber-500">Elegir icono</h3>
-          <input
-            type="text"
-            autoFocus
-            value={search}
-            placeholder="Buscar..."
-            onChange={(e) => setSearch(e.target.value)}
-            className="flex-1 max-w-xs bg-slate-950 border border-slate-800 rounded p-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
-          />
-          <button onClick={onClose} className="p-2 text-slate-400 hover:text-amber-500 transition-all">
-            <i className="fa-solid fa-xmark text-xl"></i>
-          </button>
-        </div>
+    <Sheet title="Elegir icono" size="md" onClose={onClose}>
+      <input
+        type="text"
+        autoFocus
+        value={search}
+        placeholder="Buscar…"
+        aria-label="Buscar icono"
+        enterKeyHint="search"
+        onChange={(e) => setSearch(e.target.value)}
+        className="w-full min-h-tap bg-slate-950 border border-slate-800 rounded px-3 text-sm outline-none focus:ring-1 focus:ring-amber-500 mb-4"
+      />
 
-        <div className="p-5 space-y-5">
-          {groups.map((group) => (
-            <div key={group.group}>
-              <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-2">{group.group}</p>
-              <div className="flex flex-wrap gap-1.5">
-                {group.icons.map((icon) => (
-                  <button
-                    key={icon}
-                    title={icon}
-                    onClick={() => onPick(icon)}
-                    className={`w-10 h-10 rounded border flex items-center justify-center transition-all ${
-                      value === icon
-                        ? 'border-amber-500 text-amber-400 bg-amber-500/10'
-                        : 'border-slate-800 text-slate-400 hover:text-amber-500 hover:border-slate-600'
-                    }`}
-                  >
-                    <i className={`fa-solid ${icon}`}></i>
-                  </button>
-                ))}
-              </div>
+      <div className="space-y-5">
+        {groups.map((group) => (
+          <div key={group.group}>
+            <p className="text-[11px] uppercase tracking-wider text-slate-500 mb-2">{group.group}</p>
+            <div className="flex flex-wrap gap-1.5">
+              {group.icons.map((icon) => (
+                <button
+                  key={icon}
+                  title={icon}
+                  aria-label={icon.replace('fa-', '').replace(/-/g, ' ')}
+                  onClick={() => onPick(icon)}
+                  className={`min-h-tap min-w-tap rounded border flex items-center justify-center transition-all ${
+                    value === icon
+                      ? 'border-amber-500 text-amber-400 bg-amber-500/10'
+                      : 'border-slate-800 text-slate-400 hover:text-amber-500 hover:border-slate-600'
+                  }`}
+                >
+                  <i className={`fa-solid ${icon}`}></i>
+                </button>
+              ))}
             </div>
-          ))}
-          {!groups.length && <p className="text-sm text-slate-500">Ningún icono coincide.</p>}
-        </div>
+          </div>
+        ))}
+        {!groups.length && <p className="text-sm text-slate-500">Ningún icono coincide.</p>}
       </div>
-    </div>
+    </Sheet>
   );
 };
 

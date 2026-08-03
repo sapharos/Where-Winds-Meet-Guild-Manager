@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { authService, api } from '../services/authService';
 import WeaponSets from './WeaponSets';
+import TablaAncha from './TablaAncha';
 import { AuthUser, ManagedUser, PERMISSION_LABELS, PermissionCatalog, UserRole, ROLE_LABELS } from '../types';
 
 // Mirrors the server's LOCKED table so the boxes it will refuse to clear are
@@ -198,11 +199,13 @@ const AdminPanel: React.FC<Props> = ({
             : 'Solo lectura. Se necesita el permiso "Editar permisos" para cambiar esta tabla.'}
         </p>
 
-        <div className="overflow-x-auto">
+        <TablaAncha aviso="Desliza para ver todos los roles">
           <table className="w-full text-sm border-collapse min-w-[640px]">
             <thead>
               <tr>
-                <th className="text-left font-semibold text-slate-400 p-2 border-b border-slate-800">Permiso</th>
+                <th className="text-left font-semibold text-slate-400 p-2 border-b border-slate-800 sticky left-0 bg-slate-900">
+                  Permiso
+                </th>
                 {catalog.roles.map((role) => (
                   <th
                     key={role}
@@ -216,22 +219,31 @@ const AdminPanel: React.FC<Props> = ({
             <tbody>
               {catalog.permissions.map((permission) => (
                 <tr key={permission} className="hover:bg-slate-800/30">
-                  <td className="p-2 border-b border-slate-800/60 text-slate-300">
+                  <td className="p-2 border-b border-slate-800/60 text-slate-300 sticky left-0 bg-slate-900">
                     {PERMISSION_LABELS[permission] ?? permission}
-                    <span className="block text-[10px] text-slate-600 font-mono">{permission}</span>
+                    <span className="block text-[11px] text-slate-600 font-mono">{permission}</span>
                   </td>
                   {catalog.roles.map((role) => {
                     const locked = isLocked(role, permission);
                     return (
                       <td key={role} className="p-2 border-b border-slate-800/60 text-center">
-                        <input
-                          type="checkbox"
-                          className="w-4 h-4 accent-amber-600 disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
-                          checked={(matrix[role] ?? []).includes(permission)}
-                          disabled={!canManagePermissions || locked}
+                        {/* La casilla mide 16 px, que no se acierta con el
+                            dedo. La etiqueta que la envuelve mide 44 y es
+                            igual de pulsable, así que el objetivo crece sin
+                            que el control cambie de aspecto. */}
+                        <label
+                          className="min-h-tap min-w-tap mx-auto flex items-center justify-center cursor-pointer"
                           title={locked ? 'Fijo: no puede quitarse' : undefined}
-                          onChange={() => toggle(role, permission)}
-                        />
+                        >
+                          <input
+                            type="checkbox"
+                            className="w-4 h-4 accent-amber-600 disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
+                            checked={(matrix[role] ?? []).includes(permission)}
+                            disabled={!canManagePermissions || locked}
+                            aria-label={`${PERMISSION_LABELS[permission] ?? permission} para ${ROLE_LABELS[role] ?? role}`}
+                            onChange={() => toggle(role, permission)}
+                          />
+                        </label>
                       </td>
                     );
                   })}
@@ -239,7 +251,7 @@ const AdminPanel: React.FC<Props> = ({
               ))}
             </tbody>
           </table>
-        </div>
+        </TablaAncha>
       </section>
 
       {canManageUsers && requests.length > 0 && (
@@ -333,11 +345,13 @@ const AdminPanel: React.FC<Props> = ({
             </button>
           </form>
 
-          <div className="overflow-x-auto">
+          <TablaAncha aviso="Desliza para ver rol, estado y acciones">
             <table className="w-full text-sm min-w-[560px]">
               <thead>
                 <tr className="text-left text-slate-400">
-                  <th className="p-2 border-b border-slate-800 font-semibold">Usuario</th>
+                  <th className="p-2 border-b border-slate-800 font-semibold sticky left-0 bg-slate-900">
+                    Usuario
+                  </th>
                   <th className="p-2 border-b border-slate-800 font-semibold">Rol</th>
                   <th className="p-2 border-b border-slate-800 font-semibold">Estado</th>
                   <th className="p-2 border-b border-slate-800 font-semibold text-right">Acciones</th>
@@ -346,10 +360,10 @@ const AdminPanel: React.FC<Props> = ({
               <tbody>
                 {users.map((user) => (
                   <tr key={user.id} className="hover:bg-slate-800/30">
-                    <td className="p-2 border-b border-slate-800/60 text-slate-200">
+                    <td className="p-2 border-b border-slate-800/60 text-slate-200 sticky left-0 bg-slate-900">
                       {user.username}
                       {user.id === currentUser.id && (
-                        <span className="ml-2 text-[9px] uppercase tracking-wider bg-amber-700 text-white px-1.5 py-0.5 rounded">
+                        <span className="ml-2 text-[11px] uppercase tracking-wider bg-amber-700 text-white px-1.5 py-0.5 rounded">
                           tú
                         </span>
                       )}
@@ -408,7 +422,7 @@ const AdminPanel: React.FC<Props> = ({
                 ))}
               </tbody>
             </table>
-          </div>
+          </TablaAncha>
         </section>
       )}
     </div>

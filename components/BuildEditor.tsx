@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { api } from '../services/authService';
 import { Player, PlayerBuild, Role, WeaponSet } from '../types';
 import { ROLE_NAMES, buildColours } from './PlayerCard';
+import Sheet from './Sheet';
 
 const ROLE_STYLE: Record<Role, string> = {
   [Role.TANK]: 'border-blue-500 text-blue-300 bg-blue-500/15',
@@ -87,23 +88,17 @@ const BuildEditor: React.FC<Props> = ({ player, canEdit, onClose, onSaved }) => 
   };
 
   return (
-    <div className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex items-start justify-center p-6 overflow-y-auto">
-      <div className="bg-slate-900 border border-slate-800 rounded-xl w-full max-w-3xl my-8">
-        <div className="flex items-center justify-between p-6 border-b border-slate-800">
-          <div>
-            <h2 className="cinzel text-2xl font-bold text-amber-500">Builds de {player.name}</h2>
-            <p className="text-xs text-slate-500 mt-1">
-              {canEdit
-                ? 'Una build puede cubrir varios roles a la vez. La principal decide el rol que usa la War Room.'
-                : 'Solo lectura: no tienes permiso para editar estas builds.'}
-            </p>
-          </div>
-          <button onClick={onClose} className="p-2 text-slate-400 hover:text-amber-500 transition-all">
-            <i className="fa-solid fa-xmark text-xl"></i>
-          </button>
-        </div>
-
-        <div className="p-6 space-y-4">
+    <Sheet
+      title={`Builds de ${player.name}`}
+      subtitle={
+        canEdit
+          ? 'Una build puede cubrir varios roles a la vez. La principal decide el rol que usa la War Room.'
+          : 'Solo lectura: no tienes permiso para editar estas builds.'
+      }
+      size="lg"
+      onClose={onClose}
+    >
+      <div className="space-y-4">
           {message && (
             <div
               className={`text-sm rounded-lg px-4 py-2 flex items-center gap-3 border ${
@@ -346,7 +341,7 @@ const BuildEditor: React.FC<Props> = ({ player, canEdit, onClose, onSaved }) => 
                   setBuilds([...(builds ?? []), fresh]);
                   fold(fresh.id, true);
                 }}
-                className="flex-1 border-2 border-dashed border-slate-800 hover:border-amber-600 text-slate-500 hover:text-amber-500 rounded-lg py-3 text-sm transition-all"
+                className="flex-1 min-h-tap border-2 border-dashed border-slate-800 hover:border-amber-600 text-slate-500 hover:text-amber-500 rounded-lg text-sm transition-all"
               >
                 <i className="fa-solid fa-plus mr-2"></i>
                 Añadir build
@@ -354,16 +349,15 @@ const BuildEditor: React.FC<Props> = ({ player, canEdit, onClose, onSaved }) => 
               <button
                 onClick={save}
                 disabled={busy}
-                className="bg-amber-600 hover:bg-amber-500 disabled:bg-slate-800 text-white text-sm font-bold py-2 px-6 rounded transition-all flex items-center gap-2"
+                className="min-h-tap bg-amber-600 hover:bg-amber-500 disabled:bg-slate-800 text-white text-sm font-bold px-6 rounded transition-all flex items-center gap-2"
               >
                 <i className="fa-solid fa-floppy-disk"></i>
                 Guardar
               </button>
             </div>
           )}
-        </div>
       </div>
-    </div>
+    </Sheet>
   );
 };
 

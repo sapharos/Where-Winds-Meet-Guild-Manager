@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { api } from '../services/authService';
 import { Player, ScanDocument, ScanFields, ScanPreviewEntry, SCAN_FIELD_CATALOG } from '../types';
+import TablaAncha from './TablaAncha';
 
 interface Props {
   players: Player[];
@@ -220,11 +221,13 @@ const ScanImport: React.FC<Props> = ({ players, onImported }) => {
               : `${pending} sin reconocer: elige a quién corresponden o créalos.`}
           </p>
 
-          <div className="overflow-x-auto">
+          <TablaAncha aviso="Desliza para ver UID, correspondencia y campos">
             <table className="w-full text-sm min-w-[720px]">
               <thead>
                 <tr className="text-left text-slate-400">
-                  <th className="p-2 border-b border-slate-800 font-semibold">Leído</th>
+                  <th className="p-2 border-b border-slate-800 font-semibold sticky left-0 bg-slate-900">
+                    Leído
+                  </th>
                   <th className="p-2 border-b border-slate-800 font-semibold">UID</th>
                   <th className="p-2 border-b border-slate-800 font-semibold">Corresponde a</th>
                   <th className="p-2 border-b border-slate-800 font-semibold text-right">Actividad</th>
@@ -245,7 +248,7 @@ const ScanImport: React.FC<Props> = ({ players, onImported }) => {
                   return (
                   <React.Fragment key={entry.nameAsRead}>
                     <tr className="hover:bg-slate-800/30">
-                      <td className="p-2 border-b border-slate-800/60">
+                      <td className="p-2 border-b border-slate-800/60 sticky left-0 bg-slate-900">
                         <span className="text-slate-200 font-mono">{entry.nameAsRead}</span>
                         {entry.match === 'uid' && (
                           <span className="ml-2 text-[9px] uppercase tracking-wider bg-sky-700 text-white px-1.5 py-0.5 rounded">
@@ -394,7 +397,7 @@ const ScanImport: React.FC<Props> = ({ players, onImported }) => {
                 })}
               </tbody>
             </table>
-          </div>
+          </TablaAncha>
         </section>
       )}
     </div>

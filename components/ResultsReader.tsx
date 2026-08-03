@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { FIGURES } from './WarHistory';
 import FigureCell from './FigureCell';
+import Sheet from './Sheet';
 
 /**
  * Reading the results screen.
@@ -454,21 +455,13 @@ const ResultsReader: React.FC<Props> = ({ images, participants, onClose, onApply
   const matched = rows.filter((r) => r.playerId);
 
   return (
-    <div className="fixed inset-0 z-[70] bg-black/80 backdrop-blur-sm flex items-start justify-center p-6 overflow-y-auto">
-      <div className="bg-slate-900 border border-slate-800 rounded-xl w-full max-w-5xl my-8">
-        <div className="flex items-center justify-between p-6 border-b border-slate-800">
-          <div>
-            <h2 className="cinzel text-2xl font-bold text-amber-500">Leer resultados</h2>
-            <p className="text-xs text-slate-500 mt-1">
-              Lo leído se revisa antes de guardarse. Corrige lo que haga falta.
-            </p>
-          </div>
-          <button onClick={onClose} className="p-2 text-slate-400 hover:text-amber-500 transition-all">
-            <i className="fa-solid fa-xmark text-xl"></i>
-          </button>
-        </div>
-
-        <div className="p-6 space-y-4">
+    <Sheet
+      title="Leer resultados"
+      subtitle="Lo leído se revisa antes de guardarse. Corrige lo que haga falta."
+      size="xl"
+      onClose={onClose}
+    >
+      <div className="space-y-4">
           {(stage === 'loading' || stage === 'reading') && (
             <p className="text-sm text-slate-400 flex items-center gap-3">
               <i className="fa-solid fa-circle-notch fa-spin"></i>
@@ -563,14 +556,14 @@ const ResultsReader: React.FC<Props> = ({ images, participants, onClose, onApply
               <div className="flex gap-2 justify-end">
                 <button
                   onClick={onClose}
-                  className="text-sm text-slate-400 hover:text-slate-200 px-4 py-2 transition-all"
+                  className="min-h-tap text-sm text-slate-400 hover:text-slate-200 px-4 transition-all"
                 >
                   Cancelar
                 </button>
                 <button
                   onClick={() => void onApply(matched)}
                   disabled={!matched.length}
-                  className="bg-amber-600 hover:bg-amber-500 disabled:bg-slate-800 text-white text-sm font-bold py-2 px-6 rounded transition-all flex items-center gap-2"
+                  className="min-h-tap bg-amber-600 hover:bg-amber-500 disabled:bg-slate-800 text-white text-sm font-bold px-6 rounded transition-all flex items-center gap-2"
                 >
                   <i className="fa-solid fa-floppy-disk"></i>
                   Guardar {matched.length} filas
@@ -578,9 +571,8 @@ const ResultsReader: React.FC<Props> = ({ images, participants, onClose, onApply
               </div>
             </>
           )}
-        </div>
       </div>
-    </div>
+    </Sheet>
   );
 };
 

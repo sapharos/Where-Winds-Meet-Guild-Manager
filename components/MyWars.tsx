@@ -188,7 +188,49 @@ const Table: React.FC<{ war: War; ranked: Impact[]; playerId: string }> = ({
 }) => {
   const rows = new Map<string, Participation>(war.participants.map((p) => [p.playerId, p]));
   return (
-    <div className="overflow-x-auto">
+    <>
+      {/*
+        En el móvil, una fila por persona con su puesto, su impacto y nada más.
+
+        Esta tabla vive dentro de "Mi perfil", que es la pantalla que se abre
+        sola: son once columnas de cifras dentro de 343 px. Lo que un miembro
+        viene a mirar es dónde quedó él, y para eso basta el puesto y el
+        impacto; el desglose completo sigue estando en Sala de Guerra →
+        Historial, que es donde se anota. La fila propia se marca, que es lo
+        único que hacía legible la tabla y aquí también.
+      */}
+      <ol className="flex flex-col gap-1 md:hidden">
+        {ranked.map((entry, at) => {
+          const row = rows.get(entry.playerId);
+          const self = entry.playerId === playerId;
+          return (
+            <li
+              key={entry.playerId}
+              className={`flex items-center gap-3 rounded px-2 py-1.5 ${
+                self ? 'bg-amber-500/10 ring-1 ring-amber-500/40' : ''
+              }`}
+            >
+              <span className="w-6 shrink-0 text-right text-slate-600 tabular-nums text-meta">
+                {at + 1}
+              </span>
+              <span
+                className={`flex-1 min-w-0 truncate ${self ? 'text-amber-400 font-bold' : 'text-slate-200'}`}
+              >
+                {entry.name}
+              </span>
+              {row && <span className="text-[11px] text-slate-600">{WAR_SIDE_LABELS[row.side]}</span>}
+              <span
+                className="w-9 text-right font-bold tabular-nums"
+                style={{ color: impactShade(entry.score) }}
+              >
+                {entry.score}
+              </span>
+            </li>
+          );
+        })}
+      </ol>
+
+      <div className="hidden md:block overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
           <tr className="text-[10px] uppercase tracking-wider text-slate-500 text-left">
@@ -234,7 +276,8 @@ const Table: React.FC<{ war: War; ranked: Impact[]; playerId: string }> = ({
           })}
         </tbody>
       </table>
-    </div>
+      </div>
+    </>
   );
 };
 

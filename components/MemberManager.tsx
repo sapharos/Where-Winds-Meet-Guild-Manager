@@ -3,6 +3,7 @@ import React, { useMemo, useState } from 'react';
 import { Player, PlayerBuild, Role, Platform, MembershipStatus, GuildRank, SECTS, WeaponSet, WarSide, WAR_SIDE_LABELS } from '../types';
 import PlayerCard, { ROLE_NAMES } from './PlayerCard';
 import { SetBadge } from './BuildEditor';
+import Sheet from './Sheet';
 
 interface MemberManagerProps {
   players: Player[];
@@ -438,21 +439,12 @@ const MemberManager: React.FC<MemberManagerProps> = ({
       )}
 
       {formOpen && (
-        <div className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex items-start justify-center p-6 overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-xl w-full max-w-lg my-8">
-            <div className="flex items-center justify-between p-6 border-b border-slate-800">
-              <h2 className="cinzel text-2xl font-bold text-amber-500">
-                {editing ? `Editar a ${editing.name}` : 'Nuevo miembro'}
-              </h2>
-              <button
-                onClick={() => { setFormOpen(false); setEditing(null); }}
-                className="p-2 text-slate-400 hover:text-amber-500 transition-all"
-              >
-                <i className="fa-solid fa-xmark text-xl"></i>
-              </button>
-            </div>
-
-            <form onSubmit={submit} className="p-6 space-y-4">
+        <Sheet
+          title={editing ? `Editar a ${editing.name}` : 'Nuevo miembro'}
+          size="md"
+          onClose={() => { setFormOpen(false); setEditing(null); }}
+        >
+            <form onSubmit={submit} className="space-y-4">
               <div>
                 <label className="block text-xs uppercase tracking-wider text-slate-500 mb-1">Nombre</label>
                 <input
@@ -636,20 +628,19 @@ const MemberManager: React.FC<MemberManagerProps> = ({
                 <button
                   type="button"
                   onClick={() => { setFormOpen(false); setEditing(null); }}
-                  className="flex-1 text-slate-400 hover:text-slate-200 text-sm py-2 rounded transition-all"
+                  className="flex-1 min-h-tap text-slate-400 hover:text-slate-200 text-sm rounded transition-all"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 bg-amber-600 hover:bg-amber-500 text-white font-bold py-2 rounded transition-all"
+                  className="flex-1 min-h-tap bg-amber-600 hover:bg-amber-500 text-white font-bold rounded transition-all"
                 >
                   {editing ? 'Guardar cambios' : 'Registrar miembro'}
                 </button>
               </div>
             </form>
-          </div>
-        </div>
+        </Sheet>
       )}
     </div>
   );

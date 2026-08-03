@@ -10,6 +10,7 @@ import {
   WarStrategy,
 } from '../types';
 import { IconPicker } from './WeaponSets';
+import Sheet from './Sheet';
 
 const ROLES: { key: keyof RoleTargets; label: string; colour: string }[] = [
   { key: 'tank', label: 'Tanques', colour: '#60a5fa' },
@@ -145,25 +146,17 @@ const StrategyPlanner: React.FC<Props> = ({ side, canEdit, onClose, onSaved }) =
   };
 
   return (
-    <div className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex items-start justify-center p-6 overflow-y-auto">
-      <div className="bg-slate-900 border border-slate-800 rounded-xl w-full max-w-4xl my-8">
-        <div className="flex items-center justify-between p-6 border-b border-slate-800">
-          <div>
-            <h2 className="cinzel text-2xl font-bold text-amber-500">
-              Estrategias de {WAR_SIDE_LABELS[side]}
-            </h2>
-            <p className="text-xs text-slate-500 mt-1">
-              {canEdit
-                ? 'Cuánta gente de cada rol quieres por línea, y qué unidades tácticas debe llevar el bando. Es una referencia: el tablero puede diferir.'
-                : 'Solo lectura: no tienes permiso para editar la sala de guerra.'}
-            </p>
-          </div>
-          <button onClick={onClose} className="p-2 text-slate-400 hover:text-amber-500 transition-all">
-            <i className="fa-solid fa-xmark text-xl"></i>
-          </button>
-        </div>
-
-        <div className="p-6 space-y-4">
+    <Sheet
+      title={`Estrategias de ${WAR_SIDE_LABELS[side]}`}
+      subtitle={
+        canEdit
+          ? 'Cuánta gente de cada rol quieres por línea, y qué unidades tácticas debe llevar el bando. Es una referencia: el tablero puede diferir.'
+          : 'Solo lectura: no tienes permiso para editar la sala de guerra.'
+      }
+      size="lg"
+      onClose={onClose}
+    >
+      <div className="space-y-4">
           {message && (
             <div
               className={`text-sm rounded-lg px-4 py-2 flex items-center gap-3 border ${
@@ -383,13 +376,12 @@ const StrategyPlanner: React.FC<Props> = ({ side, canEdit, onClose, onSaved }) =
           {canEdit && drafts && (
             <button
               onClick={() => setDrafts([...drafts, blankStrategy(side)])}
-              className="w-full border-2 border-dashed border-slate-800 hover:border-amber-600 text-slate-500 hover:text-amber-500 rounded-lg py-3 text-sm transition-all"
+              className="w-full min-h-tap border-2 border-dashed border-slate-800 hover:border-amber-600 text-slate-500 hover:text-amber-500 rounded-lg text-sm transition-all"
             >
               <i className="fa-solid fa-plus mr-2"></i>
               Nueva estrategia de {WAR_SIDE_LABELS[side]}
             </button>
           )}
-        </div>
       </div>
 
       {iconFor && (
@@ -402,7 +394,7 @@ const StrategyPlanner: React.FC<Props> = ({ side, canEdit, onClose, onSaved }) =
           onClose={() => setIconFor(null)}
         />
       )}
-    </div>
+    </Sheet>
   );
 };
 
