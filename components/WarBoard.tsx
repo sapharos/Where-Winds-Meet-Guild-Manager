@@ -580,6 +580,60 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
         </div>
       )}
 
+      {/*
+        El índice de las líneas, sólo en el teléfono.
+
+        En un escritorio las tres líneas y el banquillo están uno al lado del
+        otro y se ven de una vez. En un teléfono van en columna, y llegar al
+        banquillo -- que es de donde se saca a la gente -- costaba 2.625 px de
+        desplazamiento desde arriba: las dos mitades del trabajo, colocar y
+        elegir a quién, quedaban a tres pantallas la una de la otra.
+
+        No cambia nada de sitio ni de nombre: añade una fila que dice cómo va
+        cada línea y salta a ella. La cuenta que lleva es la misma que se ve
+        dentro, así que además se lee el estado del bando entero sin bajar.
+      */}
+      <nav
+        aria-label="Ir a una línea"
+        className="sm:hidden sticky top-[68px] z-30 -mx-4 px-4 py-2 bg-slate-950/90 backdrop-blur-md border-y border-slate-800"
+      >
+        <div className="flex gap-1.5">
+          {WAR_LANES.map((lane) => {
+            const cuantos = inLane(lane.id).length;
+            return (
+              <button
+                key={lane.id}
+                onClick={() =>
+                  document.getElementById(`linea-${lane.id}`)?.scrollIntoView({ behavior: 'smooth' })
+                }
+                className="flex-1 min-w-0 min-h-tap rounded-md border flex flex-col items-center justify-center leading-tight"
+                style={{ borderColor: `${lane.colour}66`, background: `${lane.colour}12` }}
+              >
+                <span className="text-[11px] truncate w-full px-1" style={{ color: lane.colour }}>
+                  {lane.label.replace('Línea ', '')}
+                </span>
+                <span
+                  className={`text-meta font-bold tabular-nums ${
+                    cuantos >= LANE_CAPACITY ? 'text-amber-400' : 'text-slate-300'
+                  }`}
+                >
+                  {cuantos}/{LANE_CAPACITY}
+                </span>
+              </button>
+            );
+          })}
+          {!shut && (
+            <button
+              onClick={() => document.getElementById('banquillo')?.scrollIntoView({ behavior: 'smooth' })}
+              className="flex-1 min-w-0 min-h-tap rounded-md border border-slate-700 bg-slate-900 flex flex-col items-center justify-center leading-tight"
+            >
+              <span className="text-[11px] text-slate-400 truncate w-full px-1">Disponibles</span>
+              <span className="text-meta font-bold tabular-nums text-slate-300">{bench.length}</span>
+            </button>
+          )}
+        </div>
+      </nav>
+
       {/* grid-cols-1 explícito y no `grid` a secas: sin columnas declaradas la
           única pista se dimensiona por su contenido y puede pasarse del
           contenedor, que es lo que hacía que las líneas midieran 334 px dentro
@@ -597,6 +651,7 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
           return (
             <section
               key={lane.id}
+              id={`linea-${lane.id}`}
               onDragOver={(event) => {
                 // Without this the browser never fires a drop at all.
                 if (dragged.current) event.preventDefault();
@@ -615,7 +670,10 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
               // min-w-0, como en la tarjeta de miembro: un hijo de grid no baja
               // de su contenido mínimo salvo que se le diga, y la fila de
               // "Tanques 3/2 Sanadores 1/1 DPS 2/4" lo fijaba en 300 px.
-              className={`min-w-0 rounded-xl border p-4 transition-all ${
+              //
+              // scroll-mt: la cabecera va pegada arriba, y sin este margen el
+              // salto desde el índice deja el título justo debajo de ella.
+              className={`min-w-0 scroll-mt-32 rounded-xl border p-4 transition-all ${
                 welcome ? 'ring-2 ring-offset-2 ring-offset-slate-950' : ''
               } ${refuses ? 'opacity-60' : ''}`}
               style={{
@@ -740,7 +798,7 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
         {/* Nobody left to field once the side is settled, so the bench goes
             away rather than sitting there offering what cannot be done. */}
         {!shut && (
-        <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+        <section id="banquillo" className="scroll-mt-32 rounded-xl border border-slate-800 bg-slate-900/60 p-4">
           <div className="flex items-center justify-between mb-3">
             <h3 className="cinzel font-bold text-lg text-slate-300">Disponibles</h3>
             <span className="text-sm text-slate-500 tabular-nums">{bench.length}</span>
