@@ -624,7 +624,9 @@ const App: React.FC = () => {
         </div>
       )}
 
-      <main className="max-w-[1600px] mx-auto p-6">
+      {/* 16 px de margen en el teléfono y 24 a partir de sm. Con 24 fijos se
+          perdían 48 de los 375, el 12,8% del ancho, en no dibujar nada. */}
+      <main className="max-w-[1600px] mx-auto p-4 sm:p-6">
         {isLoading ? (
           // Era una rueda centrada en una caja de 384 px de alto que después se
           // sustituía por contenido de otra altura, así que la página pegaba un

@@ -31,15 +31,20 @@ const WeaponOption: React.FC<{
   checked: boolean;
   onToggle: () => void;
 }> = ({ weapon, count, colour, checked, onToggle }) => (
-  <label className="flex items-center gap-2 px-2 py-1 rounded cursor-pointer hover:bg-slate-900 transition-all">
+  // La etiqueta entera es el objetivo, no la casilla: ésta mide 20 px y no
+  // crece sin deformarse, pero la fila que la envuelve sí, y pulsarla hace lo
+  // mismo.
+  <label className="min-h-tap flex items-center gap-2 px-2 rounded cursor-pointer hover:bg-slate-900 transition-all">
     <input type="checkbox" checked={checked} onChange={onToggle} className="accent-amber-500" />
     <span
-      className={`text-xs flex-1 truncate ${checked ? 'font-semibold' : 'text-slate-400'}`}
+      className={`text-sm flex-1 truncate ${checked ? 'font-semibold' : 'text-slate-400'}`}
       style={checked ? { color: colour } : undefined}
     >
       {weapon}
     </span>
-    <span className={`text-[10px] ${count ? 'text-slate-500' : 'text-slate-700'}`}>{count}</span>
+    <span className={`text-[11px] tabular-nums ${count ? 'text-slate-500' : 'text-slate-700'}`}>
+      {count}
+    </span>
   </label>
 );
 
@@ -442,7 +447,7 @@ const MemberManager: React.FC<MemberManagerProps> = ({
           </button>
         </div>
       ) : (
-        <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
           {visible.map((p) => (
             <PlayerCard
               key={p.id}

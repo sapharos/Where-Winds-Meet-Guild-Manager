@@ -35,6 +35,10 @@ export default {
   darkMode: ['class', '[data-theme="dark"]'],
   theme: {
     extend: {
+      // Tailwind empieza en 640, que para este producto es tarde: entre un
+      // teléfono de 320 y uno de 430 hay más diferencia que entre uno de 430 y
+      // una tablet, y ahí no había ningún punto donde decidir nada.
+      screens: { xs: '400px' },
       colors: {
         slate: {
           50: step('--n-50'),

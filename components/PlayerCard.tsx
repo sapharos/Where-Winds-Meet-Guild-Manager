@@ -144,7 +144,11 @@ const PlayerCard: React.FC<PlayerCardProps> = ({
 
   return (
     <div
-      className={`relative p-3 rounded-lg border transition-all ${
+      // min-w-0 en la raíz porque la tarjeta es hija de un grid, y un hijo de
+      // grid no baja de su contenido mínimo salvo que se le diga. Sin esto, a
+      // 320 px la tarjeta medía 467 y empujaba la página entera fuera de la
+      // pantalla: el desborde no lo causaba el grid, lo causaba esto.
+      className={`relative min-w-0 p-3 rounded-lg border transition-all ${
         gone
           ? 'border-slate-800 opacity-50 grayscale'
           : player.isStarter
@@ -185,8 +189,13 @@ const PlayerCard: React.FC<PlayerCardProps> = ({
             {ROLE_ICONS[player.role]}
           </div>
           <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <h4 className="font-bold text-slate-100 leading-tight truncate max-w-[140px]">{player.name}</h4>
+            {/* min-w-0 en la fila y no un tope fijo en el nombre: con
+                `max-w-[140px]` el nombre se recortaba siempre a 140 px aunque
+                sobrara sitio, y aun así la fila no encogía por debajo de su
+                contenido, así que a 320 px la tarjeta empujaba la página entera
+                fuera de la pantalla. Ahora el nombre ocupa lo que hay. */}
+            <div className="flex items-center gap-2 min-w-0">
+              <h4 className="font-bold text-slate-100 leading-tight truncate">{player.name}</h4>
               {player.martialMastery !== undefined && (
                 <span
                   className="text-[11px] text-amber-400/90 tabular-nums shrink-0"

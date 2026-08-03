@@ -211,6 +211,43 @@ textarea[class] {
   font-size: max(16px, 1em);
 }
 
+/**
+ * El suelo de 44 px, en la base.
+ *
+ * Tras arreglar a mano lo peor -- los seis iconos de 20x24 de la tarjeta de
+ * miembro, los 16x16 del tablero, los 55x17 del banquillo -- quedaba una banda
+ * de entre 29 y 42 px repartida por toda la aplicación: pestañas, filtros,
+ * botones primarios. Cuarenta sitios, todos por la misma razón (`py-2` sobre
+ * texto de 14), y ninguno arreglable de forma que no se volviera a torcer al
+ * escribir el siguiente botón.
+ *
+ * Así que el suelo va aquí. `min-height` y no `height`: un botón que necesita
+ * dos líneas sigue creciendo. Y `align-items: center` para que el contenido no
+ * se quede pegado arriba en los que ahora sobran de alto.
+ *
+ * La excepción está declarada, no supuesta: `.tap-suelto` lo desactiva para lo
+ * que de verdad va dentro de una línea de texto -- una casilla, un enlace en
+ * mitad de un párrafo -- donde 44 px de alto rompen el renglón.
+ */
+button:not(.tap-suelto),
+select:not(.tap-suelto),
+summary:not(.tap-suelto),
+[role='button']:not(.tap-suelto) {
+  min-height: 44px;
+}
+
+button:not(.tap-suelto):not(:disabled) {
+  align-items: center;
+}
+
+/* La casilla nativa mide 13 px y no se puede agrandar sin deformarla, así que
+   lo que crece es su zona de toque. */
+input[type='checkbox']:not(.tap-suelto),
+input[type='radio']:not(.tap-suelto) {
+  min-width: 20px;
+  min-height: 20px;
+}
+
 /* Foco visible en todo lo interactivo. El diagnóstico no encontró ni uno. */
 :focus-visible {
   outline: 2px solid rgb(var(--a-500));

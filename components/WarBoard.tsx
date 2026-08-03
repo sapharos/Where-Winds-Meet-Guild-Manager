@@ -357,12 +357,15 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
 
       <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-4">
         <div className="flex items-center justify-between gap-3 flex-wrap">
-          <div className="flex bg-slate-950 p-1 rounded-lg border border-slate-800">
+          {/* A 320 px los dos botones sumaban 288 y empujaban la página entera
+              fuera de la pantalla. Con flex-1 y min-w-0 se reparten lo que hay
+              y el texto se recorta antes que el layout. */}
+          <div className="flex w-full sm:w-auto bg-slate-950 p-1 rounded-lg border border-slate-800">
             {(['attack', 'defense'] as WarSide[]).map((s) => (
               <button
                 key={s}
                 onClick={() => setSide(s)}
-                className={`px-5 py-2 rounded-md text-sm font-bold transition-all flex items-center gap-2 ${
+                className={`flex-1 sm:flex-none min-w-0 px-3 sm:px-5 py-2 rounded-md text-sm font-bold transition-all flex items-center justify-center gap-2 ${
                   side === s
                     ? s === 'attack'
                       ? 'bg-red-700 text-white'
@@ -370,8 +373,13 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
                     : 'text-slate-500 hover:text-slate-300'
                 }`}
               >
-                <i className={`fa-solid ${s === 'attack' ? 'fa-khanda' : 'fa-shield'}`}></i>
-                Despliegue {WAR_SIDE_LABELS[s]}
+                <i className={`fa-solid shrink-0 ${s === 'attack' ? 'fa-khanda' : 'fa-shield'}`}></i>
+                <span className="truncate">
+                  {/* "Despliegue" es el contexto de la sección, no el dato: en
+                      un teléfono estrecho se cae antes que el bando. */}
+                  <span className="hidden xs:inline">Despliegue </span>
+                  {WAR_SIDE_LABELS[s]}
+                </span>
               </button>
             ))}
           </div>
@@ -572,7 +580,11 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
         </div>
       )}
 
-      <div className={`grid gap-4 ${shut ? 'lg:grid-cols-3' : 'lg:grid-cols-4'}`}>
+      {/* grid-cols-1 explícito y no `grid` a secas: sin columnas declaradas la
+          única pista se dimensiona por su contenido y puede pasarse del
+          contenedor, que es lo que hacía que las líneas midieran 334 px dentro
+          de 288. `grid-cols-1` es `minmax(0, 1fr)`, que sí tiene techo. */}
+      <div className={`grid grid-cols-1 gap-4 ${shut ? 'lg:grid-cols-3' : 'lg:grid-cols-4'}`}>
         {WAR_LANES.map((lane) => {
           const members = inLane(lane.id);
           const target = strategy?.composition?.[lane.id];
@@ -600,7 +612,10 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
                 event.preventDefault();
                 drop(lane.id);
               }}
-              className={`rounded-xl border p-4 transition-all ${
+              // min-w-0, como en la tarjeta de miembro: un hijo de grid no baja
+              // de su contenido mínimo salvo que se le diga, y la fila de
+              // "Tanques 3/2 Sanadores 1/1 DPS 2/4" lo fijaba en 300 px.
+              className={`min-w-0 rounded-xl border p-4 transition-all ${
                 welcome ? 'ring-2 ring-offset-2 ring-offset-slate-950' : ''
               } ${refuses ? 'opacity-60' : ''}`}
               style={{
@@ -624,7 +639,7 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
 
               {/* A strategy states the shape a lane should have; the difference
                   from what it does have is the whole reason to record one. */}
-              <div className="flex gap-2 mb-3 text-[10px] uppercase tracking-wider">
+              <div className="flex flex-wrap gap-x-2 gap-y-0.5 mb-3 text-[11px] uppercase tracking-wider">
                 {(['tank', 'healer', 'dps'] as const).map((key) => {
                   const want = target?.[key];
                   const has = counts[key];
