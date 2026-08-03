@@ -63,7 +63,7 @@ const wash = (build: PlayerBuild | undefined, sets: WeaponSet[]) => {
   // Each colour holds its own end before the blend, as on the roster card: a
   // plain ramp reaches the second weapon only at the last column of pixels.
   return {
-    background: `linear-gradient(90deg, ${from}40 0%, ${from}40 22%, ${to}40 78%, ${to}40 100%), #0b1120`,
+    background: `linear-gradient(90deg, ${from}40 0%, ${from}40 22%, ${to}40 78%, ${to}40 100%), rgb(var(--n-900))`,
   };
 };
 
@@ -471,7 +471,7 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
                 </span>
                 <button
                   onClick={() => setFinishing(true)}
-                  className="text-sm font-bold px-4 py-2 rounded border border-slate-700 text-slate-300 hover:text-white transition-all"
+                  className="text-sm font-bold px-4 py-2 rounded border border-slate-700 text-slate-300 hover:text-slate-100 transition-all"
                 >
                   Finalizar guerra
                 </button>

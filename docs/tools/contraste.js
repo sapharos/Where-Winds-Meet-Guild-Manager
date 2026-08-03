@@ -31,7 +31,9 @@ const THEMES = {
   claro: {
     surface: '#E9EDEA',
     'surface-raised': '#F5F7F4',
-    'surface-sunken': '#DDE3DF',
+    // Sirve de fondo de página y de pozo de campo a la vez: el código usa
+    // `bg-slate-950` para los dos, y separarlos costaría cuarenta ediciones.
+    'surface-sunken': '#E1E7E3',
     'text-primary': '#17211F',
     'text-muted': '#57655F',
     border: '#C6CFC9',

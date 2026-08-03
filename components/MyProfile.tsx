@@ -59,7 +59,7 @@ const MyProfile: React.FC<Props> = ({ player, weaponSets, onEditBuilds }) => {
       >
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div>
-            <h1 className="cinzel text-3xl font-bold text-white">{player.name}</h1>
+            <h1 className="cinzel text-3xl font-bold text-slate-100">{player.name}</h1>
             <p className="text-sm text-slate-300 mt-1">
               {player.sect} · Nivel {player.level}
             </p>
@@ -90,7 +90,7 @@ const MyProfile: React.FC<Props> = ({ player, weaponSets, onEditBuilds }) => {
           {latest && (
             <div className="text-right">
               <p className="text-[10px] uppercase tracking-wider text-slate-400">Actividad semanal</p>
-              <p className="text-4xl font-bold text-white tabular-nums">{latest.week_activity ?? '—'}</p>
+              <p className="text-4xl font-bold text-slate-100 tabular-nums">{latest.week_activity ?? '—'}</p>
               {previous && number(latest.week_activity) !== null && number(previous.week_activity) !== null && (
                 <p
                   className={`text-xs font-semibold ${

@@ -67,7 +67,7 @@ luz y es **más claro** que la superficie. Es una inversión con causa física, 
 |---|---|---|---|
 | `surface` | `#E9EDEA` | `#0F1614` | El vidriado. En oscuro conserva el verde-azul: nunca es gris neutro. |
 | `surface-raised` | `#F5F7F4` | `#16201D` | El vidriado fino del borde, donde asoma la pasta. Tarjetas, hojas. |
-| `surface-sunken` | `#DDE3DF` | `#0A0F0E` | El vidriado encharcado en el hueco. Campos, pozos, fondos de tabla. |
+| `surface-sunken` | `#E1E7E3` | `#0A0F0E` | El vidriado encharcado en el hueco. Fondo de página, campos, fondos de tabla. |
 | `text-primary` | `#17211F` | `#E4EAE6` | El punteado de óxido de hierro del vidriado. **No es negro ni blanco.** |
 | `text-muted` | `#57655F` | `#93A29C` | El mismo óxido, diluido. |
 | `border` | `#C6CFC9` | `#2A3733` | **开片, la grieta.** Trazo de reposo. |

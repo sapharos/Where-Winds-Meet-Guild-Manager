@@ -27,7 +27,7 @@ const CollaborationPanel: React.FC<CollaborationPanelProps> = ({
       <div className="flex items-center gap-3 bg-amber-900/20 border border-amber-600/30 px-3 py-1.5 rounded-lg animate-in fade-in zoom-in-95">
         <div className="flex flex-col">
           <span className="text-[9px] uppercase font-bold text-amber-500 tracking-widest leading-none">Código de mando</span>
-          <span className="text-xs font-mono font-bold text-white tracking-tighter">{peerId}</span>
+          <span className="text-xs font-mono font-bold text-slate-100 tracking-tighter">{peerId}</span>
         </div>
         <div className="w-px h-6 bg-amber-600/30"></div>
         <div className="flex items-center gap-2">
@@ -53,7 +53,7 @@ const CollaborationPanel: React.FC<CollaborationPanelProps> = ({
       <div className="flex items-center gap-3 bg-blue-900/20 border border-blue-600/30 px-3 py-1.5 rounded-lg animate-in fade-in zoom-in-95">
         <div className="flex flex-col">
           <span className="text-[9px] uppercase font-bold text-blue-400 tracking-widest leading-none">Modo observador</span>
-          <span className="text-xs font-bold text-white tracking-widest">SOLO LECTURA</span>
+          <span className="text-xs font-bold text-slate-100 tracking-widest">SOLO LECTURA</span>
         </div>
         <div className="w-px h-6 bg-blue-600/30"></div>
         <button 
@@ -106,7 +106,7 @@ const CollaborationPanel: React.FC<CollaborationPanelProps> = ({
           </button>
           <button 
             onClick={() => setShowInput(false)}
-            className="px-2 py-1 text-slate-500 hover:text-white"
+            className="px-2 py-1 text-slate-500 hover:text-slate-100"
           >
             <i className="fa-solid fa-xmark"></i>
           </button>

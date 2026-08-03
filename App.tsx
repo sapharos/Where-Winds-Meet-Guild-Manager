@@ -15,6 +15,7 @@ import AdminPanel from './components/AdminPanel';
 import ScanImport from './components/ScanImport';
 import MemberHistory from './components/MemberHistory';
 import BuildEditor from './components/BuildEditor';
+import ThemeToggle from './components/ThemeToggle';
 
 const App: React.FC = () => {
   const [session, setSession] = useState<Session | null>(null);
@@ -423,7 +424,7 @@ const App: React.FC = () => {
 
   if (!authChecked) {
     return (
-      <div className="min-h-screen bg-[#0a0b0c] text-slate-500 flex items-center justify-center gap-3">
+      <div className="min-h-screen bg-slate-950 text-slate-500 flex items-center justify-center gap-3">
         <i className="fa-solid fa-circle-notch fa-spin"></i>
         Cargando...
       </div>
@@ -440,8 +441,10 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-[#0a0b0c] text-slate-200">
-      <header className="border-b border-slate-800 bg-slate-900/80 backdrop-blur-md sticky top-0 z-50">
+    <div className="min-h-screen bg-slate-950 text-slate-200">
+      {/* pad-safe-top: pegada arriba y sin ella, la fila de identidad se mete
+          bajo el recorte de la pantalla en cuanto el teléfono tiene uno. */}
+      <header className="border-b border-slate-800 bg-slate-900/80 backdrop-blur-md sticky top-0 z-50 pad-safe-top">
         {/* Identity and account on one line, navigation on its own below it.
             Sharing a line is what squeezed the labels into three lines each. */}
         <div className="max-w-[1600px] mx-auto px-4 sm:px-6 pt-3 flex items-center justify-between gap-3">
@@ -454,7 +457,7 @@ const App: React.FC = () => {
               <i className="fa-solid fa-wind text-xl text-white"></i>
             </div>
             <div className="min-w-0">
-              <h1 className="cinzel text-lg sm:text-xl font-bold tracking-widest text-white leading-none truncate">
+              <h1 className="cinzel text-lg sm:text-xl font-bold tracking-widest text-slate-100 leading-none truncate">
                 ZONA ZERO
               </h1>
               <div className="flex items-center gap-2 mt-0.5">
@@ -555,11 +558,12 @@ const App: React.FC = () => {
 
             <div className="flex items-center gap-2">
               <div className="text-right leading-tight hidden md:block">
-                <div className="text-sm font-semibold text-white">{session.user.username}</div>
+                <div className="text-sm font-semibold text-slate-100">{session.user.username}</div>
                 <div className="text-[10px] uppercase tracking-wider text-amber-500 font-bold">
                   {ROLE_LABELS[session.user.role] ?? session.user.role}
                 </div>
               </div>
+              <ThemeToggle />
               <div className="flex bg-slate-950 p-1 rounded-lg border border-slate-800">
                 <button
                   onClick={handleChangePassword}
@@ -674,24 +678,6 @@ const App: React.FC = () => {
         />
       )}
 
-      {activeTab === 'war-room' && (
-        <footer className="hidden md:flex fixed bottom-0 left-0 right-0 bg-slate-950/90 backdrop-blur-md border-t border-slate-800 p-3 flex justify-center z-50">
-           <div className="flex items-center gap-8 text-[10px] font-bold uppercase tracking-widest text-slate-500">
-              <span className="flex items-center gap-2">
-                 <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></div>
-                 Grado defensivo: <span className="text-white">ÓPTIMO</span>
-              </span>
-              <span className="flex items-center gap-2">
-                 <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>
-                 Asedio: <span className="text-white">EQUILIBRADO</span>
-              </span>
-              <span className="flex items-center gap-2">
-                 <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
-                 Sostenimiento: <span className="text-white">ESTABLE</span>
-              </span>
-           </div>
-        </footer>
-      )}
     </div>
   );
 };

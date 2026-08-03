@@ -1,0 +1,86 @@
+@import './tokens.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/**
+ * Lo que vivía suelto dentro de <style> en index.html, ahora con tokens.
+ *
+ * Las clases conservan su nombre aunque el material haya cambiado. `.cinzel`
+ * está escrita en unos veinte componentes y ya no apunta a Cinzel: renombrarla
+ * costaría veinte ediciones de riesgo para no cambiar nada de lo que se ve.
+ * El nombre es deuda, y queda anotada; la piel no espera a que se salde.
+ */
+
+@layer base {
+  body {
+    font-family: theme('fontFamily.sans');
+  }
+
+  .cinzel {
+    font-family: theme('fontFamily.display');
+    font-weight: 500;
+    letter-spacing: 0.01em;
+  }
+
+  /* Las barras de scroll del sistema respetan el tema por `color-scheme`, pero
+     las de WebKit hay que pintarlas a mano o se quedan grises en los dos. */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: rgb(var(--n-950));
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgb(var(--n-800));
+    border-radius: 4px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgb(var(--n-700));
+  }
+}
+
+@layer components {
+  .no-bar {
+    scrollbar-width: none;
+  }
+  .no-bar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 4px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: rgb(var(--n-700));
+    border-radius: 10px;
+  }
+
+  /* El latido del anfitrión de una sesión compartida. Era ámbar fijo; ahora es
+     el latón de la grapa, que es lo que significa: alguien está sujetando esto. */
+  .pulse-gold {
+    animation: pulse-staple 2s infinite;
+  }
+
+  /* Barras fijas que no se meten bajo el recorte ni bajo la barra de gestos. */
+  .pad-safe-top {
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+  .pad-safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+}
+
+@keyframes pulse-staple {
+  0% {
+    box-shadow: 0 0 0 0 rgb(var(--w-500) / 0.4);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgb(var(--w-500) / 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgb(var(--w-500) / 0);
+  }
+}

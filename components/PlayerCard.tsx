@@ -82,8 +82,11 @@ const PlayerCard: React.FC<PlayerCardProps> = ({
         // Each colour holds its own third before the blend starts. A plain
         // 0%-to-100% ramp reaches the second weapon's colour only at the last
         // column of pixels, so a card read as its first weapon and little else.
-        // Over an opaque base so it looks the same wherever the card sits.
-        background: `linear-gradient(90deg, ${from}66 0%, ${from}66 22%, ${to}66 78%, ${to}66 100%), #0b1120`,
+        // Over an opaque base so it looks the same wherever the card sits. The
+        // base is the theme's raised surface rather than a fixed near-black:
+        // pinned to one colour, every card stayed dark when the light theme
+        // arrived and the wash lost the contrast it is drawn for.
+        background: `linear-gradient(90deg, ${from}66 0%, ${from}66 22%, ${to}66 78%, ${to}66 100%), rgb(var(--n-900))`,
       }}
     >
       {/* Solid edges as well as the wash: a tint alone is easy to miss against
@@ -253,7 +256,7 @@ const PlayerCard: React.FC<PlayerCardProps> = ({
             </button>
           )}
           {onEdit && (
-            <button onClick={() => onEdit(player)} title="Editar" className="text-slate-400 hover:text-white transition-colors">
+            <button onClick={() => onEdit(player)} title="Editar" className="text-slate-400 hover:text-slate-100 transition-colors">
               <i className="fa-solid fa-pen-to-square"></i>
             </button>
           )}
