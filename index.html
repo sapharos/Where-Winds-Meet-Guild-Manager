@@ -53,8 +53,13 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- display=swap: sin él el texto se queda invisible hasta que llega la
-         fuente, que con conexión inestable es la mitad de la visita. -->
-    <link href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+         fuente, que con conexión inestable es la mitad de la visita.
+
+         Newsreader va en dos pesos estáticos y no en su versión variable. La
+         variable trae los dos ejes enteros y pesa 132 KB medidos, cinco veces
+         lo que pesaba Cinzel: cambiar de tipografía no puede costarle a nadie
+         cien kilobytes en una conexión inestable por unos titulares. -->
+    <link href="https://fonts.googleapis.com/css2?family=Newsreader:wght@600&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 </head>
 <body>
     <div id="root"></div>
