@@ -17,6 +17,22 @@ export default defineConfig(({ mode }) => {
                 target: env.API_PROXY,
                 changeOrigin: true,
                 cookieDomainRewrite: '',
+                // El despliegue sirve por HTTPS, así que marca la cookie de
+                // sesión como Secure. Aquí se llega por http://localhost y hay
+                // navegadores que entonces la tiran sin decir nada: se entra,
+                // el servidor responde que todo bien, y la siguiente petición
+                // vuelve a ser anónima. Se quita la marca sólo en este proxy,
+                // que existe únicamente para desarrollo.
+                configure: (proxy) => {
+                  proxy.on('proxyRes', (proxyRes) => {
+                    const set = proxyRes.headers['set-cookie'];
+                    if (set) {
+                      proxyRes.headers['set-cookie'] = set.map((cookie) =>
+                        cookie.replace(/;\s*Secure/gi, ''),
+                      );
+                    }
+                  });
+                },
               },
             }
           : undefined,
