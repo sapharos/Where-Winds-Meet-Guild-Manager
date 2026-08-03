@@ -143,12 +143,20 @@ const PlayerCard: React.FC<PlayerCardProps> = ({
   }[];
 
   return (
+    <>
     <div
       // min-w-0 en la raíz porque la tarjeta es hija de un grid, y un hijo de
       // grid no baja de su contenido mínimo salvo que se le diga. Sin esto, a
       // 320 px la tarjeta medía 467 y empujaba la página entera fuera de la
       // pantalla: el desborde no lo causaba el grid, lo causaba esto.
-      className={`relative min-w-0 p-3 rounded-lg border transition-all ${
+      //
+      // overflow-hidden para que la tarjeta recorte sus propias barras de
+      // color: son de 4 px de ancho y llevaban un radio de 16, que es el que
+      // tiene ahora `rounded-lg`. Un radio mayor que el ancho no se puede
+      // dibujar, así que el navegador lo aplastaba y las esquinas asomaban por
+      // fuera del borde redondeado de la tarjeta. Recortadas por el padre
+      // siguen exactamente la curva que tenga la tarjeta, ahora y después.
+      className={`relative min-w-0 overflow-hidden p-3 rounded-lg border transition-all ${
         gone
           ? 'border-slate-800 opacity-50 grayscale'
           : player.isStarter
@@ -172,13 +180,13 @@ const PlayerCard: React.FC<PlayerCardProps> = ({
           is a second colour to report. */}
       <span
         aria-hidden
-        className="absolute left-0 top-0 bottom-0 w-1 rounded-l-lg"
+        className="absolute left-0 top-0 bottom-0 w-1"
         style={{ backgroundColor: from }}
       />
       {to !== from && (
         <span
           aria-hidden
-          className="absolute right-0 top-0 bottom-0 w-1 rounded-r-lg"
+          className="absolute right-0 top-0 bottom-0 w-1"
           style={{ backgroundColor: to }}
         />
       )}
@@ -288,7 +296,11 @@ const PlayerCard: React.FC<PlayerCardProps> = ({
           </button>
         )}
       </div>
+    </div>
 
+      {/* Fuera de la tarjeta: ahora la tarjeta recorta lo que hay dentro, y una
+          hoja que cubre la pantalla no tiene nada que hacer dentro de una caja
+          de 76 px de alto. */}
       {menu && (
         <Sheet
           title={player.name}
@@ -335,7 +347,7 @@ const PlayerCard: React.FC<PlayerCardProps> = ({
           )}
         </Sheet>
       )}
-    </div>
+    </>
   );
 };
 
