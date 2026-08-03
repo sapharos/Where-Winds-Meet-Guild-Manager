@@ -3,7 +3,7 @@ import { authService, api } from '../services/authService';
 import WeaponSets from './WeaponSets';
 import TablaAncha from './TablaAncha';
 import ScanImport from './ScanImport';
-import { Bloque } from './Esqueleto';
+import { Filas } from './Esqueleto';
 import { AuthUser, ManagedUser, PERMISSION_LABELS, PermissionCatalog, Player, UserRole, ROLE_LABELS } from '../types';
 
 // Mirrors the server's LOCKED table so the boxes it will refuse to clear are
@@ -202,7 +202,22 @@ const AdminPanel: React.FC<Props> = ({
             {message.text}
           </p>
         ) : (
-          <Bloque alto="h-64" className="rounded-xl" />
+          /*
+            El hueco tiene la forma de lo que va a llegar, no la de una losa.
+            Era un rectángulo gris de 256 px sin nada alrededor, debajo de una
+            sección ya dibujada por completo: leído sin contexto no parece que
+            algo esté cargando, parece que algo está tapando la pantalla. Con su
+            título y sus filas se entiende de un vistazo qué falta y cuánto.
+          */
+          <section
+            className="bg-slate-900/60 border border-slate-800 rounded-xl p-4 sm:p-6"
+            role="status"
+            aria-label="Cargando los permisos por rol"
+          >
+            <h2 className="cinzel text-2xl font-bold text-amber-500 mb-1">Permisos por rol</h2>
+            <p className="text-sm text-slate-500 mb-5">Cargando la configuración…</p>
+            <Filas cuantas={6} />
+          </section>
         )}
       </div>
     );
