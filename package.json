@@ -8,7 +8,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "deploy": "gh-pages -d dist"
+    "deploy": "gh-pages -d dist",
+    "iconos": "node tools/generar-iconos.mjs"
   },
   "dependencies": {
     "gh-pages": "^6.3.0",
@@ -17,6 +18,9 @@
     "react-dom": "^19.2.3"
   },
   "devDependencies": {
+    "@fortawesome/free-brands-svg-icons": "^6.7.2",
+    "@fortawesome/free-regular-svg-icons": "^6.7.2",
+    "@fortawesome/free-solid-svg-icons": "^6.7.2",
     "@types/bun": "latest",
     "@types/node": "^22.14.0",
     "@types/react": "^19.2.17",

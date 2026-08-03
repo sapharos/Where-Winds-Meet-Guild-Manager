@@ -1,4 +1,6 @@
 @import './tokens.css';
+/* Generado por tools/generar-iconos.mjs. Sustituye al CDN de Font Awesome. */
+@import './iconos.generated.css';
 
 @tailwind base;
 @tailwind components;

@@ -16,6 +16,9 @@ import ReactDOM from 'react-dom/client';
 import './styles/app.css';
 import { instalarServidorFalso } from './fixtures/server';
 
+// Igual que en index.tsx: el catálogo de iconos, después de la primera pintura.
+void import('./styles/iconos.catalogo.generated.css');
+
 instalarServidorFalso();
 
 const root = document.getElementById('root');
