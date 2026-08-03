@@ -40,13 +40,13 @@ const DiscordClaim: React.FC<{ onDone: () => void }> = ({ onDone }) => {
   };
 
   return (
-    <div className="min-h-screen bg-[#0a0b0c] text-slate-200 flex items-center justify-center p-6">
+    <div className="min-h-screen bg-slate-950 text-slate-200 flex items-center justify-center p-6">
       <div className="w-full max-w-sm">
         <div className="flex flex-col items-center mb-8">
           <div className="w-16 h-16 bg-gradient-to-br from-amber-600 to-amber-900 rounded-lg flex items-center justify-center shadow-lg border border-amber-500/30 mb-4">
             <i className="fa-solid fa-wind text-3xl text-white"></i>
           </div>
-          <h1 className="cinzel text-2xl font-bold tracking-widest text-white text-center leading-tight">
+          <h1 className="cinzel text-2xl font-bold tracking-widest text-slate-100 text-center leading-tight">
             ZONA ZERO
           </h1>
         </div>

@@ -3,6 +3,7 @@ import React, { useMemo, useState } from 'react';
 import { Player, PlayerBuild, Role, Platform, MembershipStatus, GuildRank, SECTS, WeaponSet, WarSide, WAR_SIDE_LABELS } from '../types';
 import PlayerCard, { ROLE_NAMES } from './PlayerCard';
 import { SetBadge } from './BuildEditor';
+import Sheet from './Sheet';
 
 interface MemberManagerProps {
   players: Player[];
@@ -30,15 +31,20 @@ const WeaponOption: React.FC<{
   checked: boolean;
   onToggle: () => void;
 }> = ({ weapon, count, colour, checked, onToggle }) => (
-  <label className="flex items-center gap-2 px-2 py-1 rounded cursor-pointer hover:bg-slate-900 transition-all">
+  // La etiqueta entera es el objetivo, no la casilla: ésta mide 20 px y no
+  // crece sin deformarse, pero la fila que la envuelve sí, y pulsarla hace lo
+  // mismo.
+  <label className="min-h-tap flex items-center gap-2 px-2 rounded cursor-pointer hover:bg-slate-900 transition-all">
     <input type="checkbox" checked={checked} onChange={onToggle} className="accent-amber-500" />
     <span
-      className={`text-xs flex-1 truncate ${checked ? 'font-semibold' : 'text-slate-400'}`}
+      className={`text-sm flex-1 truncate ${checked ? 'font-semibold' : 'text-slate-400'}`}
       style={checked ? { color: colour } : undefined}
     >
       {weapon}
     </span>
-    <span className={`text-[10px] ${count ? 'text-slate-500' : 'text-slate-700'}`}>{count}</span>
+    <span className={`text-[11px] tabular-nums ${count ? 'text-slate-500' : 'text-slate-700'}`}>
+      {count}
+    </span>
   </label>
 );
 
@@ -85,6 +91,7 @@ const MemberManager: React.FC<MemberManagerProps> = ({
   const [sideFilter, setSideFilter] = useState<'' | WarSide>('');
   const [showGone, setShowGone] = useState(false);
   const [order, setOrder] = useState<'lineup' | 'mastery' | 'set' | 'name'>('lineup');
+  const [filtrosAbiertos, setFiltrosAbiertos] = useState(false);
 
   // The build shown on a card is the primary one; the rest describe how else
   // someone can play, which belongs in the build editor rather than here.
@@ -238,9 +245,176 @@ const MemberManager: React.FC<MemberManagerProps> = ({
     setNewRankName('');
   };
 
+  /** Todo lo que estrecha la lista, de una vez: la salida del estado vacío. */
+  const limpiarFiltros = () => {
+    setSearch('');
+    setRoleFilter('');
+    setWeaponFilter([]);
+    setSideFilter('');
+    setStartersOnly(false);
+    setShowGone(false);
+  };
+
   const active = players.filter((p) => p.isActive !== false);
   const gone = players.length - active.length;
   const starters = active.filter((p) => p.isStarter).length;
+
+  /** Cuántos filtros estrechan la lista ahora mismo, sin contar la búsqueda. */
+  const filtrosPuestos = [
+    roleFilter !== '',
+    weaponFilter.length > 0,
+    sideFilter !== '',
+    startersOnly,
+    showGone,
+  ].filter(Boolean).length;
+
+  /**
+   * Los controles, escritos una vez y colocados en dos sitios.
+   *
+   * En la rejilla a partir de sm, y dentro de la hoja en el teléfono. Como
+   * variable y no como componente: un componente declarado aquí dentro se
+   * remonta en cada render y cerraría el desplegable de armas mientras se está
+   * usando.
+   */
+  const controlesFiltro = (
+    <>
+      <select
+        value={roleFilter}
+        onChange={(e) => setRoleFilter(e.target.value as '' | Role)}
+        aria-label="Filtrar por rol"
+        className="w-full min-h-tap bg-slate-950 border border-slate-800 rounded px-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
+      >
+        <option value="">Todos los roles</option>
+        {Object.values(Role).map((r) => (
+          <option key={r} value={r}>
+            {ROLE_NAMES[r]}
+          </option>
+        ))}
+      </select>
+
+      <details className="relative">
+        <summary className="list-none cursor-pointer w-full min-h-tap bg-slate-950 border border-slate-800 rounded px-2 text-sm flex items-center justify-between gap-2 hover:border-slate-700 transition-all">
+          <span className={weaponFilter.length ? 'text-amber-400 truncate' : 'text-slate-400 truncate'}>
+            {weaponFilter.length === 0
+              ? 'Todas las armas'
+              : weaponFilter.length === 1
+                ? weaponFilter[0]
+                : `${weaponFilter.length} armas`}
+          </span>
+          <i className="fa-solid fa-chevron-down text-[10px] text-slate-600"></i>
+        </summary>
+
+        <div className="absolute z-30 mt-1 w-full sm:w-72 max-w-[calc(100vw-3rem)] max-h-80 overflow-y-auto overscroll-contain custom-scrollbar bg-slate-950 border border-slate-800 rounded-lg p-2 shadow-2">
+          <button
+            onClick={() => setWeaponFilter([])}
+            disabled={!weaponFilter.length}
+            className="w-full min-h-tap text-left text-sm px-2 rounded text-slate-500 hover:text-amber-500 disabled:text-slate-700 disabled:hover:text-slate-700 transition-all"
+          >
+            <i className="fa-solid fa-xmark mr-1.5"></i>
+            Quitar el filtro de armas
+          </button>
+
+          {weaponGroups.sets.map((set) => (
+            <div key={set.id} className="mt-1">
+              <div className="flex items-center gap-1.5 px-2 py-1">
+                <SetBadge set={set} size={12} />
+                <span className="text-[11px] uppercase tracking-wider" style={{ color: set.color }}>
+                  {set.name}
+                </span>
+              </div>
+              {set.weapons.map((weapon) => (
+                <WeaponOption
+                  key={weapon}
+                  weapon={weapon}
+                  count={usage.get(weapon) ?? 0}
+                  colour={set.color}
+                  checked={weaponFilter.includes(weapon)}
+                  onToggle={() => toggleWeapon(weapon)}
+                />
+              ))}
+            </div>
+          ))}
+
+          {weaponGroups.loose.length > 0 && (
+            <div className="mt-1">
+              <div className="flex items-center gap-1.5 px-2 py-1">
+                <i className="fa-solid fa-triangle-exclamation text-[11px] text-amber-600"></i>
+                <span className="text-[11px] uppercase tracking-wider text-amber-600">
+                  Fuera del catálogo
+                </span>
+              </div>
+              {weaponGroups.loose.map((weapon) => (
+                <WeaponOption
+                  key={weapon}
+                  weapon={weapon}
+                  count={usage.get(weapon) ?? 0}
+                  colour="#f59e0b"
+                  checked={weaponFilter.includes(weapon)}
+                  onToggle={() => toggleWeapon(weapon)}
+                />
+              ))}
+            </div>
+          )}
+
+          {!weaponGroups.sets.length && !weaponGroups.loose.length && (
+            <p className="text-sm text-slate-600 px-2 py-2">No hay conjuntos de armas definidos.</p>
+          )}
+        </div>
+      </details>
+
+      <select
+        value={sideFilter}
+        onChange={(e) => setSideFilter(e.target.value as '' | WarSide)}
+        aria-label="Filtrar por bando"
+        className="w-full min-h-tap bg-slate-950 border border-slate-800 rounded px-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
+      >
+        <option value="">Ataque y defensa</option>
+        {(Object.keys(WAR_SIDE_LABELS) as WarSide[]).map((side) => (
+          <option key={side} value={side}>
+            {WAR_SIDE_LABELS[side]}
+          </option>
+        ))}
+      </select>
+
+      <select
+        value={order}
+        onChange={(e) => setOrder(e.target.value as 'lineup' | 'mastery' | 'set' | 'name')}
+        aria-label="Orden de la lista"
+        className="w-full min-h-tap bg-slate-950 border border-slate-800 rounded px-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
+      >
+        <option value="lineup">Titulares primero</option>
+        <option value="mastery">Maestría marcial ↓</option>
+        <option value="set">Conjunto de armas</option>
+        <option value="name">Nombre</option>
+      </select>
+
+      <button
+        onClick={() => setShowGone((v) => !v)}
+        aria-pressed={showGone}
+        className={`w-full min-h-tap rounded px-2 text-sm border transition-all flex items-center justify-center gap-2 ${
+          showGone
+            ? 'border-slate-500 text-slate-300 bg-slate-800/60'
+            : 'border-slate-800 text-slate-500 hover:text-slate-300'
+        }`}
+      >
+        <i className="fa-solid fa-user-slash"></i>
+        Ver bajas{gone > 0 ? ` (${gone})` : ''}
+      </button>
+
+      <button
+        onClick={() => setStartersOnly((v) => !v)}
+        aria-pressed={startersOnly}
+        className={`w-full min-h-tap rounded px-2 text-sm border transition-all flex items-center justify-center gap-2 ${
+          startersOnly
+            ? 'border-amber-500 text-amber-400 bg-amber-500/10'
+            : 'border-slate-800 text-slate-500 hover:text-slate-300'
+        }`}
+      >
+        <i className={`${startersOnly ? 'fa-solid' : 'fa-regular'} fa-star`}></i>
+        Solo titulares
+      </button>
+    </>
+  );
 
   return (
     <div className="space-y-5">
@@ -264,164 +438,121 @@ const MemberManager: React.FC<MemberManagerProps> = ({
           )}
         </div>
 
-        <div className="grid sm:grid-cols-2 lg:grid-cols-7 gap-3">
+        {/*
+          En el teléfono, la búsqueda a la vista y el resto detrás de un botón.
+
+          Siete controles en columna medían 380 px: la primera tarjeta de
+          miembro empezaba a 735 px del borde superior, es decir, por debajo de
+          la pantalla. Se veía el buscador, cinco desplegables y dos botones, y
+          había que desplazar para ver a alguien -- en una pantalla cuyo trabajo
+          es enseñar quién está en el gremio.
+
+          El buscador se queda fuera porque es el que más se usa y porque
+          escribir dos letras sustituye a casi cualquier filtro. Los demás
+          entran en una hoja que dice cuántos hay puestos, para que esconderlos
+          no signifique olvidarlos. A partir de sm vuelve la rejilla entera.
+        */}
+        <div className="flex gap-2 sm:hidden">
+          <div className="relative flex-1 min-w-0">
+            <i className="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-600 text-xs"></i>
+            <input
+              type="search"
+              value={search}
+              placeholder="Buscar por nombre..."
+              aria-label="Buscar por nombre"
+              autoComplete="off"
+              enterKeyHint="search"
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full min-h-tap bg-slate-950 border border-slate-800 rounded px-3 pl-8 text-sm outline-none focus:ring-1 focus:ring-amber-500"
+            />
+          </div>
+          <button
+            onClick={() => setFiltrosAbiertos(true)}
+            aria-haspopup="dialog"
+            className={`shrink-0 min-h-tap px-3 rounded border text-sm flex items-center gap-2 transition-colors duration-micro ${
+              filtrosPuestos
+                ? 'border-amber-500 text-amber-400 bg-amber-500/10'
+                : 'border-slate-800 text-slate-400'
+            }`}
+          >
+            <i className="fa-solid fa-filter"></i>
+            Filtros
+            {filtrosPuestos > 0 && (
+              <span className="tabular-nums font-bold">({filtrosPuestos})</span>
+            )}
+          </button>
+        </div>
+
+        <div className="hidden sm:grid sm:grid-cols-2 lg:grid-cols-7 gap-3">
           <div className="relative">
             <i className="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-600 text-xs"></i>
             <input
-              type="text"
+              type="search"
               value={search}
               placeholder="Buscar por nombre..."
+              aria-label="Buscar por nombre"
+              autoComplete="off"
+              enterKeyHint="search"
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-800 rounded p-2 pl-8 text-sm outline-none focus:ring-1 focus:ring-amber-500"
+              className="w-full min-h-tap bg-slate-950 border border-slate-800 rounded px-3 pl-8 text-sm outline-none focus:ring-1 focus:ring-amber-500"
             />
           </div>
 
-          <select
-            value={roleFilter}
-            onChange={(e) => setRoleFilter(e.target.value as '' | Role)}
-            className="bg-slate-950 border border-slate-800 rounded p-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
-          >
-            <option value="">Todos los roles</option>
-            {Object.values(Role).map((r) => (
-              <option key={r} value={r}>
-                {ROLE_NAMES[r]}
-              </option>
-            ))}
-          </select>
-
-          <details className="relative">
-            <summary className="list-none cursor-pointer bg-slate-950 border border-slate-800 rounded p-2 text-sm flex items-center justify-between gap-2 hover:border-slate-700 transition-all">
-              <span className={weaponFilter.length ? 'text-amber-400 truncate' : 'text-slate-400 truncate'}>
-                {weaponFilter.length === 0
-                  ? 'Todas las armas'
-                  : weaponFilter.length === 1
-                    ? weaponFilter[0]
-                    : `${weaponFilter.length} armas`}
-              </span>
-              <i className="fa-solid fa-chevron-down text-[10px] text-slate-600"></i>
-            </summary>
-
-            <div className="absolute z-30 mt-1 w-72 max-w-[calc(100vw-3rem)] max-h-80 overflow-y-auto custom-scrollbar bg-slate-950 border border-slate-800 rounded-lg p-2 shadow-2xl">
-              <button
-                onClick={() => setWeaponFilter([])}
-                disabled={!weaponFilter.length}
-                className="w-full text-left text-[11px] px-2 py-1.5 rounded text-slate-500 hover:text-amber-500 disabled:text-slate-700 disabled:hover:text-slate-700 transition-all"
-              >
-                <i className="fa-solid fa-xmark mr-1.5"></i>
-                Quitar el filtro de armas
-              </button>
-
-              {weaponGroups.sets.map((set) => (
-                <div key={set.id} className="mt-1">
-                  <div className="flex items-center gap-1.5 px-2 py-1">
-                    <SetBadge set={set} size={12} />
-                    <span className="text-[10px] uppercase tracking-wider" style={{ color: set.color }}>
-                      {set.name}
-                    </span>
-                  </div>
-                  {set.weapons.map((weapon) => (
-                    <WeaponOption
-                      key={weapon}
-                      weapon={weapon}
-                      count={usage.get(weapon) ?? 0}
-                      colour={set.color}
-                      checked={weaponFilter.includes(weapon)}
-                      onToggle={() => toggleWeapon(weapon)}
-                    />
-                  ))}
-                </div>
-              ))}
-
-              {weaponGroups.loose.length > 0 && (
-                <div className="mt-1">
-                  <div className="flex items-center gap-1.5 px-2 py-1">
-                    <i className="fa-solid fa-triangle-exclamation text-[10px] text-amber-600"></i>
-                    <span className="text-[10px] uppercase tracking-wider text-amber-600">
-                      Fuera del catálogo
-                    </span>
-                  </div>
-                  {weaponGroups.loose.map((weapon) => (
-                    <WeaponOption
-                      key={weapon}
-                      weapon={weapon}
-                      count={usage.get(weapon) ?? 0}
-                      colour="#f59e0b"
-                      checked={weaponFilter.includes(weapon)}
-                      onToggle={() => toggleWeapon(weapon)}
-                    />
-                  ))}
-                </div>
-              )}
-
-              {!weaponGroups.sets.length && !weaponGroups.loose.length && (
-                <p className="text-[11px] text-slate-600 px-2 py-2">
-                  No hay conjuntos de armas definidos.
-                </p>
-              )}
-            </div>
-          </details>
-
-          <select
-            value={sideFilter}
-            onChange={(e) => setSideFilter(e.target.value as '' | WarSide)}
-            className="bg-slate-950 border border-slate-800 rounded p-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
-          >
-            <option value="">Ataque y defensa</option>
-            {(Object.keys(WAR_SIDE_LABELS) as WarSide[]).map((side) => (
-              <option key={side} value={side}>
-                {WAR_SIDE_LABELS[side]}
-              </option>
-            ))}
-          </select>
-
-          <select
-            value={order}
-            onChange={(e) => setOrder(e.target.value as 'lineup' | 'mastery' | 'set' | 'name')}
-            title="Orden de la lista"
-            className="bg-slate-950 border border-slate-800 rounded p-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
-          >
-            <option value="lineup">Titulares primero</option>
-            <option value="mastery">Maestría marcial ↓</option>
-            <option value="set">Conjunto de armas</option>
-            <option value="name">Nombre</option>
-          </select>
-
-          <button
-            onClick={() => setShowGone((v) => !v)}
-            title={gone ? `${gone} fuera del gremio` : 'Nadie marcado como fuera del gremio'}
-            className={`rounded p-2 text-sm border transition-all flex items-center justify-center gap-2 ${
-              showGone
-                ? 'border-slate-500 text-slate-300 bg-slate-800/60'
-                : 'border-slate-800 text-slate-500 hover:text-slate-300'
-            }`}
-          >
-            <i className="fa-solid fa-user-slash"></i>
-            Ver bajas{gone > 0 ? ` (${gone})` : ''}
-          </button>
-
-          <button
-            onClick={() => setStartersOnly((v) => !v)}
-            className={`rounded p-2 text-sm border transition-all flex items-center justify-center gap-2 ${
-              startersOnly
-                ? 'border-amber-500 text-amber-400 bg-amber-500/10'
-                : 'border-slate-800 text-slate-500 hover:text-slate-300'
-            }`}
-          >
-            <i className={`${startersOnly ? 'fa-solid' : 'fa-regular'} fa-star`}></i>
-            Solo titulares
-          </button>
+          {controlesFiltro}
         </div>
       </div>
 
+      {filtrosAbiertos && (
+        <Sheet
+          title="Filtros"
+          subtitle={`${visible.length} de ${active.length} miembros a la vista`}
+          size="sm"
+          onClose={() => setFiltrosAbiertos(false)}
+          footer={
+            <div className="flex gap-2">
+              <button
+                onClick={limpiarFiltros}
+                disabled={!filtrosPuestos && !search}
+                className="flex-1 min-h-tap rounded border border-slate-700 text-slate-300 disabled:opacity-40 transition-colors duration-micro"
+              >
+                Quitar todos
+              </button>
+              <button
+                onClick={() => setFiltrosAbiertos(false)}
+                className="flex-1 min-h-tap rounded bg-amber-600 hover:bg-amber-500 text-white font-bold transition-colors duration-micro"
+              >
+                Ver {visible.length}
+              </button>
+            </div>
+          }
+        >
+          <div className="flex flex-col gap-3">{controlesFiltro}</div>
+        </Sheet>
+      )}
+
       {visible.length === 0 ? (
-        <p className="text-sm text-slate-500 text-center py-12">
-          Ningún miembro coincide con estos filtros.
-        </p>
+        // Un estado vacío que sólo constata el vacío deja al lector con el
+        // problema en la mano. Este dice además cuál es la salida, y la ofrece.
+        <div className="text-center py-12 px-4">
+          <i className="fa-solid fa-users text-3xl text-slate-700"></i>
+          <p className="text-sm text-slate-400 mt-3">Ningún miembro coincide con estos filtros.</p>
+          <button
+            onClick={limpiarFiltros}
+            className="mt-4 min-h-tap px-4 rounded-md border border-slate-700 text-slate-300 hover:text-amber-500 hover:border-amber-700 transition-colors duration-micro"
+          >
+            <i className="fa-solid fa-xmark mr-2"></i>
+            Quitar todos los filtros
+          </button>
+        </div>
       ) : (
-        <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-          {visible.map((p) => (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+          {visible.map((p, at) => (
+            // El escalonado se detiene en el sexto: a partir de ahí el retardo
+            // deja de crecer y el resto entra a la vez. Escalonar cincuenta y
+            // ocho tarjetas serían dos segundos y medio de espera para ver una
+            // lista que ya estaba lista.
+            <div key={p.id} className="entra" style={{ '--paso': Math.min(at, 6) } as React.CSSProperties}>
             <PlayerCard
-              key={p.id}
               player={p}
               build={primaryOf.get(p.id)}
               weaponSets={weaponSets}
@@ -433,26 +564,18 @@ const MemberManager: React.FC<MemberManagerProps> = ({
               onCycleSide={isViewer ? undefined : onCycleSide}
               onToggleActive={isViewer ? undefined : onToggleActive}
             />
+            </div>
           ))}
         </div>
       )}
 
       {formOpen && (
-        <div className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex items-start justify-center p-6 overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-xl w-full max-w-lg my-8">
-            <div className="flex items-center justify-between p-6 border-b border-slate-800">
-              <h2 className="cinzel text-2xl font-bold text-amber-500">
-                {editing ? `Editar a ${editing.name}` : 'Nuevo miembro'}
-              </h2>
-              <button
-                onClick={() => { setFormOpen(false); setEditing(null); }}
-                className="p-2 text-slate-400 hover:text-amber-500 transition-all"
-              >
-                <i className="fa-solid fa-xmark text-xl"></i>
-              </button>
-            </div>
-
-            <form onSubmit={submit} className="p-6 space-y-4">
+        <Sheet
+          title={editing ? `Editar a ${editing.name}` : 'Nuevo miembro'}
+          size="md"
+          onClose={() => { setFormOpen(false); setEditing(null); }}
+        >
+            <form onSubmit={submit} className="space-y-4">
               <div>
                 <label className="block text-xs uppercase tracking-wider text-slate-500 mb-1">Nombre</label>
                 <input
@@ -484,7 +607,9 @@ const MemberManager: React.FC<MemberManagerProps> = ({
                   <label className="block text-xs uppercase tracking-wider text-slate-500 mb-1">Nivel</label>
                   <input
                     type="number"
-                    className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
+                    inputMode="numeric"
+                    autoComplete="off"
+                    className="w-full min-h-tap bg-slate-950 border border-slate-800 rounded px-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
                     value={formData.level}
                     onChange={(e) => setFormData({ ...formData, level: parseInt(e.target.value) || 1 })}
                   />
@@ -636,20 +761,19 @@ const MemberManager: React.FC<MemberManagerProps> = ({
                 <button
                   type="button"
                   onClick={() => { setFormOpen(false); setEditing(null); }}
-                  className="flex-1 text-slate-400 hover:text-slate-200 text-sm py-2 rounded transition-all"
+                  className="flex-1 min-h-tap text-slate-400 hover:text-slate-200 text-sm rounded transition-all"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 bg-amber-600 hover:bg-amber-500 text-white font-bold py-2 rounded transition-all"
+                  className="flex-1 min-h-tap bg-amber-600 hover:bg-amber-500 text-white font-bold rounded transition-all"
                 >
                   {editing ? 'Guardar cambios' : 'Registrar miembro'}
                 </button>
               </div>
             </form>
-          </div>
-        </div>
+        </Sheet>
       )}
     </div>
   );

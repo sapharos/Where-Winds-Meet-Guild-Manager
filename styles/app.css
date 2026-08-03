@@ -1,0 +1,205 @@
+@import './tokens.css';
+/* Generado por tools/generar-iconos.mjs. Sustituye al CDN de Font Awesome. */
+@import './iconos.generated.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/**
+ * Lo que vivía suelto dentro de <style> en index.html, ahora con tokens.
+ *
+ * Las clases conservan su nombre aunque el material haya cambiado. `.cinzel`
+ * está escrita en unos veinte componentes y ya no apunta a Cinzel: renombrarla
+ * costaría veinte ediciones de riesgo para no cambiar nada de lo que se ve.
+ * El nombre es deuda, y queda anotada; la piel no espera a que se salde.
+ */
+
+@layer base {
+  body {
+    font-family: theme('fontFamily.sans');
+  }
+
+  .cinzel {
+    font-family: theme('fontFamily.display');
+    font-weight: 500;
+    letter-spacing: 0.01em;
+  }
+
+  /* Las barras de scroll del sistema respetan el tema por `color-scheme`, pero
+     las de WebKit hay que pintarlas a mano o se quedan grises en los dos. */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: rgb(var(--n-950));
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgb(var(--n-800));
+    border-radius: 4px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgb(var(--n-700));
+  }
+}
+
+@layer components {
+  .no-bar {
+    scrollbar-width: none;
+  }
+  .no-bar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 4px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: rgb(var(--n-700));
+    border-radius: 10px;
+  }
+
+  /**
+   * El latido del anfitrión de una sesión compartida.
+   *
+   * Era una `box-shadow` creciendo, y una sombra animada obliga a repintar en
+   * cada fotograma -- durante toda la sesión, porque este latido no para. Ahora
+   * es un anillo dibujado una vez que escala y se desvanece: transform y
+   * opacity, que el compositor resuelve sin tocar el pintado.
+   *
+   * El color es el latón de la grapa, que es lo que significa: alguien está
+   * sujetando esto.
+   */
+  .pulse-gold {
+    position: relative;
+  }
+  .pulse-gold::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    border: 2px solid rgb(var(--w-500));
+    animation: pulse-staple 2s infinite;
+    pointer-events: none;
+  }
+
+  /* Barras fijas que no se meten bajo el recorte ni bajo la barra de gestos. */
+  .pad-safe-top {
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+  .pad-safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  /* La navegación se retira mientras hay un teclado abierto. Si no, se queda
+     flotando encima de él, ocupando 76 px de una pantalla que ya está a la
+     mitad -- y nadie cambia de sección mientras está escribiendo. */
+  .nav-inferior {
+    transition: transform var(--dur-micro) var(--ease-glaze);
+  }
+  [data-teclado='abierto'] .nav-inferior {
+    transform: translateY(100%);
+  }
+}
+
+/* -------------------------------------------------------------------------
+   Movimiento
+   Sólo transform y opacity: nada de lo de aquí obliga al navegador a recalcular
+   la maqueta ni a repintar. Y nada pasa de 400 ms.
+   ------------------------------------------------------------------------- */
+
+@layer components {
+  /**
+   * Cambio de pestaña, con dirección.
+   *
+   * Entra por el lado del que viene: ir de Roster a Perfil trae la pantalla
+   * desde la derecha, y volver la trae desde la izquierda. Es la única señal
+   * que dice si te estás moviendo hacia delante o hacia atrás por una barra
+   * donde todos los destinos parecen iguales.
+   *
+   * El desplazamiento es del 2%, no del 100%: lo que se busca es indicar el
+   * sentido, no representar un viaje. Un barrido completo en una pantalla que
+   * se abre veinte veces al día se convierte en una espera.
+   */
+  @keyframes ruta-desde-la-derecha {
+    from {
+      opacity: 0;
+      transform: translate3d(2%, 0, 0);
+    }
+  }
+  @keyframes ruta-desde-la-izquierda {
+    from {
+      opacity: 0;
+      transform: translate3d(-2%, 0, 0);
+    }
+  }
+
+  /**
+   * Quien recorta la entrada es el padre, no la pantalla que entra.
+   *
+   * Desplazar el contenido un 2% lo saca de la ventana ese 2% -- 8 px medidos
+   * a 375 -- y durante los primeros 150 ms aparecía scroll horizontal. Un
+   * elemento no se recorta a sí mismo cuando se transforma, así que el
+   * `overflow` va aquí, en el contenedor de la aplicación.
+   *
+   * Y es `clip` y no `hidden` a propósito: `hidden` crea un contenedor de
+   * scroll, y eso rompería el índice pegajoso de la Sala de Guerra, que se
+   * ancla al scrollport más cercano. `clip` recorta sin crear ninguno.
+   */
+  .recorta-rutas {
+    overflow-x: clip;
+  }
+
+  .ruta-adelante {
+    animation: ruta-desde-la-derecha var(--dur-route) var(--ease-glaze);
+  }
+  .ruta-atras {
+    animation: ruta-desde-la-izquierda var(--dur-route) var(--ease-glaze);
+  }
+
+  /**
+   * Entrada escalonada de una lista.
+   *
+   * El retardo lo pone cada elemento en `--paso`, y quien lo escribe pone un
+   * tope: pasado el sexto, el retardo deja de crecer y el resto simplemente
+   * aparece. Escalonar treinta tarjetas no es elegante, es hacer esperar tres
+   * segundos a que termine de entrar una lista que ya estaba lista.
+   */
+  @keyframes entra-en-lista {
+    from {
+      opacity: 0;
+      transform: translate3d(0, 8px, 0);
+    }
+  }
+
+  .entra {
+    animation: entra-en-lista var(--dur-micro) var(--ease-glaze) both;
+    animation-delay: calc(var(--paso, 0) * 40ms);
+  }
+
+  /**
+   * La respuesta al dedo.
+   *
+   * Por debajo de 100 ms, que es donde deja de percibirse como retardo, y sólo
+   * una escala: nada que mueva a los vecinos. Va en `:active` y no en un estado
+   * de React porque tiene que ocurrir antes de que React se entere.
+   */
+  .pulsa {
+    transition: transform var(--dur-tap) var(--ease-glaze);
+  }
+  .pulsa:active {
+    transform: scale(0.97);
+  }
+}
+
+@keyframes pulse-staple {
+  from {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.5);
+  }
+}

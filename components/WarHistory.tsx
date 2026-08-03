@@ -14,6 +14,7 @@ import {
 import ResultsReader from './ResultsReader';
 import FigureCell from './FigureCell';
 import { SetBadge } from './BuildEditor';
+import Sheet from './Sheet';
 
 interface WarRow {
   id: string;
@@ -322,23 +323,17 @@ const WarHistory: React.FC<Props> = ({ canEdit, weaponSets, onClose, onChanged }
   };
 
   return (
-    <div className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex items-start justify-center p-6 overflow-y-auto">
-      <div ref={drop} className="bg-slate-900 border border-slate-800 rounded-xl w-full max-w-5xl my-8">
-        <div className="flex items-center justify-between p-6 border-b border-slate-800">
-          <div>
-            <h2 className="cinzel text-2xl font-bold text-amber-500">Historial de guerras</h2>
-            <p className="text-xs text-slate-500 mt-1">
-              {canEdit
-                ? 'Pega aquí (Ctrl+V) las capturas de resultados y anota lo que aportó cada uno.'
-                : 'Las guerras que se han librado y quién estuvo en ellas.'}
-            </p>
-          </div>
-          <button onClick={onClose} className="p-2 text-slate-400 hover:text-amber-500 transition-all">
-            <i className="fa-solid fa-xmark text-xl"></i>
-          </button>
-        </div>
-
-        <div className="p-6 space-y-4">
+    <Sheet
+      title="Historial de guerras"
+      subtitle={
+        canEdit
+          ? 'Sube las capturas de resultados —o pégalas con Ctrl+V desde un ordenador— y anota lo que aportó cada uno.'
+          : 'Las guerras que se han librado y quién estuvo en ellas.'
+      }
+      size="xl"
+      onClose={onClose}
+    >
+      <div ref={drop} className="space-y-4">
           {message && (
             <div
               className={`text-sm rounded-lg px-4 py-2 flex items-center gap-3 border ${
@@ -520,9 +515,12 @@ const WarHistory: React.FC<Props> = ({ canEdit, weaponSets, onClose, onChanged }
                 </div>
 
                 {detail.images.length === 0 ? (
-                  <p className="text-xs text-slate-600 italic border border-dashed border-slate-800 rounded-lg py-6 text-center">
+                  <p className="text-sm text-slate-500 border border-dashed border-slate-800 rounded-lg py-6 px-4 text-center">
+                    {/* Decía «pulsa Ctrl+V» a quien está en un teléfono, que no
+                        tiene esa tecla -- y el botón para subir la imagen
+                        llevaba ahí todo el tiempo, dos líneas más arriba. */}
                     {canEdit
-                      ? 'Copia la captura del juego y pulsa Ctrl+V con esta ventana abierta.'
+                      ? 'Sin capturas todavía. Usa «Subir imagen», o pega la captura con Ctrl+V si estás en un ordenador.'
                       : 'Sin capturas de resultados.'}
                   </p>
                 ) : (
@@ -536,12 +534,16 @@ const WarHistory: React.FC<Props> = ({ canEdit, weaponSets, onClose, onChanged }
                           className="w-full rounded border border-slate-800 cursor-zoom-in"
                         />
                         {canEdit && (
+                          // Era `opacity-0 group-hover:opacity-100`: en una
+                          // pantalla táctil no hay hover, así que borrar una
+                          // captura era sencillamente imposible desde el
+                          // teléfono. Ahora se ve siempre, y mide 44.
                           <button
                             onClick={() => removeImage(img.id)}
-                            title="Borrar esta imagen"
-                            className="absolute top-1 right-1 w-7 h-7 rounded bg-slate-950/80 text-slate-400 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all"
+                            aria-label="Borrar esta captura"
+                            className="absolute top-1 right-1 min-h-tap min-w-tap flex items-center justify-center rounded-md bg-slate-950/80 border border-slate-800 text-slate-300 hover:text-red-400 transition-colors duration-micro"
                           >
-                            <i className="fa-solid fa-trash-can text-xs"></i>
+                            <i className="fa-solid fa-trash-can"></i>
                           </button>
                         )}
                       </div>
@@ -557,7 +559,80 @@ const WarHistory: React.FC<Props> = ({ canEdit, weaponSets, onClose, onChanged }
                     · el impacto se calcula contra el resto de esta misma guerra
                   </span>
                 </h3>
-                <div className="overflow-x-auto">
+                {/*
+                  Una tarjeta por participante en el móvil, la tabla desde md.
+
+                  Once columnas dentro de una hoja de 343 px no se leen: había
+                  que arrastrar de lado y, en cuanto lo hacías, perdías el
+                  nombre y quedaban cifras sin dueño. La tarjeta pone delante lo
+                  que se viene a mirar -- quién, de qué bando y qué impacto -- y
+                  deja las ocho cifras debajo, en rejilla y con su etiqueta al
+                  lado, que además es lo que las hace editables con el dedo.
+                */}
+                <div className="flex flex-col gap-2 md:hidden">
+                  <label className="flex items-center gap-2 text-meta text-slate-500">
+                    Ordenar por
+                    <select
+                      value={sort.key}
+                      onChange={(e) => sortBy(e.target.value)}
+                      className="flex-1 min-h-tap bg-slate-950 border border-slate-800 rounded px-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
+                    >
+                      <option value="impact">Impacto</option>
+                      <option value="name">Miembro</option>
+                      <option value="side">Bando</option>
+                      {FIGURES.map((f) => (
+                        <option key={f.key} value={f.key}>
+                          {f.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  {ordered.map((p) => (
+                    <article
+                      key={p.playerId}
+                      className="rounded-md border border-slate-800 bg-slate-950/40 p-3"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="flex items-center gap-1 shrink-0">
+                          {setsCarried(p.weapons).map((set) => (
+                            <SetBadge key={set.id} set={set} size={14} />
+                          ))}
+                        </span>
+                        <span className="flex-1 min-w-0 truncate text-slate-100 font-semibold">
+                          {p.name}
+                        </span>
+                        <span className="text-meta text-slate-500">{WAR_SIDE_LABELS[p.side]}</span>
+                        <span
+                          className="text-lg font-bold tabular-nums"
+                          style={{ color: impactShade(scores.get(p.playerId) ?? 0) }}
+                        >
+                          {scores.get(p.playerId) ?? 0}
+                        </span>
+                      </div>
+
+                      {/* Igual que en Mis guerras: una columna hasta 400 px, dos
+                          a partir de ahí. En dos, "Daño de asedio" se recortaba
+                          a "Daño d..." y quedaba indistinguible de "Daño". */}
+                      <div className="mt-2 grid grid-cols-1 xs:grid-cols-2 gap-x-4 gap-y-1">
+                        {FIGURES.map((f) => (
+                          <div key={f.key} className="flex items-baseline justify-between gap-2">
+                            <span className="text-[11px] uppercase tracking-wider text-slate-500 leading-tight">
+                              {f.label}
+                            </span>
+                            <FigureCell
+                              value={p.stats?.[f.key]}
+                              readOnly={!canEdit}
+                              onChange={(value) => setFigure(p.playerId, f.key, value)}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    </article>
+                  ))}
+                </div>
+
+                <div className="hidden md:block overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="text-[10px] uppercase tracking-wider text-slate-500 text-left">
@@ -624,7 +699,6 @@ const WarHistory: React.FC<Props> = ({ canEdit, weaponSets, onClose, onChanged }
               </section>
             </>
           )}
-        </div>
       </div>
 
       {reading && detail && (
@@ -688,7 +762,7 @@ const WarHistory: React.FC<Props> = ({ canEdit, weaponSets, onClose, onChanged }
           </span>
         </div>
       )}
-    </div>
+    </Sheet>
   );
 };
 

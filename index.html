@@ -3,7 +3,12 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- viewport-fit=cover es lo que hace que env(safe-area-inset-*) devuelva
+         algo distinto de cero en un teléfono con recorte. Sin él, las barras
+         fijas se meten bajo el notch y bajo la barra de gestos. Sin
+         maximum-scale ni user-scalable: impedir el zoom es quitarle a alguien
+         la única forma de leer lo que le hemos dejado pequeño. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>Zona Zero · Mando del gremio</title>
 
     <!-- Files in public/ are copied to the site root at build time, so these
@@ -11,67 +16,49 @@
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
     <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png">
     <link rel="apple-touch-icon" sizes="180x180" href="/favicon-180.png">
-    <meta name="theme-color" content="#0c0d0e">
+    <!-- Uno por tema, para que la barra del navegador acompañe en vez de
+         delatar el tema contrario. Los valores son --n-950 de cada tema. -->
+    <meta name="theme-color" content="#dde3df" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#0a0f0e" media="(prefers-color-scheme: dark)">
 
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <style>
-        body {
-            font-family: 'Inter', sans-serif;
-            background-color: #0c0d0e;
-            color: #e2e8f0;
+    <!--
+      El tema, antes de que se pinte nada.
+
+      Va en línea y sin `defer` a propósito: cualquier cosa que llegue por red
+      llega tarde, y llegar tarde aquí significa que el usuario ve un fogonazo
+      del tema equivocado antes de que React monte. Duplica tres líneas de
+      services/theme.ts; la alternativa es el fogonazo.
+    -->
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem('zz-theme');
+          var choice = stored === 'light' || stored === 'dark' ? stored : 'system';
+          var resolved =
+            choice === 'system'
+              ? (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+                  ? 'dark'
+                  : 'light')
+              : choice;
+          document.documentElement.dataset.theme = resolved;
+          document.documentElement.style.colorScheme = resolved;
+        } catch (e) {
+          document.documentElement.dataset.theme = 'dark';
+          document.documentElement.style.colorScheme = 'dark';
         }
-        .cinzel {
-            font-family: 'Cinzel', serif;
-        }
-        .no-bar {
-            scrollbar-width: none;
-        }
-        .no-bar::-webkit-scrollbar {
-            display: none;
-        }
-        ::-webkit-scrollbar {
-            width: 8px;
-        }
-        ::-webkit-scrollbar-track {
-            background: #1a1a1a;
-        }
-        ::-webkit-scrollbar-thumb {
-            background: #333;
-            border-radius: 4px;
-        }
-        ::-webkit-scrollbar-thumb:hover {
-            background: #444;
-        }
-        /* Small scrollbar for compact menus */
-        .custom-scrollbar::-webkit-scrollbar {
-            width: 4px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb {
-            background: #444;
-            border-radius: 10px;
-        }
-        
-        @keyframes pulse-gold {
-            0% { box-shadow: 0 0 0 0 rgba(217, 119, 6, 0.4); }
-            70% { box-shadow: 0 0 0 10px rgba(217, 119, 6, 0); }
-            100% { box-shadow: 0 0 0 0 rgba(217, 119, 6, 0); }
-        }
-        .pulse-gold {
-            animation: pulse-gold 2s infinite;
-        }
-    </style>
-<script type="importmap">
-{
-  "imports": {
-    "react": "https://esm.sh/react@^19.2.3",
-    "react/": "https://esm.sh/react@^19.2.3/",
-    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
-    "peerjs": "https://esm.sh/peerjs@1.5.4"
-  }
-}
-</script>
+      })();
+    </script>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <!-- display=swap: sin él el texto se queda invisible hasta que llega la
+         fuente, que con conexión inestable es la mitad de la visita.
+
+         Newsreader va en dos pesos estáticos y no en su versión variable. La
+         variable trae los dos ejes enteros y pesa 132 KB medidos, cinco veces
+         lo que pesaba Cinzel: cambiar de tipografía no puede costarle a nadie
+         cien kilobytes en una conexión inestable por unos titulares. -->
+    <link href="https://fonts.googleapis.com/css2?family=Newsreader:wght@600&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 </head>
 <body>
     <div id="root"></div>

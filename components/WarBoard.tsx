@@ -24,6 +24,7 @@ import WarTimers from './WarTimers';
 import WarHistory from './WarHistory';
 import StartWarModal from './StartWarModal';
 import FinishWarModal from './FinishWarModal';
+import Sheet from './Sheet';
 
 const ROLE_KEYS: Record<Role, 'tank' | 'healer' | 'dps'> = {
   [Role.TANK]: 'tank',
@@ -63,7 +64,7 @@ const wash = (build: PlayerBuild | undefined, sets: WeaponSet[]) => {
   // Each colour holds its own end before the blend, as on the roster card: a
   // plain ramp reaches the second weapon only at the last column of pixels.
   return {
-    background: `linear-gradient(90deg, ${from}40 0%, ${from}40 22%, ${to}40 78%, ${to}40 100%), #0b1120`,
+    background: `linear-gradient(90deg, ${from}40 0%, ${from}40 22%, ${to}40 78%, ${to}40 100%), rgb(var(--n-900))`,
   };
 };
 
@@ -103,6 +104,8 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
   const [markFilter, setMarkFilter] = useState<'' | WarSide | 'none'>('');
   const [planning, setPlanning] = useState(false);
   const [history, setHistory] = useState(false);
+  // Quién tiene el menú de acciones abierto, en el tablero o en el banquillo.
+  const [abierto, setAbierto] = useState<string | null>(null);
 
   // What the board holds right now, for handlers that fire faster than a render.
   const latest = useRef<Deployment[]>([]);
@@ -210,15 +213,40 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
 
   const strategy = strategies.find((s) => s.id === inForce[side] && s.side === side);
 
+  /**
+   * Colocar a alguien en una línea, o sacarlo del tablero.
+   *
+   * Se muestra antes de pedirlo y se deshace si el servidor dice que no. Es la
+   * acción más repetida de esta pantalla -- treinta personas por guerra, y a
+   * veces varias veces cada una -- y antes esperaba a la respuesta y encima
+   * recargaba el tablero entero: despliegues, estrategias y estado, tres
+   * peticiones más, para mover una tarjeta de sitio. Sobre una conexión
+   * inestable eso son segundos por persona, y en ese hueco no hay forma de
+   * saber si el toque llegó.
+   *
+   * El mismo trato que ya tenía `toggleUnit`, y por la misma razón: quien está
+   * ordenando una guerra toca deprisa, y la segunda orden no puede esperar a
+   * que vuelva la primera.
+   */
   const move = async (playerId: string, lane: WarLane | null) => {
+    const before = latest.current;
+    const after = [
+      ...before.filter((d) => !(d.side === side && d.playerId === playerId)),
+      ...(lane ? [{ side, lane, playerId, unitIds: [], buildId: null } as Deployment] : []),
+    ];
+
     setError(null);
+    latest.current = after;
+    setDeployments(after);
+
     try {
       await api(`/war/deployments/${side}/${playerId}`, {
         method: 'PUT',
         body: JSON.stringify({ lane }),
       });
-      await load();
     } catch (err) {
+      latest.current = before;
+      setDeployments(before);
       setError(err instanceof Error ? err.message : 'No se pudo mover');
     }
   };
@@ -303,15 +331,26 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
     }
   };
 
+  /** Igual que `move`: se pinta al momento y se revierte si falla. Cambia los
+   *  colores de la tarjeta, así que esperar se nota más que en otras. */
   const useBuild = async (playerId: string, build: string | null) => {
+    const before = latest.current;
+    const after = before.map((d) =>
+      d.side === side && d.playerId === playerId ? { ...d, buildId: build } : d,
+    );
+
     setError(null);
+    latest.current = after;
+    setDeployments(after);
+
     try {
       await api(`/war/deployments/${side}/${playerId}/build`, {
         method: 'PUT',
         body: JSON.stringify({ build }),
       });
-      await load();
     } catch (err) {
+      latest.current = before;
+      setDeployments(before);
       setError(err instanceof Error ? err.message : 'No se pudo cambiar la build');
     }
   };
@@ -354,12 +393,15 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
 
       <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-4">
         <div className="flex items-center justify-between gap-3 flex-wrap">
-          <div className="flex bg-slate-950 p-1 rounded-lg border border-slate-800">
+          {/* A 320 px los dos botones sumaban 288 y empujaban la página entera
+              fuera de la pantalla. Con flex-1 y min-w-0 se reparten lo que hay
+              y el texto se recorta antes que el layout. */}
+          <div className="flex w-full sm:w-auto bg-slate-950 p-1 rounded-lg border border-slate-800">
             {(['attack', 'defense'] as WarSide[]).map((s) => (
               <button
                 key={s}
                 onClick={() => setSide(s)}
-                className={`px-5 py-2 rounded-md text-sm font-bold transition-all flex items-center gap-2 ${
+                className={`flex-1 sm:flex-none min-w-0 px-3 sm:px-5 py-2 rounded-md text-sm font-bold transition-all flex items-center justify-center gap-2 ${
                   side === s
                     ? s === 'attack'
                       ? 'bg-red-700 text-white'
@@ -367,8 +409,13 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
                     : 'text-slate-500 hover:text-slate-300'
                 }`}
               >
-                <i className={`fa-solid ${s === 'attack' ? 'fa-khanda' : 'fa-shield'}`}></i>
-                Despliegue {WAR_SIDE_LABELS[s]}
+                <i className={`fa-solid shrink-0 ${s === 'attack' ? 'fa-khanda' : 'fa-shield'}`}></i>
+                <span className="truncate">
+                  {/* "Despliegue" es el contexto de la sección, no el dato: en
+                      un teléfono estrecho se cae antes que el bando. */}
+                  <span className="hidden xs:inline">Despliegue </span>
+                  {WAR_SIDE_LABELS[s]}
+                </span>
               </button>
             ))}
           </div>
@@ -471,7 +518,7 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
                 </span>
                 <button
                   onClick={() => setFinishing(true)}
-                  className="text-sm font-bold px-4 py-2 rounded border border-slate-700 text-slate-300 hover:text-white transition-all"
+                  className="text-sm font-bold px-4 py-2 rounded border border-slate-700 text-slate-300 hover:text-slate-100 transition-all"
                 >
                   Finalizar guerra
                 </button>
@@ -569,7 +616,65 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
         </div>
       )}
 
-      <div className={`grid gap-4 ${shut ? 'lg:grid-cols-3' : 'lg:grid-cols-4'}`}>
+      {/*
+        El índice de las líneas, sólo en el teléfono.
+
+        En un escritorio las tres líneas y el banquillo están uno al lado del
+        otro y se ven de una vez. En un teléfono van en columna, y llegar al
+        banquillo -- que es de donde se saca a la gente -- costaba 2.625 px de
+        desplazamiento desde arriba: las dos mitades del trabajo, colocar y
+        elegir a quién, quedaban a tres pantallas la una de la otra.
+
+        No cambia nada de sitio ni de nombre: añade una fila que dice cómo va
+        cada línea y salta a ella. La cuenta que lleva es la misma que se ve
+        dentro, así que además se lee el estado del bando entero sin bajar.
+      */}
+      <nav
+        aria-label="Ir a una línea"
+        className="sm:hidden sticky top-[68px] z-30 -mx-4 px-4 py-2 bg-slate-950/90 backdrop-blur-md border-y border-slate-800"
+      >
+        <div className="flex gap-1.5">
+          {WAR_LANES.map((lane) => {
+            const cuantos = inLane(lane.id).length;
+            return (
+              <button
+                key={lane.id}
+                onClick={() =>
+                  document.getElementById(`linea-${lane.id}`)?.scrollIntoView({ behavior: 'smooth' })
+                }
+                className="flex-1 min-w-0 min-h-tap rounded-md border flex flex-col items-center justify-center leading-tight"
+                style={{ borderColor: `${lane.colour}66`, background: `${lane.colour}12` }}
+              >
+                <span className="text-[11px] truncate w-full px-1" style={{ color: lane.colour }}>
+                  {lane.label.replace('Línea ', '')}
+                </span>
+                <span
+                  className={`text-meta font-bold tabular-nums ${
+                    cuantos >= LANE_CAPACITY ? 'text-amber-400' : 'text-slate-300'
+                  }`}
+                >
+                  {cuantos}/{LANE_CAPACITY}
+                </span>
+              </button>
+            );
+          })}
+          {!shut && (
+            <button
+              onClick={() => document.getElementById('banquillo')?.scrollIntoView({ behavior: 'smooth' })}
+              className="flex-1 min-w-0 min-h-tap rounded-md border border-slate-700 bg-slate-900 flex flex-col items-center justify-center leading-tight"
+            >
+              <span className="text-[11px] text-slate-400 truncate w-full px-1">Disponibles</span>
+              <span className="text-meta font-bold tabular-nums text-slate-300">{bench.length}</span>
+            </button>
+          )}
+        </div>
+      </nav>
+
+      {/* grid-cols-1 explícito y no `grid` a secas: sin columnas declaradas la
+          única pista se dimensiona por su contenido y puede pasarse del
+          contenedor, que es lo que hacía que las líneas midieran 334 px dentro
+          de 288. `grid-cols-1` es `minmax(0, 1fr)`, que sí tiene techo. */}
+      <div className={`grid grid-cols-1 gap-4 ${shut ? 'lg:grid-cols-3' : 'lg:grid-cols-4'}`}>
         {WAR_LANES.map((lane) => {
           const members = inLane(lane.id);
           const target = strategy?.composition?.[lane.id];
@@ -582,6 +687,7 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
           return (
             <section
               key={lane.id}
+              id={`linea-${lane.id}`}
               onDragOver={(event) => {
                 // Without this the browser never fires a drop at all.
                 if (dragged.current) event.preventDefault();
@@ -597,7 +703,13 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
                 event.preventDefault();
                 drop(lane.id);
               }}
-              className={`rounded-xl border p-4 transition-all ${
+              // min-w-0, como en la tarjeta de miembro: un hijo de grid no baja
+              // de su contenido mínimo salvo que se le diga, y la fila de
+              // "Tanques 3/2 Sanadores 1/1 DPS 2/4" lo fijaba en 300 px.
+              //
+              // scroll-mt: la cabecera va pegada arriba, y sin este margen el
+              // salto desde el índice deja el título justo debajo de ella.
+              className={`min-w-0 scroll-mt-32 rounded-xl border p-4 transition-all ${
                 welcome ? 'ring-2 ring-offset-2 ring-offset-slate-950' : ''
               } ${refuses ? 'opacity-60' : ''}`}
               style={{
@@ -621,7 +733,7 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
 
               {/* A strategy states the shape a lane should have; the difference
                   from what it does have is the whole reason to record one. */}
-              <div className="flex gap-2 mb-3 text-[10px] uppercase tracking-wider">
+              <div className="flex flex-wrap gap-x-2 gap-y-0.5 mb-3 text-[11px] uppercase tracking-wider">
                 {(['tank', 'healer', 'dps'] as const).map((key) => {
                   const want = target?.[key];
                   const has = counts[key];
@@ -669,83 +781,43 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
                           </p>
                         </div>
                         {arranging && (
-                          <div className="flex items-center gap-1 shrink-0">
-                            {/* The other two lanes, for touch screens and for
-                                anyone who would rather click than drag. */}
-                            {WAR_LANES.filter((other) => other.id !== lane.id).map((other) => (
-                              <button
-                                key={other.id}
-                                onClick={() => move(p.id, other.id)}
-                                disabled={inLane(other.id).length >= LANE_CAPACITY}
-                                title={`Mover a ${other.label}`}
-                                className="w-4 h-4 rounded-sm border text-[9px] font-bold leading-none flex items-center justify-center transition-all disabled:opacity-25"
-                                style={{ borderColor: `${other.colour}80`, color: other.colour }}
-                              >
-                                {other.label.replace('Línea ', '').charAt(0)}
-                              </button>
-                            ))}
-                            <button
-                              onClick={() => move(p.id, null)}
-                              title="Quitar de la línea"
-                              className="text-slate-600 hover:text-red-400 transition-all ml-0.5"
-                            >
-                              <i className="fa-solid fa-xmark"></i>
-                            </button>
-                          </div>
+                          // Eran dos botones de 16x16 y una equis sin caja, que
+                          // el propio código llamaba "para pantallas táctiles".
+                          // Ahora es un menú de 44 que abre las mismas acciones
+                          // escritas, más las dos que estaban enterradas en la
+                          // tarjeta: la build de esta guerra y las unidades.
+                          <button
+                            onClick={() => setAbierto(p.id)}
+                            aria-label={`Acciones de ${p.name}`}
+                            aria-haspopup="dialog"
+                            className="shrink-0 -mr-1 min-h-tap min-w-tap flex items-center justify-center rounded-md text-slate-400 hover:text-amber-500 transition-colors duration-micro"
+                          >
+                            <i className="fa-solid fa-ellipsis-vertical"></i>
+                          </button>
                         )}
                       </div>
 
-                      {/* Which build they should bring. Only worth asking of
-                          somebody who has more than one to choose between. */}
-                      {arranging && mine.length > 1 && (
-                        <select
-                          value={buildIdOf.get(p.id) ?? ''}
-                          onChange={(e) => useBuild(p.id, e.target.value || null)}
-                          title="Build que debe usar en esta guerra"
-                          className="mt-1.5 w-full bg-slate-950/80 border border-slate-800 rounded p-1 text-[11px] outline-none focus:ring-1 focus:ring-amber-500"
-                        >
-                          <option value="">
-                            Build principal{mine.find((b) => b.isPrimary)?.name ? ` — ${mine.find((b) => b.isPrimary)!.name}` : ''}
-                          </option>
-                          {mine.map((b) => (
-                            <option key={b.id} value={b.id}>
-                              {b.name || 'Sin nombre'}
-                            </option>
-                          ))}
-                        </select>
-                      )}
+                      {/* La build y las unidades se editan desde el menú: en la
+                          tarjeta eran un desplegable de 11 px y unos chips de
+                          17 px de alto, dentro de una lista de diez. */}
 
-                      {/* The units are a separate question from the lane, and
-                          only worth asking once a strategy names some. Chips
-                          rather than a list: somebody can hold several jobs, and
-                          arranging thirty people should not mean opening thirty
-                          menus. */}
-                      {strategy && strategy.units.length > 0 && (
+                      {/* Las unidades que lleva, ya sólo como lectura: pulsarlas
+                          era un objetivo de 17 px de alto. Se cambian desde el
+                          menú, donde caben con su nombre entero. */}
+                      {strategy && strategy.units.length > 0 && held.length > 0 && (
                         <div className="mt-1.5 flex flex-wrap gap-1">
                           {strategy.units
-                            .filter((u) => arranging || held.includes(u.id))
-                            .map((u) => {
-                              const on = held.includes(u.id);
-                              return (
-                                <button
-                                  key={u.id}
-                                  disabled={!arranging}
-                                  onClick={() => toggleUnit(p.id, u.id)}
-                                  title={on ? `Quitar de ${u.name}` : `Añadir a ${u.name}`}
-                                  className={`text-[10px] px-1.5 py-0.5 rounded border flex items-center gap-1 max-w-full transition-all ${
-                                    on ? '' : 'border-slate-800 text-slate-600 hover:text-slate-300'
-                                  }`}
-                                  style={
-                                    on
-                                      ? { borderColor: u.color, color: u.color, backgroundColor: `${u.color}1f` }
-                                      : undefined
-                                  }
-                                >
-                                  <i className={`fa-solid ${u.icon} text-[9px]`}></i>
-                                  <span className="truncate">{u.name}</span>
-                                </button>
-                              );
-                            })}
+                            .filter((u) => held.includes(u.id))
+                            .map((u) => (
+                              <span
+                                key={u.id}
+                                className="text-[11px] px-1.5 py-0.5 rounded border flex items-center gap-1 max-w-full"
+                                style={{ borderColor: u.color, color: u.color, backgroundColor: `${u.color}1f` }}
+                              >
+                                <i className={`fa-solid ${u.icon} text-[10px]`}></i>
+                                <span className="truncate">{u.name}</span>
+                              </span>
+                            ))}
                         </div>
                       )}
                     </div>
@@ -762,7 +834,7 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
         {/* Nobody left to field once the side is settled, so the bench goes
             away rather than sitting there offering what cannot be done. */}
         {!shut && (
-        <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+        <section id="banquillo" className="scroll-mt-32 rounded-xl border border-slate-800 bg-slate-900/60 p-4">
           <div className="flex items-center justify-between mb-3">
             <h3 className="cinzel font-bold text-lg text-slate-300">Disponibles</h3>
             <span className="text-sm text-slate-500 tabular-nums">{bench.length}</span>
@@ -772,11 +844,14 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
             <div className="relative">
               <i className="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-600 text-xs"></i>
               <input
-                type="text"
+                type="search"
                 value={search}
                 placeholder="Buscar por nombre..."
+                aria-label="Buscar por nombre"
+                autoComplete="off"
+                enterKeyHint="search"
                 onChange={(e) => setSearch(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded p-2 pl-8 text-sm outline-none focus:ring-1 focus:ring-amber-500"
+                className="w-full min-h-tap bg-slate-950 border border-slate-800 rounded px-3 pl-8 text-sm outline-none focus:ring-1 focus:ring-amber-500"
               />
             </div>
             <div className="grid grid-cols-2 gap-2">
@@ -847,6 +922,9 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
                   </p>
                 ) : (
                   canEdit && (
+                    // Medían 55x17 px. El nombre de la línea se queda -- es lo
+                    // que dice a dónde va -- pero el botón pasa a 44 de alto,
+                    // que es lo que hace que se acierte.
                     <div className="flex gap-1">
                       {WAR_LANES.map((lane) => (
                         <button
@@ -858,7 +936,7 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
                               ? `La guerra ya tiene ${WAR_CAPACITY} desplegados entre ambos bandos`
                               : `Enviar a ${lane.label}`
                           }
-                          className="flex-1 text-[10px] py-1 rounded border transition-all disabled:opacity-30"
+                          className="flex-1 min-h-tap text-[11px] font-semibold rounded border transition-all disabled:opacity-30"
                           style={{ borderColor: `${lane.colour}80`, color: lane.colour }}
                         >
                           {lane.label.replace('Línea ', '')}
@@ -879,6 +957,121 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
         </section>
         )}
       </div>
+
+      {/*
+        Todo lo que se puede hacer con alguien que ya está en una línea.
+
+        Estaba repartido por la tarjeta en cuatro controles de entre 16 y 17 px
+        -- dos letras para mover de línea, una equis para sacarlo, un
+        desplegable de 11 px para la build y unos chips para las unidades --
+        dentro de una lista de hasta diez tarjetas. Aquí caben con su nombre.
+      */}
+      {abierto && (() => {
+        const p = byId.get(abierto);
+        if (!p) return null;
+        const suya = here.find((d) => d.playerId === p.id);
+        const mine = owned.get(p.id) ?? [];
+        const held = unitsOf.get(p.id) ?? [];
+
+        return (
+          <Sheet
+            title={p.name}
+            subtitle={
+              suya
+                ? `${WAR_LANES.find((l) => l.id === suya.lane)?.label} · ${WAR_SIDE_LABELS[side]}`
+                : WAR_SIDE_LABELS[side]
+            }
+            size="sm"
+            onClose={() => setAbierto(null)}
+          >
+            <div className="flex flex-col gap-1">
+              {WAR_LANES.filter((other) => other.id !== suya?.lane).map((other) => {
+                const llena = inLane(other.id).length >= LANE_CAPACITY;
+                return (
+                  <button
+                    key={other.id}
+                    disabled={llena}
+                    onClick={() => {
+                      void move(p.id, other.id);
+                      setAbierto(null);
+                    }}
+                    className="min-h-tap flex items-center gap-3 px-3 -mx-1 rounded-md text-left text-slate-200 hover:bg-slate-800/60 disabled:opacity-40 transition-colors duration-micro"
+                  >
+                    <i className="fa-solid fa-arrow-right w-5 text-center" style={{ color: other.colour }}></i>
+                    <span className="flex-1">Mover a {other.label}</span>
+                    <span className="text-meta text-slate-500 tabular-nums">
+                      {inLane(other.id).length}/{LANE_CAPACITY}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {mine.length > 1 && (
+              <div className="mt-4 pt-3 border-t border-slate-800">
+                <label className="block text-[11px] uppercase tracking-wider text-slate-500 mb-1.5">
+                  Build en esta guerra
+                </label>
+                <select
+                  value={suya?.buildId ?? ''}
+                  onChange={(e) => void useBuild(p.id, e.target.value || null)}
+                  className="w-full min-h-tap bg-slate-950 border border-slate-800 rounded px-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
+                >
+                  <option value="">
+                    Build principal{mine.find((b) => b.isPrimary)?.name ? ` — ${mine.find((b) => b.isPrimary)!.name}` : ''}
+                  </option>
+                  {mine.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name || 'Sin nombre'}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {strategy && strategy.units.length > 0 && (
+              <div className="mt-4 pt-3 border-t border-slate-800">
+                <p className="text-[11px] uppercase tracking-wider text-slate-500 mb-1.5">
+                  Unidades tácticas
+                </p>
+                <div className="flex flex-col gap-1">
+                  {strategy.units.map((u) => {
+                    const on = held.includes(u.id);
+                    return (
+                      <button
+                        key={u.id}
+                        onClick={() => void toggleUnit(p.id, u.id)}
+                        className="min-h-tap flex items-center gap-3 px-3 -mx-1 rounded-md text-left text-slate-200 hover:bg-slate-800/60 transition-colors duration-micro"
+                      >
+                        <i className={`fa-solid ${u.icon} w-5 text-center`} style={{ color: u.color }}></i>
+                        <span className="flex-1">{u.name}</span>
+                        <i
+                          className={`fa-solid ${on ? 'fa-check' : ''}`}
+                          style={on ? { color: u.color } : undefined}
+                          aria-label={on ? 'asignado' : undefined}
+                        ></i>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            <div className="mt-4 pt-3 border-t border-slate-800">
+              <button
+                onClick={() => {
+                  void move(p.id, null);
+                  setAbierto(null);
+                }}
+                className="w-full min-h-tap flex items-center gap-3 px-3 -mx-1 rounded-md text-left text-red-400 hover:bg-red-500/10 transition-colors duration-micro"
+              >
+                <i className="fa-solid fa-xmark w-5 text-center"></i>
+                Quitar de la línea
+              </button>
+            </div>
+          </Sheet>
+        );
+      })()}
 
       {history && (
         <WarHistory

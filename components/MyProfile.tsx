@@ -14,6 +14,7 @@ import { ROLE_NAMES, buildColours } from './PlayerCard';
 import { SetBadge } from './BuildEditor';
 import MyWars from './MyWars';
 import GearSheet from './GearSheet';
+import Seccion from './Seccion';
 
 const ROLE_STYLE: Record<Role, string> = {
   [Role.TANK]: 'border-blue-500 text-blue-300 bg-blue-500/15',
@@ -57,22 +58,32 @@ const MyProfile: React.FC<Props> = ({ player, weaponSets, onEditBuilds }) => {
         className="relative border rounded-xl p-6 overflow-hidden"
         style={{ background: `linear-gradient(90deg, ${from}40 0%, ${to}40 100%)`, borderColor: `${from}80` }}
       >
-        <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div>
-            <h1 className="cinzel text-3xl font-bold text-white">{player.name}</h1>
+        {/*
+          Identidad arriba, cifra abajo, con una regla entre medias.
+
+          Antes eran dos bloques al lado -- el nombre a la izquierda y la
+          actividad alineada a la derecha -- que en un teléfono se envolvían y
+          acababan con dos alineaciones distintas en la misma tarjeta, uno
+          pegado a un borde y el otro al contrario. Puestos uno debajo del otro
+          la tarjeta tiene un solo eje, y la cifra gana el sitio que merece:
+          es lo que un miembro viene a mirar.
+        */}
+        <div className="flex flex-col gap-4">
+          <div className="min-w-0">
+            <h1 className="cinzel text-3xl font-bold text-slate-100 break-words">{player.name}</h1>
             <p className="text-sm text-slate-300 mt-1">
               {player.sect} · Nivel {player.level}
             </p>
             <div className="flex items-center gap-2 mt-3 flex-wrap">
               {player.isStarter && (
-                <span className="text-[10px] px-2 py-0.5 rounded border border-amber-400 text-amber-300 bg-amber-400/10 uppercase font-bold tracking-wider">
+                <span className="text-[11px] px-2 py-0.5 rounded border border-staple text-staple bg-staple/10 uppercase font-bold tracking-wider">
                   <i className="fa-solid fa-star mr-1"></i>
                   Titular
                 </span>
               )}
               {player.warSide && (
                 <span
-                  className={`text-[10px] px-2 py-0.5 rounded border uppercase font-bold tracking-wider ${
+                  className={`text-[11px] px-2 py-0.5 rounded border uppercase font-bold tracking-wider ${
                     player.warSide === 'attack'
                       ? 'border-red-500 text-red-300 bg-red-500/10'
                       : 'border-sky-500 text-sky-300 bg-sky-500/10'
@@ -82,27 +93,38 @@ const MyProfile: React.FC<Props> = ({ player, weaponSets, onEditBuilds }) => {
                 </span>
               )}
               {player.gameUid && (
-                <span className="text-[10px] text-slate-400 font-mono">UID {player.gameUid}</span>
+                <span className="text-[11px] text-slate-400 font-mono">UID {player.gameUid}</span>
               )}
             </div>
           </div>
 
           {latest && (
-            <div className="text-right">
-              <p className="text-[10px] uppercase tracking-wider text-slate-400">Actividad semanal</p>
-              <p className="text-4xl font-bold text-white tabular-nums">{latest.week_activity ?? '—'}</p>
-              {previous && number(latest.week_activity) !== null && number(previous.week_activity) !== null && (
-                <p
-                  className={`text-xs font-semibold ${
-                    number(latest.week_activity)! >= number(previous.week_activity)!
-                      ? 'text-emerald-400'
-                      : 'text-red-400'
-                  }`}
-                >
-                  {number(latest.week_activity)! - number(previous.week_activity)! >= 0 ? '+' : ''}
-                  {number(latest.week_activity)! - number(previous.week_activity)!} desde el escaneo anterior
+            <div className="border-t border-slate-100/10 pt-4">
+              <p className="text-[11px] uppercase tracking-wider text-slate-400">
+                Actividad semanal
+              </p>
+              <div className="flex items-baseline justify-between gap-3 mt-1">
+                <p className="cinzel text-figure-xl font-bold text-slate-100 tabular-nums leading-none">
+                  {latest.week_activity ?? '—'}
                 </p>
-              )}
+                {previous &&
+                  number(latest.week_activity) !== null &&
+                  number(previous.week_activity) !== null && (
+                    <p
+                      className={`text-meta font-semibold text-right ${
+                        number(latest.week_activity)! >= number(previous.week_activity)!
+                          ? 'text-emerald-400'
+                          : 'text-red-400'
+                      }`}
+                    >
+                      {number(latest.week_activity)! - number(previous.week_activity)! >= 0 ? '+' : ''}
+                      {number(latest.week_activity)! - number(previous.week_activity)!}
+                      <span className="block text-slate-400 font-normal">
+                        desde el escaneo anterior
+                      </span>
+                    </p>
+                  )}
+              </div>
             </div>
           )}
         </div>
@@ -223,9 +245,32 @@ const MyProfile: React.FC<Props> = ({ player, weaponSets, onEditBuilds }) => {
         )}
       </section>
 
-      <GearSheet playerId={player.id} canEdit />
+      {/*
+        Las dos últimas llegan plegadas.
 
-      <MyWars playerId={player.id} weaponSets={weaponSets} />
+        Son las que más ocupan y las que menos se miran, y ésta es la pantalla
+        que se abre sola en una visita de dos minutos. Plegadas siguen
+        anunciando qué guardan; y como el contenido no se monta hasta que se
+        abren, GearSheet deja de pedirle cinco cosas al servidor a todo el que
+        entra a mirar su actividad semanal.
+
+        El orden, los nombres y lo que hay dentro no cambian.
+      */}
+      <Seccion
+        titulo="Mi equipo"
+        icono="fa-shield-halved"
+        resumen="Piezas, líneas y sintonización"
+      >
+        <GearSheet playerId={player.id} canEdit />
+      </Seccion>
+
+      <Seccion
+        titulo="Mis guerras"
+        icono="fa-chess-knight"
+        resumen="Lo que has librado y tu impacto"
+      >
+        <MyWars playerId={player.id} weaponSets={weaponSets} />
+      </Seccion>
     </div>
   );
 };

@@ -10,6 +10,7 @@ import {
   WarStrategy,
 } from '../types';
 import { IconPicker } from './WeaponSets';
+import Sheet from './Sheet';
 
 const ROLES: { key: keyof RoleTargets; label: string; colour: string }[] = [
   { key: 'tank', label: 'Tanques', colour: '#60a5fa' },
@@ -38,16 +39,19 @@ const blankStrategy = (side: WarSide): WarStrategy => ({
 const Count: React.FC<{
   value: number;
   disabled: boolean;
+  etiqueta: string;
   onChange: (n: number) => void;
-}> = ({ value, disabled, onChange }) => (
+}> = ({ value, disabled, etiqueta, onChange }) => (
   <input
     type="number"
+    inputMode="numeric"
     min={0}
     max={SIDE_CAPACITY}
     value={value}
     disabled={disabled}
+    aria-label={etiqueta}
     onChange={(e) => onChange(Math.max(0, Math.min(SIDE_CAPACITY, Number(e.target.value) || 0)))}
-    className={`w-14 bg-slate-950 border rounded p-1.5 text-sm text-center tabular-nums outline-none focus:ring-1 focus:ring-amber-500 ${
+    className={`w-full sm:w-14 bg-slate-950 border rounded px-1 text-sm text-center tabular-nums outline-none focus:ring-1 focus:ring-amber-500 ${
       value ? 'border-slate-700 text-slate-100' : 'border-slate-800 text-slate-600'
     }`}
   />
@@ -145,25 +149,17 @@ const StrategyPlanner: React.FC<Props> = ({ side, canEdit, onClose, onSaved }) =
   };
 
   return (
-    <div className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex items-start justify-center p-6 overflow-y-auto">
-      <div className="bg-slate-900 border border-slate-800 rounded-xl w-full max-w-4xl my-8">
-        <div className="flex items-center justify-between p-6 border-b border-slate-800">
-          <div>
-            <h2 className="cinzel text-2xl font-bold text-amber-500">
-              Estrategias de {WAR_SIDE_LABELS[side]}
-            </h2>
-            <p className="text-xs text-slate-500 mt-1">
-              {canEdit
-                ? 'Cuánta gente de cada rol quieres por línea, y qué unidades tácticas debe llevar el bando. Es una referencia: el tablero puede diferir.'
-                : 'Solo lectura: no tienes permiso para editar la sala de guerra.'}
-            </p>
-          </div>
-          <button onClick={onClose} className="p-2 text-slate-400 hover:text-amber-500 transition-all">
-            <i className="fa-solid fa-xmark text-xl"></i>
-          </button>
-        </div>
-
-        <div className="p-6 space-y-4">
+    <Sheet
+      title={`Estrategias de ${WAR_SIDE_LABELS[side]}`}
+      subtitle={
+        canEdit
+          ? 'Cuánta gente de cada rol quieres por línea, y qué unidades tácticas debe llevar el bando. Es una referencia: el tablero puede diferir.'
+          : 'Solo lectura: no tienes permiso para editar la sala de guerra.'
+      }
+      size="lg"
+      onClose={onClose}
+    >
+      <div className="space-y-4">
           {message && (
             <div
               className={`text-sm rounded-lg px-4 py-2 flex items-center gap-3 border ${
@@ -247,40 +243,75 @@ const StrategyPlanner: React.FC<Props> = ({ side, canEdit, onClose, onSaved }) =
                     {WAR_LANES.map((lane) => {
                       const targets = strategy.composition?.[lane.id] ?? emptyTargets();
                       const total = ROLES.reduce((n, role) => n + targets[role.key], 0);
+                      const excede = total > LANE_CAPACITY;
+                      const aviso = excede
+                        ? `Una línea son ${LANE_CAPACITY} personas. Pasa de ahí solo si cuentas con híbridos, que cubren dos roles a la vez.`
+                        : undefined;
+
                       return (
-                        <div key={lane.id} className="flex items-center gap-2 flex-wrap">
+                        /*
+                          En el teléfono, cada línea es un bloque con sus tres
+                          cifras etiquetadas; a partir de sm vuelve a ser la fila
+                          de siempre, con la cabecera de columnas arriba.
+
+                          La cabecera era `hidden sm:flex` y no había nada que la
+                          sustituyera: en un teléfono se veían tres casillas con
+                          2, 1 y 4 dentro y ninguna forma de saber cuál era
+                          tanques, cuál sanadores y cuál DPS. Tres números sin
+                          nombre no son un formulario, son una adivinanza.
+                        */
+                        <div
+                          key={lane.id}
+                          className="flex flex-col sm:flex-row sm:items-center gap-2 rounded-md border border-slate-800 p-2 sm:border-0 sm:p-0"
+                        >
+                          <div className="flex items-baseline justify-between gap-2 sm:block sm:w-[124px] sm:shrink-0">
+                            <span className="text-sm sm:text-xs font-bold" style={{ color: lane.colour }}>
+                              {lane.label}
+                            </span>
+                            <span
+                              className={`sm:hidden text-meta tabular-nums ${
+                                excede ? 'text-amber-500 font-bold' : 'text-slate-500'
+                              }`}
+                              title={aviso}
+                            >
+                              {excede && <i className="fa-solid fa-triangle-exclamation mr-1"></i>}
+                              {total}/{LANE_CAPACITY}
+                            </span>
+                          </div>
+
+                          <div className="flex gap-2 sm:contents">
+                            {ROLES.map((role) => (
+                              <label key={role.key} className="flex-1 min-w-0 sm:flex-none">
+                                <span
+                                  className="sm:hidden block text-[11px] uppercase tracking-wider mb-0.5 truncate"
+                                  style={{ color: role.colour }}
+                                >
+                                  {role.label}
+                                </span>
+                                <Count
+                                  value={targets[role.key]}
+                                  disabled={!canEdit}
+                                  etiqueta={`${role.label} en ${lane.label}`}
+                                  onChange={(n) =>
+                                    patch(index, {
+                                      composition: {
+                                        ...strategy.composition,
+                                        [lane.id]: { ...targets, [role.key]: n },
+                                      },
+                                    })
+                                  }
+                                />
+                              </label>
+                            ))}
+                          </div>
+
                           <span
-                            className="w-[124px] text-xs font-bold shrink-0"
-                            style={{ color: lane.colour }}
-                          >
-                            {lane.label}
-                          </span>
-                          {ROLES.map((role) => (
-                            <Count
-                              key={role.key}
-                              value={targets[role.key]}
-                              disabled={!canEdit}
-                              onChange={(n) =>
-                                patch(index, {
-                                  composition: {
-                                    ...strategy.composition,
-                                    [lane.id]: { ...targets, [role.key]: n },
-                                  },
-                                })
-                              }
-                            />
-                          ))}
-                          <span
-                            className={`text-[10px] tabular-nums ${
-                              total > LANE_CAPACITY ? 'text-amber-500' : 'text-slate-600'
+                            className={`hidden sm:inline text-[10px] tabular-nums ${
+                              excede ? 'text-amber-500' : 'text-slate-600'
                             }`}
-                            title={
-                              total > LANE_CAPACITY
-                                ? `Una línea son ${LANE_CAPACITY} personas. Pasa de ahí solo si cuentas con híbridos, que cubren dos roles a la vez.`
-                                : undefined
-                            }
+                            title={aviso}
                           >
-                            {total > LANE_CAPACITY && <i className="fa-solid fa-triangle-exclamation mr-1"></i>}
+                            {excede && <i className="fa-solid fa-triangle-exclamation mr-1"></i>}
                             {total}/{LANE_CAPACITY}
                           </span>
                         </div>
@@ -297,51 +328,82 @@ const StrategyPlanner: React.FC<Props> = ({ side, canEdit, onClose, onSaved }) =
 
                   <div className="space-y-1.5">
                     {strategy.units.map((unit) => (
+                      // Mismo reparto que las líneas: identidad arriba, cifras
+                      // etiquetadas debajo. Sin las etiquetas, las tres casillas
+                      // de una unidad eran tan mudas como las de una línea.
                       <div
                         key={unit.id}
-                        className="flex items-center gap-2 flex-wrap rounded p-1.5"
+                        className="flex flex-col sm:flex-row sm:items-center gap-2 rounded p-1.5"
                         style={{ backgroundColor: `${unit.color}10` }}
                       >
-                        <button
-                          disabled={!canEdit}
-                          onClick={() => setIconFor({ strategy: index, unit: unit.id })}
-                          title="Elegir icono"
-                          className="w-9 h-9 shrink-0 rounded border border-slate-800 flex items-center justify-center hover:border-slate-600 transition-all"
-                          style={{ color: unit.color }}
-                        >
-                          <i className={`fa-solid ${unit.icon}`}></i>
-                        </button>
-                        <input
-                          type="color"
-                          value={unit.color}
-                          disabled={!canEdit}
-                          onChange={(e) => patchUnit(index, unit.id, { color: e.target.value })}
-                          title="Color de la unidad"
-                          className="w-8 h-9 shrink-0 bg-transparent border-none cursor-pointer"
-                        />
-                        <input
-                          type="text"
-                          value={unit.name}
-                          disabled={!canEdit}
-                          placeholder="Nombre de la unidad"
-                          onChange={(e) => patchUnit(index, unit.id, { name: e.target.value })}
-                          className="flex-1 min-w-[140px] bg-slate-900 border border-slate-800 rounded p-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
-                        />
-                        {ROLES.map((role) => (
-                          <Count
-                            key={role.key}
-                            value={unit[role.key]}
+                        <div className="flex items-center gap-2 min-w-0">
+                          <button
                             disabled={!canEdit}
-                            onChange={(n) => patchUnit(index, unit.id, { [role.key]: n })}
+                            onClick={() => setIconFor({ strategy: index, unit: unit.id })}
+                            title="Elegir icono"
+                            aria-label={`Icono de ${unit.name || 'la unidad'}`}
+                            className="min-h-tap min-w-tap shrink-0 rounded border border-slate-800 flex items-center justify-center hover:border-slate-600 transition-all"
+                            style={{ color: unit.color }}
+                          >
+                            <i className={`fa-solid ${unit.icon}`}></i>
+                          </button>
+                          <input
+                            type="color"
+                            value={unit.color}
+                            disabled={!canEdit}
+                            onChange={(e) => patchUnit(index, unit.id, { color: e.target.value })}
+                            title="Color de la unidad"
+                            aria-label={`Color de ${unit.name || 'la unidad'}`}
+                            className="w-11 shrink-0 bg-transparent border-none cursor-pointer"
                           />
-                        ))}
+                          <input
+                            type="text"
+                            value={unit.name}
+                            disabled={!canEdit}
+                            placeholder="Nombre de la unidad"
+                            aria-label="Nombre de la unidad"
+                            onChange={(e) => patchUnit(index, unit.id, { name: e.target.value })}
+                            className="flex-1 min-w-0 sm:min-w-[140px] bg-slate-900 border border-slate-800 rounded px-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
+                          />
+                          {canEdit && (
+                            <button
+                              onClick={() =>
+                                patch(index, { units: strategy.units.filter((u) => u.id !== unit.id) })
+                              }
+                              aria-label={`Quitar ${unit.name || 'esta unidad'}`}
+                              className="sm:hidden min-h-tap min-w-tap shrink-0 flex items-center justify-center text-slate-500 hover:text-red-400 transition-all"
+                            >
+                              <i className="fa-solid fa-xmark"></i>
+                            </button>
+                          )}
+                        </div>
+
+                        <div className="flex gap-2 sm:contents">
+                          {ROLES.map((role) => (
+                            <label key={role.key} className="flex-1 min-w-0 sm:flex-none">
+                              <span
+                                className="sm:hidden block text-[11px] uppercase tracking-wider mb-0.5 truncate"
+                                style={{ color: role.colour }}
+                              >
+                                {role.label}
+                              </span>
+                              <Count
+                                value={unit[role.key]}
+                                disabled={!canEdit}
+                                etiqueta={`${role.label} en ${unit.name || 'la unidad'}`}
+                                onChange={(n) => patchUnit(index, unit.id, { [role.key]: n })}
+                              />
+                            </label>
+                          ))}
+                        </div>
+
                         {canEdit && (
                           <button
                             onClick={() =>
                               patch(index, { units: strategy.units.filter((u) => u.id !== unit.id) })
                             }
-                            title="Quitar esta unidad"
-                            className="p-2 text-slate-600 hover:text-red-400 transition-all"
+                            aria-label={`Quitar ${unit.name || 'esta unidad'}`}
+                            className="hidden sm:flex min-h-tap min-w-tap shrink-0 items-center justify-center text-slate-600 hover:text-red-400 transition-all"
                           >
                             <i className="fa-solid fa-xmark"></i>
                           </button>
@@ -383,13 +445,12 @@ const StrategyPlanner: React.FC<Props> = ({ side, canEdit, onClose, onSaved }) =
           {canEdit && drafts && (
             <button
               onClick={() => setDrafts([...drafts, blankStrategy(side)])}
-              className="w-full border-2 border-dashed border-slate-800 hover:border-amber-600 text-slate-500 hover:text-amber-500 rounded-lg py-3 text-sm transition-all"
+              className="w-full min-h-tap border-2 border-dashed border-slate-800 hover:border-amber-600 text-slate-500 hover:text-amber-500 rounded-lg text-sm transition-all"
             >
               <i className="fa-solid fa-plus mr-2"></i>
               Nueva estrategia de {WAR_SIDE_LABELS[side]}
             </button>
           )}
-        </div>
       </div>
 
       {iconFor && (
@@ -402,7 +463,7 @@ const StrategyPlanner: React.FC<Props> = ({ side, canEdit, onClose, onSaved }) =
           onClose={() => setIconFor(null)}
         />
       )}
-    </div>
+    </Sheet>
   );
 };
 

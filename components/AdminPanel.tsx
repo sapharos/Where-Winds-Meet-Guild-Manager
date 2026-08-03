@@ -1,7 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { authService, api } from '../services/authService';
 import WeaponSets from './WeaponSets';
-import { AuthUser, ManagedUser, PERMISSION_LABELS, PermissionCatalog, UserRole, ROLE_LABELS } from '../types';
+import TablaAncha from './TablaAncha';
+import ScanImport from './ScanImport';
+import { Filas } from './Esqueleto';
+import { AuthUser, ManagedUser, PERMISSION_LABELS, PermissionCatalog, Player, UserRole, ROLE_LABELS } from '../types';
 
 // Mirrors the server's LOCKED table so the boxes it will refuse to clear are
 // shown as fixed rather than silently springing back after a save.
@@ -15,6 +18,10 @@ interface Props {
   canManageUsers: boolean;
   canManagePermissions: boolean;
   canManageBuilds: boolean;
+  /** Importar un barrido del roster es una tarea administrativa, y vive aquí. */
+  canScan: boolean;
+  players: Player[];
+  onScanImported: () => void;
   /** The impact score reads the sets, so a change here has to reach the rest. */
   onWeaponSetsChanged: () => void;
 }
@@ -32,6 +39,9 @@ const AdminPanel: React.FC<Props> = ({
   canManageUsers,
   canManagePermissions,
   canManageBuilds,
+  canScan,
+  players,
+  onScanImported,
   onWeaponSetsChanged,
 }) => {
   const [users, setUsers] = useState<ManagedUser[]>([]);
@@ -44,6 +54,15 @@ const AdminPanel: React.FC<Props> = ({
   const [newPassword, setNewPassword] = useState('');
   const [newRole, setNewRole] = useState<UserRole>('member');
   const [requests, setRequests] = useState<Registration[]>([]);
+  /**
+   * Qué rol se está mirando en el teléfono, donde la matriz va de uno en uno.
+   *
+   * Arranca en oficial y no en el primero de la lista: el primero es
+   * administrador, cuyos permisos están casi todos fijos, así que abrir ahí
+   * enseña una pantalla en la que no se puede tocar casi nada. Oficial es el
+   * rol que de verdad se ajusta.
+   */
+  const [rolElegido, setRolElegido] = useState<string | null>(null);
 
   const report = (text: string, ok = true) => setMessage({ text, ok });
 
@@ -154,17 +173,60 @@ const AdminPanel: React.FC<Props> = ({
     }
   };
 
+  /**
+   * El escaneo, fuera del bloque que depende del catálogo de permisos.
+   *
+   * Quien sólo tiene `roster.edit` llega aquí para importar un barrido y no
+   * puede leer la matriz de permisos, así que su petición falla y `catalog` se
+   * queda en null. Si esto estuviera detrás de esa comprobación, esa persona
+   * vería una rueda girando para siempre en lugar de la única sección a la que
+   * ha venido.
+   */
+  const escaneo = canScan && (
+    <section className="bg-slate-900/60 border border-slate-800 rounded-xl p-4 sm:p-6">
+      <h2 className="cinzel text-2xl font-bold text-amber-500 mb-1">Escaneo del roster</h2>
+      <p className="text-sm text-slate-500 mb-4">
+        Importar un barrido del gremio y decidir a quién corresponde cada línea leída.
+      </p>
+      <ScanImport players={players} onImported={onScanImported} />
+    </section>
+  );
+
   if (!catalog) {
     return (
-      <div className="flex items-center justify-center h-96 text-slate-500 gap-3">
-        <i className="fa-solid fa-circle-notch fa-spin"></i>
-        Cargando configuración...
+      <div className="space-y-6">
+        {escaneo}
+        {message ? (
+          <p className="text-sm rounded-lg px-4 py-3 border bg-red-950/60 border-red-900 text-red-200">
+            <i className="fa-solid fa-triangle-exclamation mr-2"></i>
+            {message.text}
+          </p>
+        ) : (
+          /*
+            El hueco tiene la forma de lo que va a llegar, no la de una losa.
+            Era un rectángulo gris de 256 px sin nada alrededor, debajo de una
+            sección ya dibujada por completo: leído sin contexto no parece que
+            algo esté cargando, parece que algo está tapando la pantalla. Con su
+            título y sus filas se entiende de un vistazo qué falta y cuánto.
+          */
+          <section
+            className="bg-slate-900/60 border border-slate-800 rounded-xl p-4 sm:p-6"
+            role="status"
+            aria-label="Cargando los permisos por rol"
+          >
+            <h2 className="cinzel text-2xl font-bold text-amber-500 mb-1">Permisos por rol</h2>
+            <p className="text-sm text-slate-500 mb-5">Cargando la configuración…</p>
+            <Filas cuantas={6} />
+          </section>
+        )}
       </div>
     );
   }
 
   return (
     <div className="space-y-6">
+      {escaneo}
+
       {message && (
         <div
           className={`text-sm rounded-lg px-4 py-2 flex items-center gap-3 border ${
@@ -198,11 +260,100 @@ const AdminPanel: React.FC<Props> = ({
             : 'Solo lectura. Se necesita el permiso "Editar permisos" para cambiar esta tabla.'}
         </p>
 
-        <div className="overflow-x-auto">
+        {/*
+          En el teléfono, un rol cada vez.
+
+          La matriz son diez permisos por cinco roles. En 293 px de ancho útil
+          la columna de nombres se llevaba 230, así que asomaba media columna de
+          casillas y llegar a "Miembro" costaba 347 px de arrastre lateral. Y al
+          bajar por las diez filas la cabecera se iba de la pantalla, de modo
+          que se marcaban casillas sin saber de qué rol eran. Una columna fija
+          arregla el nombre de la fila y empeora todo lo demás.
+
+          Un rol cada vez es además el trabajo real -- "¿qué puede hacer un
+          oficial?" -- y es lo que dice el título de la sección. Comparar roles
+          entre sí, que es para lo que sirve una matriz, sigue estando a partir
+          de md, donde cabe.
+        */}
+        {/* Se resuelve aquí y no en el estado inicial porque el catálogo llega
+            del servidor: cuando se monta el componente todavía no hay roles. */}
+        {(() => {
+          const rolVisible =
+            rolElegido && catalog.roles.includes(rolElegido as UserRole)
+              ? rolElegido
+              : (catalog.roles.find((r) => r === 'officer') ?? catalog.roles[0]);
+          const setRolVisible = setRolElegido;
+          return (
+        <div className="md:hidden">
+          <label className="block mb-3">
+            <span className="block text-[11px] uppercase tracking-wider text-slate-500 mb-1">
+              Rol
+            </span>
+            <select
+              value={rolVisible}
+              onChange={(e) => setRolVisible(e.target.value)}
+              className="w-full bg-slate-950 border border-slate-800 rounded px-2 text-sm text-slate-100 outline-none focus:ring-1 focus:ring-amber-500"
+            >
+              {catalog.roles.map((role) => (
+                <option key={role} value={role}>
+                  {ROLE_LABELS[role] ?? role} — {(matrix[role] ?? []).length} de{' '}
+                  {catalog.permissions.length}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <ul className="flex flex-col divide-y divide-slate-800 border-y border-slate-800">
+            {catalog.permissions.map((permission) => {
+              const locked = isLocked(rolVisible, permission);
+              const puesto = (matrix[rolVisible] ?? []).includes(permission);
+              return (
+                <li key={permission}>
+                  <label
+                    className={`min-h-tap flex items-center gap-3 py-2 ${
+                      canManagePermissions && !locked ? 'cursor-pointer' : 'cursor-default'
+                    }`}
+                  >
+                    <span className="min-w-0 flex-1">
+                      <span className={`block text-sm ${puesto ? 'text-slate-100' : 'text-slate-400'}`}>
+                        {PERMISSION_LABELS[permission] ?? permission}
+                      </span>
+                      <span className="block text-[11px] text-slate-600 font-mono">{permission}</span>
+                    </span>
+                    {/* El "fijo" se dice, no se deja adivinar por una casilla
+                        que no responde: el servidor la va a rechazar igual y
+                        sin explicación el rechazo parece un fallo. */}
+                    {locked && (
+                      <span className="shrink-0 text-[11px] uppercase tracking-wider text-slate-500 border border-slate-700 rounded px-1.5 py-0.5">
+                        fijo
+                      </span>
+                    )}
+                    <input
+                      type="checkbox"
+                      className="shrink-0 w-5 h-5 accent-amber-600 disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
+                      checked={puesto}
+                      disabled={!canManagePermissions || locked}
+                      aria-label={`${PERMISSION_LABELS[permission] ?? permission} para ${
+                        ROLE_LABELS[rolVisible] ?? rolVisible
+                      }`}
+                      onChange={() => toggle(rolVisible, permission)}
+                    />
+                  </label>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+          );
+        })()}
+
+        <TablaAncha aviso="Desliza para ver todos los roles" className="hidden md:block">
           <table className="w-full text-sm border-collapse min-w-[640px]">
             <thead>
               <tr>
-                <th className="text-left font-semibold text-slate-400 p-2 border-b border-slate-800">Permiso</th>
+                <th className="text-left font-semibold text-slate-400 p-2 border-b border-slate-800 sticky left-0 bg-slate-900">
+                  Permiso
+                </th>
                 {catalog.roles.map((role) => (
                   <th
                     key={role}
@@ -216,22 +367,31 @@ const AdminPanel: React.FC<Props> = ({
             <tbody>
               {catalog.permissions.map((permission) => (
                 <tr key={permission} className="hover:bg-slate-800/30">
-                  <td className="p-2 border-b border-slate-800/60 text-slate-300">
+                  <td className="p-2 border-b border-slate-800/60 text-slate-300 sticky left-0 bg-slate-900">
                     {PERMISSION_LABELS[permission] ?? permission}
-                    <span className="block text-[10px] text-slate-600 font-mono">{permission}</span>
+                    <span className="block text-[11px] text-slate-600 font-mono">{permission}</span>
                   </td>
                   {catalog.roles.map((role) => {
                     const locked = isLocked(role, permission);
                     return (
                       <td key={role} className="p-2 border-b border-slate-800/60 text-center">
-                        <input
-                          type="checkbox"
-                          className="w-4 h-4 accent-amber-600 disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
-                          checked={(matrix[role] ?? []).includes(permission)}
-                          disabled={!canManagePermissions || locked}
+                        {/* La casilla mide 16 px, que no se acierta con el
+                            dedo. La etiqueta que la envuelve mide 44 y es
+                            igual de pulsable, así que el objetivo crece sin
+                            que el control cambie de aspecto. */}
+                        <label
+                          className="min-h-tap min-w-tap mx-auto flex items-center justify-center cursor-pointer"
                           title={locked ? 'Fijo: no puede quitarse' : undefined}
-                          onChange={() => toggle(role, permission)}
-                        />
+                        >
+                          <input
+                            type="checkbox"
+                            className="w-4 h-4 accent-amber-600 disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
+                            checked={(matrix[role] ?? []).includes(permission)}
+                            disabled={!canManagePermissions || locked}
+                            aria-label={`${PERMISSION_LABELS[permission] ?? permission} para ${ROLE_LABELS[role] ?? role}`}
+                            onChange={() => toggle(role, permission)}
+                          />
+                        </label>
                       </td>
                     );
                   })}
@@ -239,7 +399,7 @@ const AdminPanel: React.FC<Props> = ({
               ))}
             </tbody>
           </table>
-        </div>
+        </TablaAncha>
       </section>
 
       {canManageUsers && requests.length > 0 && (
@@ -333,11 +493,13 @@ const AdminPanel: React.FC<Props> = ({
             </button>
           </form>
 
-          <div className="overflow-x-auto">
+          <TablaAncha aviso="Desliza para ver rol, estado y acciones">
             <table className="w-full text-sm min-w-[560px]">
               <thead>
                 <tr className="text-left text-slate-400">
-                  <th className="p-2 border-b border-slate-800 font-semibold">Usuario</th>
+                  <th className="p-2 border-b border-slate-800 font-semibold sticky left-0 bg-slate-900">
+                    Usuario
+                  </th>
                   <th className="p-2 border-b border-slate-800 font-semibold">Rol</th>
                   <th className="p-2 border-b border-slate-800 font-semibold">Estado</th>
                   <th className="p-2 border-b border-slate-800 font-semibold text-right">Acciones</th>
@@ -346,10 +508,10 @@ const AdminPanel: React.FC<Props> = ({
               <tbody>
                 {users.map((user) => (
                   <tr key={user.id} className="hover:bg-slate-800/30">
-                    <td className="p-2 border-b border-slate-800/60 text-slate-200">
+                    <td className="p-2 border-b border-slate-800/60 text-slate-200 sticky left-0 bg-slate-900">
                       {user.username}
                       {user.id === currentUser.id && (
-                        <span className="ml-2 text-[9px] uppercase tracking-wider bg-amber-700 text-white px-1.5 py-0.5 rounded">
+                        <span className="ml-2 text-[11px] uppercase tracking-wider bg-amber-700 text-white px-1.5 py-0.5 rounded">
                           tú
                         </span>
                       )}
@@ -408,7 +570,7 @@ const AdminPanel: React.FC<Props> = ({
                 ))}
               </tbody>
             </table>
-          </div>
+          </TablaAncha>
         </section>
       )}
     </div>

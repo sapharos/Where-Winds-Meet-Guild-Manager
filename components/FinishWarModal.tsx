@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { WAR_OUTCOME_LABELS, WarOutcome } from '../types';
+import Sheet from './Sheet';
 
 const LOOK: Record<WarOutcome, { icon: string; on: string; ring: string }> = {
   win: {
@@ -49,25 +50,14 @@ const FinishWarModal: React.FC<Props> = ({ warName, onClose, onFinish }) => {
   };
 
   return (
-    <div className="fixed inset-0 z-[70] bg-black/70 backdrop-blur-sm flex items-start justify-center p-6 overflow-y-auto">
-      <form onSubmit={submit} className="bg-slate-900 border border-slate-800 rounded-xl w-full max-w-md my-8">
-        <div className="flex items-center justify-between p-6 border-b border-slate-800">
-          <div>
-            <h2 className="cinzel text-2xl font-bold text-amber-500">Finalizar guerra</h2>
-            <p className="text-xs text-slate-500 mt-1">
-              «{warName}» queda cerrada y se abren las dos formaciones.
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-2 text-slate-400 hover:text-amber-500 transition-all"
-          >
-            <i className="fa-solid fa-xmark text-xl"></i>
-          </button>
-        </div>
-
-        <div className="p-6 space-y-4">
+    <Sheet
+      title="Finalizar guerra"
+      subtitle={`«${warName}» queda cerrada y se abren las dos formaciones.`}
+      size="sm"
+      onClose={onClose}
+    >
+      <form onSubmit={submit}>
+        <div className="space-y-4">
           <div>
             <label className="block text-xs uppercase tracking-wider text-slate-500 mb-1.5">
               ¿Cómo terminó?
@@ -101,14 +91,14 @@ const FinishWarModal: React.FC<Props> = ({ warName, onClose, onFinish }) => {
           <button
             type="submit"
             disabled={busy}
-            className="w-full bg-amber-600 hover:bg-amber-500 disabled:bg-slate-800 disabled:text-slate-600 text-white text-sm font-bold py-2.5 px-5 rounded transition-all flex items-center justify-center gap-2"
+            className="w-full min-h-tap bg-amber-600 hover:bg-amber-500 disabled:bg-slate-800 disabled:text-slate-600 text-white text-sm font-bold px-5 rounded transition-all flex items-center justify-center gap-2"
           >
             <i className={`fa-solid ${busy ? 'fa-circle-notch fa-spin' : 'fa-flag-checkered'}`}></i>
             Finalizar
           </button>
         </div>
       </form>
-    </div>
+    </Sheet>
   );
 };
 

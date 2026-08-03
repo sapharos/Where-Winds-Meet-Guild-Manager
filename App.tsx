@@ -12,16 +12,16 @@ import LoginScreen from './components/LoginScreen';
 import DiscordClaim from './components/DiscordClaim';
 import MyProfile from './components/MyProfile';
 import AdminPanel from './components/AdminPanel';
-import ScanImport from './components/ScanImport';
 import MemberHistory from './components/MemberHistory';
 import BuildEditor from './components/BuildEditor';
+import ThemeToggle from './components/ThemeToggle';
+import { Bloque, Tarjetas } from './components/Esqueleto';
 
 const App: React.FC = () => {
   const [session, setSession] = useState<Session | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
-  const [activeTab, setActiveTab] = useState<
-    'me' | 'roster' | 'war-room' | 'scan' | 'admin'
-  >('roster');
+  const [activeTab, setActiveTab] = useState<'me' | 'roster' | 'war-room' | 'admin'>('roster');
+  const [haciaAtras, setHaciaAtras] = useState(false);
   const [historyFor, setHistoryFor] = useState<Player | null>(null);
   const [buildsFor, setBuildsFor] = useState<Player | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
@@ -402,17 +402,42 @@ const App: React.FC = () => {
 
   const activeSession = sessions.find(s => s.id === activeSessionId);
   const myPlayer = players.find((p) => p.id === session?.user.playerId);
-  const canSeeAdmin = can('users.manage') || can('permissions.manage') || can('builds.manage');
+  // Escaneo dejó de ser una pestaña: importar un barrido es una tarea
+  // administrativa y vive dentro de Administración, así que quien puede
+  // escanear necesita llegar a esa sección aunque no gestione nada más.
+  const canSeeAdmin =
+    can('users.manage') || can('permissions.manage') || can('builds.manage') || can('roster.edit');
 
   // The tabs as data rather than five near-identical blocks of markup: adding
   // one should not mean copying a class list and hoping it still matches.
+  // `corto` es la etiqueta de la barra inferior, donde hay cuatro columnas y
+  // "Sala de Guerra" en dos líneas rompe la fila.
   const tabs = [
-    { id: 'roster' as const, label: 'Roster', icon: 'fa-users', show: true },
-    { id: 'me' as const, label: 'Mi perfil', icon: 'fa-user', show: Boolean(myPlayer) },
-    { id: 'war-room' as const, label: 'Sala de Guerra', icon: 'fa-chess-knight', show: true },
-    { id: 'scan' as const, label: 'Escaneo', icon: 'fa-file-import', show: can('roster.edit') },
-    { id: 'admin' as const, label: 'Administración', icon: 'fa-user-shield', show: canSeeAdmin },
+    { id: 'roster' as const, label: 'Roster', corto: 'Roster', icon: 'fa-users', show: true },
+    { id: 'me' as const, label: 'Mi perfil', corto: 'Perfil', icon: 'fa-user', show: Boolean(myPlayer) },
+    { id: 'war-room' as const, label: 'Sala de Guerra', corto: 'Guerra', icon: 'fa-chess-knight', show: true },
+    { id: 'admin' as const, label: 'Administración', corto: 'Admin', icon: 'fa-user-shield', show: canSeeAdmin },
   ].filter((t) => t.show);
+
+  /**
+   * Por qué lado entra la pantalla nueva.
+   *
+   * Moverse a la derecha en la barra trae el contenido desde la derecha, y
+   * volver lo trae desde la izquierda. Es la única señal de sentido que tiene
+   * una barra donde los cuatro destinos parecen igual de lejos.
+   *
+   * Se decide al pulsar y no al pintar. La primera versión guardaba la pestaña
+   * anterior en un ref y lo actualizaba durante el render, y siempre salía
+   * "adelante": en desarrollo React renderiza dos veces, y en la segunda el ref
+   * ya valía la pestaña nueva, así que la diferencia era cero. Comparar dos
+   * cosas mientras una de ellas se está escribiendo no funciona.
+   */
+  const irA = (destino: typeof activeTab) => {
+    const desde = tabs.findIndex((t) => t.id === activeTab);
+    const hasta = tabs.findIndex((t) => t.id === destino);
+    setHaciaAtras(hasta < desde);
+    setActiveTab(destino);
+  };
 
   const handleUpdateSession = (updatedSession: GuildWarSession) => {
     if (warLocked) return;
@@ -423,7 +448,7 @@ const App: React.FC = () => {
 
   if (!authChecked) {
     return (
-      <div className="min-h-screen bg-[#0a0b0c] text-slate-500 flex items-center justify-center gap-3">
+      <div className="min-h-screen bg-slate-950 text-slate-500 flex items-center justify-center gap-3">
         <i className="fa-solid fa-circle-notch fa-spin"></i>
         Cargando...
       </div>
@@ -440,8 +465,10 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-[#0a0b0c] text-slate-200">
-      <header className="border-b border-slate-800 bg-slate-900/80 backdrop-blur-md sticky top-0 z-50">
+    <div className="recorta-rutas min-h-screen bg-slate-950 text-slate-200">
+      {/* pad-safe-top: pegada arriba y sin ella, la fila de identidad se mete
+          bajo el recorte de la pantalla en cuanto el teléfono tiene uno. */}
+      <header className="border-b border-slate-800 bg-slate-900/80 backdrop-blur-md sticky top-0 z-50 pad-safe-top">
         {/* Identity and account on one line, navigation on its own below it.
             Sharing a line is what squeezed the labels into three lines each. */}
         <div className="max-w-[1600px] mx-auto px-4 sm:px-6 pt-3 flex items-center justify-between gap-3">
@@ -454,7 +481,7 @@ const App: React.FC = () => {
               <i className="fa-solid fa-wind text-xl text-white"></i>
             </div>
             <div className="min-w-0">
-              <h1 className="cinzel text-lg sm:text-xl font-bold tracking-widest text-white leading-none truncate">
+              <h1 className="cinzel text-lg sm:text-xl font-bold tracking-widest text-slate-100 leading-none truncate">
                 ZONA ZERO
               </h1>
               <div className="flex items-center gap-2 mt-0.5">
@@ -490,10 +517,17 @@ const App: React.FC = () => {
             {/* Below large screens the same tools live behind one button. A
                 native details element needs no state and closes itself. */}
             <details className="lg:hidden relative">
-              <summary className="list-none cursor-pointer p-2 rounded-lg bg-slate-950 border border-slate-800 text-slate-400 hover:text-amber-500 transition-all">
+              <summary
+                aria-label="Más herramientas"
+                className="list-none cursor-pointer p-2 rounded-lg bg-slate-950 border border-slate-800 text-slate-400 hover:text-amber-500 transition-all"
+              >
                 <i className="fa-solid fa-ellipsis"></i>
               </summary>
               <div className="absolute right-0 mt-2 w-60 bg-slate-900 border border-slate-800 rounded-lg shadow-2xl p-3 space-y-3 z-50">
+                <div>
+                  <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-1.5">Tema</p>
+                  <ThemeToggle />
+                </div>
                 <CollaborationPanel
                   peerId={myPeerId}
                   role={peerRole}
@@ -555,10 +589,17 @@ const App: React.FC = () => {
 
             <div className="flex items-center gap-2">
               <div className="text-right leading-tight hidden md:block">
-                <div className="text-sm font-semibold text-white">{session.user.username}</div>
+                <div className="text-sm font-semibold text-slate-100">{session.user.username}</div>
                 <div className="text-[10px] uppercase tracking-wider text-amber-500 font-bold">
                   {ROLE_LABELS[session.user.role] ?? session.user.role}
                 </div>
+              </div>
+              {/* Tres botones de 44px no caben junto al nombre del gremio en un
+                  teléfono: metidos aquí dejaban "ZONA ZERO" en "Z.". Abajo de
+                  lg viven en el mismo menú que el resto de herramientas, que es
+                  lo que ya hacían la colaboración y la importación. */}
+              <div className="hidden lg:block">
+                <ThemeToggle />
               </div>
               <div className="flex bg-slate-950 p-1 rounded-lg border border-slate-800">
                 <button
@@ -580,15 +621,17 @@ const App: React.FC = () => {
           </div>
         </div>
 
-        {/* Scrolls sideways when it does not fit rather than wrapping: a label
-            broken across three lines is what made this feel unfinished. */}
-        <nav className="max-w-[1600px] mx-auto px-4 sm:px-6 py-3 overflow-x-auto no-bar">
+        {/* En escritorio las pestañas siguen donde estaban. En el teléfono se
+            van abajo (ver el <nav> del final): arriba estaban fuera del alcance
+            del pulgar, se salían de la pantalla y había que arrastrarlas de
+            lado para llegar a la última. */}
+        <nav className="hidden sm:block max-w-[1600px] mx-auto px-6 py-3 overflow-x-auto no-bar">
           <div className="flex gap-1 w-max mx-auto bg-slate-950 p-1 rounded-lg border border-slate-800">
             {tabs.map((tab) => (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`px-4 sm:px-5 py-2 rounded-md text-sm font-semibold transition-all flex items-center gap-2 whitespace-nowrap ${
+                onClick={() => irA(tab.id)}
+                className={`px-5 py-2 rounded-md text-sm font-semibold transition-all flex items-center gap-2 whitespace-nowrap ${
                   activeTab === tab.id
                     ? 'bg-amber-700 text-white shadow-lg'
                     : 'text-slate-500 hover:text-slate-300'
@@ -609,11 +652,22 @@ const App: React.FC = () => {
         </div>
       )}
 
-      <main className="max-w-[1600px] mx-auto p-6">
+      {/* 16 px de margen en el teléfono y 24 a partir de sm. Con 24 fijos se
+          perdían 48 de los 375, el 12,8% del ancho, en no dibujar nada. */}
+      {/* `key` en la pestaña para que la animación vuelva a correr en cada
+          cambio: sin ella React reutiliza el nodo y la clase no dispara nada. */}
+      <main
+        key={activeTab}
+        className={`max-w-[1600px] mx-auto p-4 sm:p-6 ${haciaAtras ? 'ruta-atras' : 'ruta-adelante'}`}
+      >
         {isLoading ? (
-          <div className="flex items-center justify-center h-96 text-slate-500 gap-3">
-            <i className="fa-solid fa-circle-notch fa-spin"></i>
-            Loading guild data...
+          // Era una rueda centrada en una caja de 384 px de alto que después se
+          // sustituía por contenido de otra altura, así que la página pegaba un
+          // salto justo cuando el lector empezaba a leerla. El esqueleto ocupa
+          // el sitio que va a ocupar el roster y dice qué va a salir.
+          <div className="space-y-5" role="status" aria-label="Cargando los datos del gremio">
+            <Bloque alto="h-[188px]" className="rounded-xl" />
+            <Tarjetas cuantas={6} />
           </div>
         ) : activeTab === 'me' ? (
           myPlayer ? (
@@ -627,14 +681,15 @@ const App: React.FC = () => {
               Tu cuenta todavía no está enlazada a un miembro del roster.
             </p>
           )
-        ) : activeTab === 'scan' ? (
-          <ScanImport players={players} onImported={() => void loadAllData()} />
         ) : activeTab === 'admin' ? (
           <AdminPanel
             currentUser={session.user}
             canManageUsers={can('users.manage')}
             canManagePermissions={can('permissions.manage')}
             canManageBuilds={can('builds.manage')}
+            canScan={can('roster.edit')}
+            players={players}
+            onScanImported={() => void loadAllData()}
             onWeaponSetsChanged={reloadWeaponSets}
           />
         ) : activeTab === 'roster' ? (
@@ -674,24 +729,61 @@ const App: React.FC = () => {
         />
       )}
 
-      {activeTab === 'war-room' && (
-        <footer className="hidden md:flex fixed bottom-0 left-0 right-0 bg-slate-950/90 backdrop-blur-md border-t border-slate-800 p-3 flex justify-center z-50">
-           <div className="flex items-center gap-8 text-[10px] font-bold uppercase tracking-widest text-slate-500">
-              <span className="flex items-center gap-2">
-                 <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></div>
-                 Grado defensivo: <span className="text-white">ÓPTIMO</span>
-              </span>
-              <span className="flex items-center gap-2">
-                 <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>
-                 Asedio: <span className="text-white">EQUILIBRADO</span>
-              </span>
-              <span className="flex items-center gap-2">
-                 <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
-                 Sostenimiento: <span className="text-white">ESTABLE</span>
-              </span>
-           </div>
-        </footer>
-      )}
+      {/*
+        La navegación, abajo y sólo en el teléfono.
+
+        Arriba estaba en el peor sitio posible: fuera del alcance del pulgar, y
+        tan ancha que la última pestaña quedaba fuera de la pantalla y había que
+        arrastrarla de lado para encontrarla. Aquí cada destino tiene su columna,
+        se ven todos a la vez, y están donde ya está la mano.
+
+        Los mismos destinos y en el mismo orden que arriba: cambia dónde está la
+        barra, no el mapa.
+      */}
+      {/* `nav-inferior` la aparta cuando sale el teclado (regla en tokens.css).
+          Se hace en CSS y no con estado: la altura del teclado cambia muchas
+          veces por segundo mientras se abre, y volver a renderizar la
+          aplicación entera en cada paso es la forma más cara posible de mover
+          una barra 76 px. */}
+      <nav
+        aria-label="Secciones"
+        className="nav-inferior sm:hidden fixed bottom-0 inset-x-0 z-40 border-t border-slate-800 bg-slate-900/95 backdrop-blur-md pb-safe-b"
+      >
+        <div className="flex">
+          {tabs.map((tab) => {
+            const aqui = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => irA(tab.id)}
+                aria-current={aqui ? 'page' : undefined}
+                className={`flex-1 min-w-0 min-h-tap flex flex-col items-center justify-center gap-0.5 pt-2 pb-1.5 transition-colors duration-micro ${
+                  aqui ? 'text-amber-500' : 'text-slate-500'
+                }`}
+              >
+                <i className={`fa-solid ${tab.icon} text-lg`}></i>
+                <span className="text-[11px] font-semibold tracking-wide">{tab.corto}</span>
+                {/* 锔钉: la grapa marca dónde estás sujeto. */}
+                <svg
+                  aria-hidden
+                  width="26"
+                  height="5"
+                  viewBox="0 0 34 7"
+                  className={`transition-opacity duration-micro ${aqui ? 'opacity-100' : 'opacity-0'}`}
+                >
+                  <rect x="4" y="2" width="26" height="2.6" rx="1.3" fill="currentColor" />
+                  <circle cx="4" cy="3.3" r="3.2" fill="currentColor" />
+                  <circle cx="30" cy="3.3" r="3.2" fill="currentColor" />
+                </svg>
+              </button>
+            );
+          })}
+        </div>
+      </nav>
+
+      {/* El hueco que ocupa la barra fija, para que no tape el último elemento
+          de ninguna pantalla. */}
+      <div className="sm:hidden h-[76px] pb-safe-b" aria-hidden />
     </div>
   );
 };

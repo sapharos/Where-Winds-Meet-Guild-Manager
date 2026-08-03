@@ -258,25 +258,53 @@ const WarTimers: React.FC<Props> = ({ startedAt, offset, mayBeWarned }) => {
 
   return (
     <>
-      {/* Big enough to be caught out of the corner of an eye, and above
-          everything else, because it is worth nothing a moment later. */}
+      {/*
+        El aviso ocupa la pantalla, porque es lo único que importa mientras dura.
+
+        Estaba a 24 px del borde superior -- debajo de la cabecera pegajosa y
+        dentro del recorte de la pantalla -- y era una caja pequeña en mitad de
+        una interfaz llena de cosas. Un aviso que llega a los treinta segundos de
+        un boss compite con todo lo que hay alrededor, y pierde.
+
+        Ahora cubre lo que hay detrás y toda ella cierra: no hay que apuntar a
+        nada, con tocar en cualquier sitio basta. Y se va sola, así que quien no
+        esté mirando el teléfono no se lo encuentra puesto diez minutos después.
+      */}
       {toast && (
-        <div className="fixed inset-x-0 top-6 z-[80] flex justify-center px-4 pointer-events-none">
-          <button
-            onClick={() => setToast(null)}
-            className="pointer-events-auto rounded-2xl border-2 px-8 py-5 shadow-2xl backdrop-blur-sm text-center animate-pulse"
-            style={{
-              borderColor: toast.colour,
-              background: `linear-gradient(180deg, ${toast.colour}26 0%, #0b1120 100%)`,
-              boxShadow: `0 0 40px ${toast.colour}55`,
-            }}
+        <button
+          onClick={() => setToast(null)}
+          aria-live="assertive"
+          aria-label={`${toast.label} en ${toast.when}. Toca para descartar.`}
+          className="fixed inset-0 z-[95] flex flex-col items-center justify-center gap-3 px-6 text-center animate-hoja"
+          style={{
+            // El resplandor va encima de una base casi opaca, no mezclado con
+            // ella: mezclados, el color teñía la pantalla entera y lo que había
+            // detrás seguía leyéndose a través, que es justo lo que un aviso no
+            // debe permitir.
+            background: `radial-gradient(circle at 50% 42%, ${toast.colour}30 0%, transparent 58%), rgb(var(--n-950) / 0.97)`,
+            backdropFilter: 'blur(4px)',
+          }}
+        >
+          <span
+            className="rounded-full border-2 px-4 py-1 text-[11px] uppercase tracking-[0.2em] font-bold animate-pulse"
+            style={{ borderColor: toast.colour, color: toast.colour }}
           >
-            <p className="cinzel text-4xl sm:text-5xl font-bold" style={{ color: toast.colour }}>
-              {toast.label}
-            </p>
-            <p className="text-lg sm:text-xl text-slate-200 mt-1">en {toast.when}</p>
-          </button>
-        </div>
+            Aviso
+          </span>
+
+          <span
+            className="cinzel text-[clamp(2.75rem,14vw,6rem)] font-bold leading-[0.95] drop-shadow-lg"
+            style={{ color: toast.colour, textShadow: `0 0 44px ${toast.colour}80` }}
+          >
+            {toast.label}
+          </span>
+
+          <span className="text-[clamp(1.25rem,6vw,2rem)] text-slate-100 font-semibold">
+            en {toast.when}
+          </span>
+
+          <span className="mt-6 text-sm text-slate-400">Toca para cerrar</span>
+        </button>
       )}
 
       <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-4 flex items-center gap-4 flex-wrap">

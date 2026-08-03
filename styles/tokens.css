@@ -1,0 +1,321 @@
+/**
+ * Los tokens de Zona Zero.
+ *
+ * Dirección: docs/DIRECCION_VISUAL.md. En corto -- cerámica Ru de las Cinco
+ * Dinastías: el vidriado 雨过天青 es la superficie, el craquelado 开片 es el
+ * borde, y el latón de la grapa 锔钉 es la marca de lo que está sujeto.
+ *
+ * El tema oscuro NO es el claro restado. Es la misma pieza de noche, y por eso
+ * la grieta se invierte: de día es más oscura que el vidriado, de noche atrapa
+ * la luz y es más clara. Los dos temas se escriben aquí a la vez, uno al lado
+ * del otro, para que no se pueda tocar uno sin ver el otro.
+ *
+ * Todo valor de color va como tres canales sueltos, sin `rgb()`: es lo que
+ * permite que `bg-slate-900/60` siga significando algo. Los contrastes están
+ * comprobados en docs/tools/contraste.js -- si se toca un valor aquí, se toca
+ * allí y se vuelve a correr.
+ */
+
+:root {
+  color-scheme: light;
+
+  /* --- neutral: superficies, bordes, tinta ------------------------------ */
+  /* Se invierte entre temas. En claro, 100 es la tinta y 900 la tarjeta.   */
+  --n-50: 10 15 14;
+  --n-100: 23 33 31; /* text-primary        13,95 sobre surface */
+  --n-200: 30 42 39;
+  --n-300: 43 57 52;
+  --n-400: 67 80 73;
+  --n-500: 87 101 95; /* text-muted          5,18 */
+  --n-600: 107 122 115;
+  --n-700: 139 153 146; /* tinta apagada / borde marcado */
+  --n-800: 198 207 201; /* border -- 开片, la grieta */
+  --n-900: 245 247 244; /* surface-raised: tarjetas, hojas */
+  /* 950 es más claro que 900 a propósito y sólo aquí: el código lo usa para
+     pozos (campos, fondos de tabla), que en claro se hunden respecto a la
+     tarjeta en vez de oscurecerse como en el tema oscuro. */
+  --n-950: 225 231 227; /* surface-sunken: fondo de página y pozos de campo */
+
+  /* --- acento: 天青, el azul del cielo tras la lluvia -------------------- */
+  --a-100: 210 230 238;
+  --a-200: 169 207 220;
+  --a-300: 78 157 182;
+  --a-400: 46 130 160;
+  --a-500: 31 107 132; /* accent              5,08 */
+  /* Los peldaños de relleno (600-950) valen lo mismo en los dos temas: son los
+     que llevan texto blanco encima, y ese texto no puede depender del tema. */
+  --a-600: 26 92 114;
+  --a-700: 22 77 96;
+  --a-800: 18 61 76;
+  --a-900: 14 47 58;
+  --a-950: 9 31 39;
+
+  /* --- destructivo: 铁红, óxido de hierro del horno --------------------- */
+  --d-200: 224 176 167;
+  --d-300: 196 112 95;
+  --d-400: 176 78 59;
+  --d-500: 155 51 36; /* danger              6,14 */
+  --d-600: 138 44 31;
+  --d-700: 116 37 26;
+  --d-800: 94 30 21;
+  --d-900: 74 24 16;
+  --d-950: 46 15 10;
+
+  /* --- confirmado: 豆青, el verde del propio vidriado ------------------- */
+  --s-200: 154 198 176;
+  --s-300: 95 163 131;
+  --s-400: 65 133 102;
+  --s-500: 47 107 79; /* success             5,32 */
+  --s-600: 40 92 67;
+  --s-700: 32 74 54;
+  --s-800: 26 59 43;
+  --s-900: 20 46 33;
+  --s-950: 12 27 20;
+
+  /* --- informativo: bando defensivo y rol de tanque --------------------- */
+  /* Azul frío, deliberadamente aparte del acento para que "defensa" no se lea
+     como "activo". */
+  --i-300: 106 126 204;
+  --i-400: 74 99 184;
+  --i-500: 59 81 160;
+  --i-600: 51 70 138;
+  --i-700: 42 58 114;
+  --i-800: 34 47 92;
+  --i-900: 27 37 72;
+
+  /* --- 锔钉: el latón de la grapa. Firma y aviso. ----------------------- */
+  --w-300: 196 152 84;
+  --w-500: 138 90 22; /* warning             5,00 */
+  --w-700: 106 68 16;
+
+  /* Lo que ocupa el teclado del teléfono. Lo mide services/teclado.ts; aquí
+     sólo se declara para que valga 0 mientras no haya nadie escribiendo. */
+  --teclado: 0px;
+
+  /* --- velo de las hojas y modales -------------------------------------- */
+  --scrim: 23 33 31;
+  --scrim-alpha: 0.45;
+
+  /* --- elevación: sólo dos ---------------------------------------------- */
+  --shadow-1: 0 2px 12px rgb(23 33 31 / 0.1);
+  --shadow-2: 0 6px 28px rgb(23 33 31 / 0.16);
+
+  /* --- movimiento -------------------------------------------------------- */
+  --dur-tap: 100ms;
+  --dur-micro: 180ms;
+  --dur-sheet: 280ms;
+  --dur-route: 300ms;
+  --ease-glaze: cubic-bezier(0.2, 0, 0, 1);
+  --ease-lift: cubic-bezier(0.4, 0, 1, 1);
+  /* Lo único del sistema que se pasa de largo, porque es lo único que
+     representa un golpe seco: la grapa al fijar a alguien. */
+  --ease-staple: cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+
+[data-theme='dark'] {
+  color-scheme: dark;
+
+  --n-50: 245 247 244;
+  --n-100: 228 234 230; /* text-primary       15,03 sobre surface */
+  --n-200: 214 222 218;
+  --n-300: 192 202 197;
+  --n-400: 168 180 175;
+  --n-500: 147 162 156; /* text-muted          6,89 */
+  --n-600: 116 130 124;
+  --n-700: 95 112 105;
+  --n-800: 42 55 51; /* border -- la grieta, aquí más clara que el vidriado */
+  --n-900: 22 32 29; /* surface-raised */
+  --n-950: 10 15 14; /* surface-sunken */
+
+  --a-100: 14 47 58;
+  --a-200: 18 61 76;
+  --a-300: 143 202 221;
+  --a-400: 100 182 206; /* accent              7,97 */
+  --a-500: 74 165 192;
+  --a-600: 26 92 114; /* idéntico al claro: lleva texto blanco */
+  --a-700: 22 77 96;
+  --a-800: 18 61 76;
+  --a-900: 14 47 58;
+  --a-950: 9 31 39;
+
+  --d-200: 244 190 182;
+  --d-300: 238 156 144;
+  --d-400: 228 121 106; /* danger              6,32 */
+  --d-500: 212 92 76;
+  --d-600: 184 72 58;
+  --d-700: 142 53 41;
+  --d-800: 94 30 21;
+  --d-900: 58 22 16;
+  --d-950: 36 16 12;
+
+  --s-200: 186 224 203;
+  --s-300: 154 214 181;
+  --s-400: 111 191 147; /* success             8,34 */
+  --s-500: 79 168 120;
+  --s-600: 59 138 96;
+  --s-700: 44 107 74;
+  --s-800: 30 74 51;
+  --s-900: 20 50 34;
+  --s-950: 11 29 20;
+
+  --i-300: 163 180 238;
+  --i-400: 132 150 224;
+  --i-500: 108 126 204;
+  --i-600: 74 92 168;
+  --i-700: 58 74 136;
+  --i-800: 44 56 104;
+  --i-900: 33 42 78;
+
+  --w-300: 226 189 133;
+  --w-500: 211 161 85; /* warning             7,86 */
+  --w-700: 160 116 52;
+
+  --scrim: 0 0 0;
+  --scrim-alpha: 0.7;
+
+  --shadow-1: 0 2px 12px rgb(0 0 0 / 0.45);
+  --shadow-2: 0 6px 28px rgb(0 0 0 / 0.6);
+}
+
+/* -------------------------------------------------------------------------
+   Fundaciones de ventana
+   ------------------------------------------------------------------------- */
+
+html {
+  /* La barra de Safari desmiente 100vh: con dvh el alto es el que de verdad
+     se ve, y el contenido deja de saltar cuando la barra aparece y se va. */
+  min-height: 100dvh;
+  /* Que el rebote del final de una lista no arrastre la página de detrás. */
+  overscroll-behavior-y: none;
+}
+
+body {
+  min-height: 100dvh;
+  background-color: rgb(var(--n-950));
+  color: rgb(var(--n-100));
+  /* Un tirón horizontal en una tabla no debe mover la página entera. */
+  overscroll-behavior-x: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* El suelo de 16px del que hablaba el diagnóstico. Por debajo, iOS hace zoom
+   al enfocar y deja la página en otro sitio; en una visita de dos minutos eso
+   es un pellizco de recuperación por cada campo tocado. Va aquí, en la base,
+   y no clase por clase, porque el patrón está copiado en unos 40 sitios.
+
+   El selector lleva `[class]` a propósito. Sin él la regla pierde contra
+   `text-sm`, que es exactamente la clase que está escrita en los cuarenta
+   campos: una utilidad de Tailwind gana a un selector de elemento suelto, así
+   que la regla se aplicaba y no servía de nada. Con el atributo la
+   especificidad sube lo justo (0,1,1 contra 0,1,0) sin recurrir a !important,
+   que se llevaría por delante también los tamaños puestos a conciencia. */
+input[class],
+select[class],
+textarea[class] {
+  font-size: max(16px, 1em);
+}
+
+/**
+ * El suelo de 44 px, en la base.
+ *
+ * Tras arreglar a mano lo peor -- los seis iconos de 20x24 de la tarjeta de
+ * miembro, los 16x16 del tablero, los 55x17 del banquillo -- quedaba una banda
+ * de entre 29 y 42 px repartida por toda la aplicación: pestañas, filtros,
+ * botones primarios. Cuarenta sitios, todos por la misma razón (`py-2` sobre
+ * texto de 14), y ninguno arreglable de forma que no se volviera a torcer al
+ * escribir el siguiente botón.
+ *
+ * Así que el suelo va aquí. `min-height` y no `height`: un botón que necesita
+ * dos líneas sigue creciendo. Y `align-items: center` para que el contenido no
+ * se quede pegado arriba en los que ahora sobran de alto.
+ *
+ * La excepción está declarada, no supuesta: `.tap-suelto` lo desactiva para lo
+ * que de verdad va dentro de una línea de texto -- una casilla, un enlace en
+ * mitad de un párrafo -- donde 44 px de alto rompen el renglón.
+ */
+button:not(.tap-suelto),
+select:not(.tap-suelto),
+summary:not(.tap-suelto),
+textarea:not(.tap-suelto),
+[role='button']:not(.tap-suelto) {
+  min-height: 44px;
+}
+
+/* Los campos de texto también. Se listan por tipo en vez de excluir casillas y
+   radios, porque `input` sin más incluye botones, ficheros y ocultos, y darle
+   44 px de alto a un input oculto es empezar a mover cosas que no se ven. */
+input:not(.tap-suelto):is(
+    [type='text'],
+    [type='search'],
+    [type='password'],
+    [type='email'],
+    [type='number'],
+    [type='tel'],
+    [type='url'],
+    [type='date'],
+    [type='time'],
+    [type='datetime-local'],
+    [type='color'],
+    :not([type])
+  ) {
+  min-height: 44px;
+}
+
+button:not(.tap-suelto):not(:disabled) {
+  align-items: center;
+}
+
+/**
+ * La respuesta al dedo, en todo lo que se pulsa.
+ *
+ * Va aquí y no clase por clase porque el reproche era general: se tocaba un
+ * botón y no pasaba nada visible hasta que volvía el servidor. Una escala del
+ * 2% en 100 ms no adorna nada, dice "te he oído" -- y 100 ms es el umbral por
+ * debajo del cual deja de percibirse como retardo.
+ *
+ * Sólo `transform`: no mueve a los vecinos ni obliga a recalcular la maqueta.
+ * Y en `:active`, que ocurre antes de que React se entere de nada.
+ */
+button:not(.tap-suelto):not(:disabled),
+summary:not(.tap-suelto),
+[role='button']:not(.tap-suelto) {
+  transition: transform var(--dur-tap) var(--ease-glaze);
+}
+
+button:not(.tap-suelto):not(:disabled):active,
+summary:not(.tap-suelto):active,
+[role='button']:not(.tap-suelto):active {
+  transform: scale(0.97);
+}
+
+/* La casilla nativa mide 13 px y no se puede agrandar sin deformarla, así que
+   lo que crece es su zona de toque. */
+input[type='checkbox']:not(.tap-suelto),
+input[type='radio']:not(.tap-suelto) {
+  min-width: 20px;
+  min-height: 20px;
+}
+
+/* Foco visible en todo lo interactivo. El diagnóstico no encontró ni uno. */
+:focus-visible {
+  outline: 2px solid rgb(var(--a-500));
+  outline-offset: 2px;
+  border-radius: inherit;
+}
+
+/* -------------------------------------------------------------------------
+   Movimiento reducido
+   Cableado desde el principio, y a cambio instantáneo -- nunca a ausencia de
+   respuesta. Quien pide menos movimiento sigue necesitando saber que su toque
+   llegó.
+   ------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

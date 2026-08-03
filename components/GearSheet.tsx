@@ -542,6 +542,9 @@ const Translations: React.FC<{
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             placeholder="Buscar atributo…"
+            type="search"
+            aria-label="Buscar atributo"
+            enterKeyHint="search"
             autoComplete="off"
             className="w-full bg-slate-900 border border-slate-800 rounded p-1.5 text-xs outline-none focus:ring-1 focus:ring-amber-500"
           />
@@ -966,20 +969,26 @@ const PieceEditor: React.FC<{
               autoComplete="off"
               className="sm:col-span-2 bg-slate-900 border border-slate-800 rounded p-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
             />
+            {/* inputMode numérico: son cifras, y sin él sale el teclado
+                alfabético y hay que cambiarlo a mano en cada pieza. */}
             <input
               value={level}
               onChange={(e) => setLevel(e.target.value)}
               placeholder="Nivel"
+              aria-label="Nivel de la pieza"
+              inputMode="numeric"
               autoComplete="off"
-              className="bg-slate-900 border border-slate-800 rounded p-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
+              className="min-h-tap bg-slate-900 border border-slate-800 rounded px-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
             />
             <input
               value={days}
               onChange={(e) => setDays(e.target.value)}
               placeholder="Días para sintonizar"
+              aria-label="Días para sintonizar"
+              inputMode="numeric"
               autoComplete="off"
               title="Los días que muestra el juego abajo a la derecha"
-              className="bg-slate-900 border border-slate-800 rounded p-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
+              className="min-h-tap bg-slate-900 border border-slate-800 rounded px-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
             />
           </div>
 
