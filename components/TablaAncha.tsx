@@ -17,11 +17,13 @@ import React from 'react';
  * el desvanecido del borde derecho, que es lo que hace visible que la tabla
  * sigue. `overscroll-x-contain` evita que el tirón se lleve la página entera.
  */
-const TablaAncha: React.FC<{ aviso?: string; children: React.ReactNode }> = ({
-  aviso = 'Desliza para ver el resto',
-  children,
-}) => (
-  <div className="relative">
+const TablaAncha: React.FC<{
+  aviso?: string;
+  /** Para ocultarla donde una versión en tarjetas la sustituye. */
+  className?: string;
+  children: React.ReactNode;
+}> = ({ aviso = 'Desliza para ver el resto', className = '', children }) => (
+  <div className={`relative ${className}`}>
     <p className="md:hidden text-[11px] text-slate-500 mb-1.5 flex items-center gap-1.5">
       <i className="fa-solid fa-arrows-left-right"></i>
       {aviso}

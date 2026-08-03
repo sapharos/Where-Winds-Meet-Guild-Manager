@@ -54,6 +54,15 @@ const AdminPanel: React.FC<Props> = ({
   const [newPassword, setNewPassword] = useState('');
   const [newRole, setNewRole] = useState<UserRole>('member');
   const [requests, setRequests] = useState<Registration[]>([]);
+  /**
+   * Qué rol se está mirando en el teléfono, donde la matriz va de uno en uno.
+   *
+   * Arranca en oficial y no en el primero de la lista: el primero es
+   * administrador, cuyos permisos están casi todos fijos, así que abrir ahí
+   * enseña una pantalla en la que no se puede tocar casi nada. Oficial es el
+   * rol que de verdad se ajusta.
+   */
+  const [rolElegido, setRolElegido] = useState<string | null>(null);
 
   const report = (text: string, ok = true) => setMessage({ text, ok });
 
@@ -236,7 +245,94 @@ const AdminPanel: React.FC<Props> = ({
             : 'Solo lectura. Se necesita el permiso "Editar permisos" para cambiar esta tabla.'}
         </p>
 
-        <TablaAncha aviso="Desliza para ver todos los roles">
+        {/*
+          En el teléfono, un rol cada vez.
+
+          La matriz son diez permisos por cinco roles. En 293 px de ancho útil
+          la columna de nombres se llevaba 230, así que asomaba media columna de
+          casillas y llegar a "Miembro" costaba 347 px de arrastre lateral. Y al
+          bajar por las diez filas la cabecera se iba de la pantalla, de modo
+          que se marcaban casillas sin saber de qué rol eran. Una columna fija
+          arregla el nombre de la fila y empeora todo lo demás.
+
+          Un rol cada vez es además el trabajo real -- "¿qué puede hacer un
+          oficial?" -- y es lo que dice el título de la sección. Comparar roles
+          entre sí, que es para lo que sirve una matriz, sigue estando a partir
+          de md, donde cabe.
+        */}
+        {/* Se resuelve aquí y no en el estado inicial porque el catálogo llega
+            del servidor: cuando se monta el componente todavía no hay roles. */}
+        {(() => {
+          const rolVisible =
+            rolElegido && catalog.roles.includes(rolElegido as UserRole)
+              ? rolElegido
+              : (catalog.roles.find((r) => r === 'officer') ?? catalog.roles[0]);
+          const setRolVisible = setRolElegido;
+          return (
+        <div className="md:hidden">
+          <label className="block mb-3">
+            <span className="block text-[11px] uppercase tracking-wider text-slate-500 mb-1">
+              Rol
+            </span>
+            <select
+              value={rolVisible}
+              onChange={(e) => setRolVisible(e.target.value)}
+              className="w-full bg-slate-950 border border-slate-800 rounded px-2 text-sm text-slate-100 outline-none focus:ring-1 focus:ring-amber-500"
+            >
+              {catalog.roles.map((role) => (
+                <option key={role} value={role}>
+                  {ROLE_LABELS[role] ?? role} — {(matrix[role] ?? []).length} de{' '}
+                  {catalog.permissions.length}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <ul className="flex flex-col divide-y divide-slate-800 border-y border-slate-800">
+            {catalog.permissions.map((permission) => {
+              const locked = isLocked(rolVisible, permission);
+              const puesto = (matrix[rolVisible] ?? []).includes(permission);
+              return (
+                <li key={permission}>
+                  <label
+                    className={`min-h-tap flex items-center gap-3 py-2 ${
+                      canManagePermissions && !locked ? 'cursor-pointer' : 'cursor-default'
+                    }`}
+                  >
+                    <span className="min-w-0 flex-1">
+                      <span className={`block text-sm ${puesto ? 'text-slate-100' : 'text-slate-400'}`}>
+                        {PERMISSION_LABELS[permission] ?? permission}
+                      </span>
+                      <span className="block text-[11px] text-slate-600 font-mono">{permission}</span>
+                    </span>
+                    {/* El "fijo" se dice, no se deja adivinar por una casilla
+                        que no responde: el servidor la va a rechazar igual y
+                        sin explicación el rechazo parece un fallo. */}
+                    {locked && (
+                      <span className="shrink-0 text-[11px] uppercase tracking-wider text-slate-500 border border-slate-700 rounded px-1.5 py-0.5">
+                        fijo
+                      </span>
+                    )}
+                    <input
+                      type="checkbox"
+                      className="shrink-0 w-5 h-5 accent-amber-600 disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
+                      checked={puesto}
+                      disabled={!canManagePermissions || locked}
+                      aria-label={`${PERMISSION_LABELS[permission] ?? permission} para ${
+                        ROLE_LABELS[rolVisible] ?? rolVisible
+                      }`}
+                      onChange={() => toggle(rolVisible, permission)}
+                    />
+                  </label>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+          );
+        })()}
+
+        <TablaAncha aviso="Desliza para ver todos los roles" className="hidden md:block">
           <table className="w-full text-sm border-collapse min-w-[640px]">
             <thead>
               <tr>
