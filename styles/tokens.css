@@ -232,7 +232,28 @@ textarea[class] {
 button:not(.tap-suelto),
 select:not(.tap-suelto),
 summary:not(.tap-suelto),
+textarea:not(.tap-suelto),
 [role='button']:not(.tap-suelto) {
+  min-height: 44px;
+}
+
+/* Los campos de texto también. Se listan por tipo en vez de excluir casillas y
+   radios, porque `input` sin más incluye botones, ficheros y ocultos, y darle
+   44 px de alto a un input oculto es empezar a mover cosas que no se ven. */
+input:not(.tap-suelto):is(
+    [type='text'],
+    [type='search'],
+    [type='password'],
+    [type='email'],
+    [type='number'],
+    [type='tel'],
+    [type='url'],
+    [type='date'],
+    [type='time'],
+    [type='datetime-local'],
+    [type='color'],
+    :not([type])
+  ) {
   min-height: 44px;
 }
 

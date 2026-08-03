@@ -27,11 +27,13 @@ if (!root) throw new Error('Falta #root');
 // Una cinta arriba para que nadie confunda esto con el gremio de verdad.
 const aviso = document.createElement('div');
 aviso.textContent = 'BANCO DE PRUEBAS · datos inventados';
+// Arriba a la derecha y no abajo: abajo se sentaba justo encima de la barra de
+// navegación del teléfono, que es una de las cosas que hay que poder probar.
 aviso.style.cssText =
-  'position:fixed;left:0;right:0;bottom:0;z-index:9999;pointer-events:none;' +
-  'font:700 10px/1.6 ui-sans-serif,system-ui;letter-spacing:.14em;text-align:center;' +
+  'position:fixed;right:0;top:0;z-index:9999;pointer-events:none;' +
+  'font:700 9px/1.6 ui-sans-serif,system-ui;letter-spacing:.12em;' +
   'text-transform:uppercase;color:rgb(var(--w-500));background:rgb(var(--n-900));' +
-  'border-top:1px solid rgb(var(--n-800));padding:3px 0 calc(3px + env(safe-area-inset-bottom,0px))';
+  'border:1px solid rgb(var(--n-800));border-radius:0 0 0 6px;padding:2px 8px';
 document.body.appendChild(aviso);
 
 void import('./App').then(({ default: App }) => {

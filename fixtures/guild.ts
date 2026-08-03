@@ -157,14 +157,24 @@ export const deployments: Deployment[] = (() => {
   return out;
 })();
 
-/** Una guerra empezada hace doce minutos, para que los relojes corran. */
+/**
+ * Una guerra empezada hace doce minutos, para que los relojes corran.
+ *
+ * Con `?aviso` arranca donde falta poco para la jungla, que es la única forma
+ * de ver la alerta sin esperar cinco minutos delante de la pantalla. La jungla
+ * sale cada cinco minutos y avisa a falta de uno, así que empezar hace 3:55
+ * deja el aviso a cinco segundos vista.
+ */
+const HACE = () =>
+  new URLSearchParams(location.search).has('aviso') ? 3 * 60_000 + 55_000 : 12 * 60_000;
+
 export const board = () => ({
   active: { attack: 'st-1', defense: 'st-2' } as Record<WarSide, string | null>,
   locked: { attack: true, defense: true } as Record<WarSide, boolean>,
   current: {
     id: 'w-actual',
     name: 'Asedio del Paso Norte',
-    startedAt: new Date(Date.now() - 12 * 60 * 1000).toISOString(),
+    startedAt: new Date(Date.now() - HACE()).toISOString(),
     matchType: 'league' as const,
   },
   now: new Date().toISOString(),

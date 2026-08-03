@@ -2,7 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { authService, api } from '../services/authService';
 import WeaponSets from './WeaponSets';
 import TablaAncha from './TablaAncha';
-import { AuthUser, ManagedUser, PERMISSION_LABELS, PermissionCatalog, UserRole, ROLE_LABELS } from '../types';
+import ScanImport from './ScanImport';
+import { Bloque } from './Esqueleto';
+import { AuthUser, ManagedUser, PERMISSION_LABELS, PermissionCatalog, Player, UserRole, ROLE_LABELS } from '../types';
 
 // Mirrors the server's LOCKED table so the boxes it will refuse to clear are
 // shown as fixed rather than silently springing back after a save.
@@ -16,6 +18,10 @@ interface Props {
   canManageUsers: boolean;
   canManagePermissions: boolean;
   canManageBuilds: boolean;
+  /** Importar un barrido del roster es una tarea administrativa, y vive aquí. */
+  canScan: boolean;
+  players: Player[];
+  onScanImported: () => void;
   /** The impact score reads the sets, so a change here has to reach the rest. */
   onWeaponSetsChanged: () => void;
 }
@@ -33,6 +39,9 @@ const AdminPanel: React.FC<Props> = ({
   canManageUsers,
   canManagePermissions,
   canManageBuilds,
+  canScan,
+  players,
+  onScanImported,
   onWeaponSetsChanged,
 }) => {
   const [users, setUsers] = useState<ManagedUser[]>([]);
@@ -155,17 +164,45 @@ const AdminPanel: React.FC<Props> = ({
     }
   };
 
+  /**
+   * El escaneo, fuera del bloque que depende del catálogo de permisos.
+   *
+   * Quien sólo tiene `roster.edit` llega aquí para importar un barrido y no
+   * puede leer la matriz de permisos, así que su petición falla y `catalog` se
+   * queda en null. Si esto estuviera detrás de esa comprobación, esa persona
+   * vería una rueda girando para siempre en lugar de la única sección a la que
+   * ha venido.
+   */
+  const escaneo = canScan && (
+    <section className="bg-slate-900/60 border border-slate-800 rounded-xl p-4 sm:p-6">
+      <h2 className="cinzel text-2xl font-bold text-amber-500 mb-1">Escaneo del roster</h2>
+      <p className="text-sm text-slate-500 mb-4">
+        Importar un barrido del gremio y decidir a quién corresponde cada línea leída.
+      </p>
+      <ScanImport players={players} onImported={onScanImported} />
+    </section>
+  );
+
   if (!catalog) {
     return (
-      <div className="flex items-center justify-center h-96 text-slate-500 gap-3">
-        <i className="fa-solid fa-circle-notch fa-spin"></i>
-        Cargando configuración...
+      <div className="space-y-6">
+        {escaneo}
+        {message ? (
+          <p className="text-sm rounded-lg px-4 py-3 border bg-red-950/60 border-red-900 text-red-200">
+            <i className="fa-solid fa-triangle-exclamation mr-2"></i>
+            {message.text}
+          </p>
+        ) : (
+          <Bloque alto="h-64" className="rounded-xl" />
+        )}
       </div>
     );
   }
 
   return (
     <div className="space-y-6">
+      {escaneo}
+
       {message && (
         <div
           className={`text-sm rounded-lg px-4 py-2 flex items-center gap-3 border ${

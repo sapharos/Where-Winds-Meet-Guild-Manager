@@ -12,7 +12,6 @@ import LoginScreen from './components/LoginScreen';
 import DiscordClaim from './components/DiscordClaim';
 import MyProfile from './components/MyProfile';
 import AdminPanel from './components/AdminPanel';
-import ScanImport from './components/ScanImport';
 import MemberHistory from './components/MemberHistory';
 import BuildEditor from './components/BuildEditor';
 import ThemeToggle from './components/ThemeToggle';
@@ -21,9 +20,7 @@ import { Bloque, Tarjetas } from './components/Esqueleto';
 const App: React.FC = () => {
   const [session, setSession] = useState<Session | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
-  const [activeTab, setActiveTab] = useState<
-    'me' | 'roster' | 'war-room' | 'scan' | 'admin'
-  >('roster');
+  const [activeTab, setActiveTab] = useState<'me' | 'roster' | 'war-room' | 'admin'>('roster');
   const [historyFor, setHistoryFor] = useState<Player | null>(null);
   const [buildsFor, setBuildsFor] = useState<Player | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
@@ -404,16 +401,21 @@ const App: React.FC = () => {
 
   const activeSession = sessions.find(s => s.id === activeSessionId);
   const myPlayer = players.find((p) => p.id === session?.user.playerId);
-  const canSeeAdmin = can('users.manage') || can('permissions.manage') || can('builds.manage');
+  // Escaneo dejó de ser una pestaña: importar un barrido es una tarea
+  // administrativa y vive dentro de Administración, así que quien puede
+  // escanear necesita llegar a esa sección aunque no gestione nada más.
+  const canSeeAdmin =
+    can('users.manage') || can('permissions.manage') || can('builds.manage') || can('roster.edit');
 
   // The tabs as data rather than five near-identical blocks of markup: adding
   // one should not mean copying a class list and hoping it still matches.
+  // `corto` es la etiqueta de la barra inferior, donde hay cuatro columnas y
+  // "Sala de Guerra" en dos líneas rompe la fila.
   const tabs = [
-    { id: 'roster' as const, label: 'Roster', icon: 'fa-users', show: true },
-    { id: 'me' as const, label: 'Mi perfil', icon: 'fa-user', show: Boolean(myPlayer) },
-    { id: 'war-room' as const, label: 'Sala de Guerra', icon: 'fa-chess-knight', show: true },
-    { id: 'scan' as const, label: 'Escaneo', icon: 'fa-file-import', show: can('roster.edit') },
-    { id: 'admin' as const, label: 'Administración', icon: 'fa-user-shield', show: canSeeAdmin },
+    { id: 'roster' as const, label: 'Roster', corto: 'Roster', icon: 'fa-users', show: true },
+    { id: 'me' as const, label: 'Mi perfil', corto: 'Perfil', icon: 'fa-user', show: Boolean(myPlayer) },
+    { id: 'war-room' as const, label: 'Sala de Guerra', corto: 'Guerra', icon: 'fa-chess-knight', show: true },
+    { id: 'admin' as const, label: 'Administración', corto: 'Admin', icon: 'fa-user-shield', show: canSeeAdmin },
   ].filter((t) => t.show);
 
   const handleUpdateSession = (updatedSession: GuildWarSession) => {
@@ -595,15 +597,17 @@ const App: React.FC = () => {
           </div>
         </div>
 
-        {/* Scrolls sideways when it does not fit rather than wrapping: a label
-            broken across three lines is what made this feel unfinished. */}
-        <nav className="max-w-[1600px] mx-auto px-4 sm:px-6 py-3 overflow-x-auto no-bar">
+        {/* En escritorio las pestañas siguen donde estaban. En el teléfono se
+            van abajo (ver el <nav> del final): arriba estaban fuera del alcance
+            del pulgar, se salían de la pantalla y había que arrastrarlas de
+            lado para llegar a la última. */}
+        <nav className="hidden sm:block max-w-[1600px] mx-auto px-6 py-3 overflow-x-auto no-bar">
           <div className="flex gap-1 w-max mx-auto bg-slate-950 p-1 rounded-lg border border-slate-800">
             {tabs.map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`px-4 sm:px-5 py-2 rounded-md text-sm font-semibold transition-all flex items-center gap-2 whitespace-nowrap ${
+                className={`px-5 py-2 rounded-md text-sm font-semibold transition-all flex items-center gap-2 whitespace-nowrap ${
                   activeTab === tab.id
                     ? 'bg-amber-700 text-white shadow-lg'
                     : 'text-slate-500 hover:text-slate-300'
@@ -648,14 +652,15 @@ const App: React.FC = () => {
               Tu cuenta todavía no está enlazada a un miembro del roster.
             </p>
           )
-        ) : activeTab === 'scan' ? (
-          <ScanImport players={players} onImported={() => void loadAllData()} />
         ) : activeTab === 'admin' ? (
           <AdminPanel
             currentUser={session.user}
             canManageUsers={can('users.manage')}
             canManagePermissions={can('permissions.manage')}
             canManageBuilds={can('builds.manage')}
+            canScan={can('roster.edit')}
+            players={players}
+            onScanImported={() => void loadAllData()}
             onWeaponSetsChanged={reloadWeaponSets}
           />
         ) : activeTab === 'roster' ? (
@@ -695,6 +700,56 @@ const App: React.FC = () => {
         />
       )}
 
+      {/*
+        La navegación, abajo y sólo en el teléfono.
+
+        Arriba estaba en el peor sitio posible: fuera del alcance del pulgar, y
+        tan ancha que la última pestaña quedaba fuera de la pantalla y había que
+        arrastrarla de lado para encontrarla. Aquí cada destino tiene su columna,
+        se ven todos a la vez, y están donde ya está la mano.
+
+        Los mismos destinos y en el mismo orden que arriba: cambia dónde está la
+        barra, no el mapa.
+      */}
+      <nav
+        aria-label="Secciones"
+        className="sm:hidden fixed bottom-0 inset-x-0 z-40 border-t border-slate-800 bg-slate-900/95 backdrop-blur-md pb-safe-b"
+      >
+        <div className="flex">
+          {tabs.map((tab) => {
+            const aqui = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                aria-current={aqui ? 'page' : undefined}
+                className={`flex-1 min-w-0 min-h-tap flex flex-col items-center justify-center gap-0.5 pt-2 pb-1.5 transition-colors duration-micro ${
+                  aqui ? 'text-amber-500' : 'text-slate-500'
+                }`}
+              >
+                <i className={`fa-solid ${tab.icon} text-lg`}></i>
+                <span className="text-[11px] font-semibold tracking-wide">{tab.corto}</span>
+                {/* 锔钉: la grapa marca dónde estás sujeto. */}
+                <svg
+                  aria-hidden
+                  width="26"
+                  height="5"
+                  viewBox="0 0 34 7"
+                  className={`transition-opacity duration-micro ${aqui ? 'opacity-100' : 'opacity-0'}`}
+                >
+                  <rect x="4" y="2" width="26" height="2.6" rx="1.3" fill="currentColor" />
+                  <circle cx="4" cy="3.3" r="3.2" fill="currentColor" />
+                  <circle cx="30" cy="3.3" r="3.2" fill="currentColor" />
+                </svg>
+              </button>
+            );
+          })}
+        </div>
+      </nav>
+
+      {/* El hueco que ocupa la barra fija, para que no tape el último elemento
+          de ninguna pantalla. */}
+      <div className="sm:hidden h-[76px] pb-safe-b" aria-hidden />
     </div>
   );
 };
