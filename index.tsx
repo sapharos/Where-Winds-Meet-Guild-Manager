@@ -3,6 +3,11 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import './styles/app.css';
 import App from './App';
+import { instalarTeclado } from './services/teclado';
+
+// Antes de montar: la medida del teclado la usa el CSS, y una hoja que se abra
+// con el teclado ya puesto debe encoger desde la primera pintura.
+instalarTeclado();
 
 /**
  * Los iconos que un miembro puede elegir para un conjunto de armas o una unidad

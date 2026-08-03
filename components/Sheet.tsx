@@ -132,7 +132,11 @@ const Sheet: React.FC<Props> = ({ title, subtitle, size = 'md', footer, onClose,
   return (
     <div
       className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center sm:p-6"
-      style={{ backgroundColor: `rgb(var(--scrim) / var(--scrim-alpha))` }}
+      style={{
+        backgroundColor: `rgb(var(--scrim) / var(--scrim-alpha))`,
+        // La hoja se apoya sobre el teclado, no debajo de él.
+        paddingBottom: 'var(--teclado)',
+      }}
       onPointerDown={(event) => {
         // Sólo el velo cierra, no lo que hay dentro de la hoja.
         if (event.target === event.currentTarget) cerrar();
@@ -149,10 +153,15 @@ const Sheet: React.FC<Props> = ({ title, subtitle, size = 'md', footer, onClose,
           bg-slate-900 border border-slate-800
           rounded-t-vessel sm:rounded-lg
           shadow-2
-          max-h-[92dvh] sm:max-h-[86dvh]
           animate-hoja
         `}
-        style={arrastre ? { transform: `translateY(${arrastre}px)`, transition: 'none' } : undefined}
+        style={{
+          // La hoja se queda con lo que el teclado no ocupa. Sin esto la hoja
+          // seguía midiendo el 92% de la pantalla y el teclado se le ponía
+          // encima, tapando justo el campo que se acababa de tocar.
+          maxHeight: 'calc(92dvh - var(--teclado))',
+          ...(arrastre ? { transform: `translateY(${arrastre}px)`, transition: 'none' } : null),
+        }}
       >
         {/* El asa: la señal de que esto se puede arrastrar, y el sitio por donde
             se agarra. Sólo en móvil, que es donde el gesto existe. */}

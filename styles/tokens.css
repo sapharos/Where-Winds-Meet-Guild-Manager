@@ -88,6 +88,10 @@
   --w-500: 138 90 22; /* warning             5,00 */
   --w-700: 106 68 16;
 
+  /* Lo que ocupa el teclado del teléfono. Lo mide services/teclado.ts; aquí
+     sólo se declara para que valga 0 mientras no haya nadie escribiendo. */
+  --teclado: 0px;
+
   /* --- velo de las hojas y modales -------------------------------------- */
   --scrim: 23 33 31;
   --scrim-alpha: 0.45;

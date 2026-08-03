@@ -15,6 +15,9 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import './styles/app.css';
 import { instalarServidorFalso } from './fixtures/server';
+import { instalarTeclado } from './services/teclado';
+
+instalarTeclado();
 
 // Igual que en index.tsx: el catálogo de iconos, después de la primera pintura.
 void import('./styles/iconos.catalogo.generated.css');

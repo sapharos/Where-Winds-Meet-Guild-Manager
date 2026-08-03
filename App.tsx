@@ -711,9 +711,14 @@ const App: React.FC = () => {
         Los mismos destinos y en el mismo orden que arriba: cambia dónde está la
         barra, no el mapa.
       */}
+      {/* `nav-inferior` la aparta cuando sale el teclado (regla en tokens.css).
+          Se hace en CSS y no con estado: la altura del teclado cambia muchas
+          veces por segundo mientras se abre, y volver a renderizar la
+          aplicación entera en cada paso es la forma más cara posible de mover
+          una barra 76 px. */}
       <nav
         aria-label="Secciones"
-        className="sm:hidden fixed bottom-0 inset-x-0 z-40 border-t border-slate-800 bg-slate-900/95 backdrop-blur-md pb-safe-b"
+        className="nav-inferior sm:hidden fixed bottom-0 inset-x-0 z-40 border-t border-slate-800 bg-slate-900/95 backdrop-blur-md pb-safe-b"
       >
         <div className="flex">
           {tabs.map((tab) => {

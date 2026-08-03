@@ -73,6 +73,16 @@
   .pad-safe-bottom {
     padding-bottom: env(safe-area-inset-bottom, 0px);
   }
+
+  /* La navegación se retira mientras hay un teclado abierto. Si no, se queda
+     flotando encima de él, ocupando 76 px de una pantalla que ya está a la
+     mitad -- y nadie cambia de sección mientras está escribiendo. */
+  .nav-inferior {
+    transition: transform var(--dur-micro) var(--ease-glaze);
+  }
+  [data-teclado='abierto'] .nav-inferior {
+    transform: translateY(100%);
+  }
 }
 
 @keyframes pulse-staple {
