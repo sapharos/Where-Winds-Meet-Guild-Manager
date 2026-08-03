@@ -261,10 +261,16 @@ const WarTimers: React.FC<Props> = ({ startedAt, offset, mayBeWarned }) => {
       {/* Big enough to be caught out of the corner of an eye, and above
           everything else, because it is worth nothing a moment later. */}
       {toast && (
-        <div className="fixed inset-x-0 top-6 z-[80] flex justify-center px-4 pointer-events-none">
+        // Estaba a 24 px del borde superior, es decir, debajo de la cabecera
+        // pegajosa de 120 px y dentro del recorte de la pantalla: el elemento
+        // más importante de la aplicación en el momento en que aparece, y el
+        // peor colocado. Abajo no lo tapa nada, y además cae donde está el
+        // pulgar, que es lo que hay que hacer para quitarlo de en medio.
+        <div className="fixed inset-x-0 bottom-0 z-[80] flex justify-center px-4 pb-[calc(1rem+env(safe-area-inset-bottom,0px))] pointer-events-none">
           <button
             onClick={() => setToast(null)}
-            className="pointer-events-auto rounded-2xl border-2 px-8 py-5 shadow-2xl backdrop-blur-sm text-center animate-pulse"
+            aria-live="assertive"
+            className="pointer-events-auto rounded-2xl border-2 px-8 py-5 shadow-2 backdrop-blur-sm text-center animate-pulse"
             style={{
               borderColor: toast.colour,
               background: `linear-gradient(180deg, ${toast.colour}26 0%, #0b1120 100%)`,

@@ -89,9 +89,14 @@ const CollaborationPanel: React.FC<CollaborationPanelProps> = ({
       ) : (
         <div className="flex items-center gap-1 bg-slate-900 border border-slate-700 p-1 rounded-lg animate-in slide-in-from-right-4">
           <input 
-            type="text" 
-            placeholder="Código de mando..." 
-            className="bg-transparent text-xs p-1 outline-none w-32 tracking-tighter"
+            type="text"
+            placeholder="Código de mando..."
+            aria-label="Código de mando"
+            autoComplete="off"
+            autoCapitalize="none"
+            spellCheck={false}
+            enterKeyHint="go"
+            className="bg-transparent text-sm p-1 outline-none w-32 tracking-tighter"
             value={targetId}
             onChange={(e) => setTargetId(e.target.value)}
             autoFocus

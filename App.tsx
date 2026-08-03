@@ -16,6 +16,7 @@ import ScanImport from './components/ScanImport';
 import MemberHistory from './components/MemberHistory';
 import BuildEditor from './components/BuildEditor';
 import ThemeToggle from './components/ThemeToggle';
+import { Bloque, Tarjetas } from './components/Esqueleto';
 
 const App: React.FC = () => {
   const [session, setSession] = useState<Session | null>(null);
@@ -625,9 +626,13 @@ const App: React.FC = () => {
 
       <main className="max-w-[1600px] mx-auto p-6">
         {isLoading ? (
-          <div className="flex items-center justify-center h-96 text-slate-500 gap-3">
-            <i className="fa-solid fa-circle-notch fa-spin"></i>
-            Loading guild data...
+          // Era una rueda centrada en una caja de 384 px de alto que después se
+          // sustituía por contenido de otra altura, así que la página pegaba un
+          // salto justo cuando el lector empezaba a leerla. El esqueleto ocupa
+          // el sitio que va a ocupar el roster y dice qué va a salir.
+          <div className="space-y-5" role="status" aria-label="Cargando los datos del gremio">
+            <Bloque alto="h-[188px]" className="rounded-xl" />
+            <Tarjetas cuantas={6} />
           </div>
         ) : activeTab === 'me' ? (
           myPlayer ? (

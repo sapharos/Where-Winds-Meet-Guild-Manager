@@ -239,6 +239,16 @@ const MemberManager: React.FC<MemberManagerProps> = ({
     setNewRankName('');
   };
 
+  /** Todo lo que estrecha la lista, de una vez: la salida del estado vacío. */
+  const limpiarFiltros = () => {
+    setSearch('');
+    setRoleFilter('');
+    setWeaponFilter([]);
+    setSideFilter('');
+    setStartersOnly(false);
+    setShowGone(false);
+  };
+
   const active = players.filter((p) => p.isActive !== false);
   const gone = players.length - active.length;
   const starters = active.filter((p) => p.isStarter).length;
@@ -269,11 +279,14 @@ const MemberManager: React.FC<MemberManagerProps> = ({
           <div className="relative">
             <i className="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-600 text-xs"></i>
             <input
-              type="text"
+              type="search"
               value={search}
               placeholder="Buscar por nombre..."
+              aria-label="Buscar por nombre"
+              autoComplete="off"
+              enterKeyHint="search"
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-800 rounded p-2 pl-8 text-sm outline-none focus:ring-1 focus:ring-amber-500"
+              className="w-full min-h-tap bg-slate-950 border border-slate-800 rounded px-3 pl-8 text-sm outline-none focus:ring-1 focus:ring-amber-500"
             />
           </div>
 
@@ -415,9 +428,19 @@ const MemberManager: React.FC<MemberManagerProps> = ({
       </div>
 
       {visible.length === 0 ? (
-        <p className="text-sm text-slate-500 text-center py-12">
-          Ningún miembro coincide con estos filtros.
-        </p>
+        // Un estado vacío que sólo constata el vacío deja al lector con el
+        // problema en la mano. Este dice además cuál es la salida, y la ofrece.
+        <div className="text-center py-12 px-4">
+          <i className="fa-solid fa-users text-3xl text-slate-700"></i>
+          <p className="text-sm text-slate-400 mt-3">Ningún miembro coincide con estos filtros.</p>
+          <button
+            onClick={limpiarFiltros}
+            className="mt-4 min-h-tap px-4 rounded-md border border-slate-700 text-slate-300 hover:text-amber-500 hover:border-amber-700 transition-colors duration-micro"
+          >
+            <i className="fa-solid fa-xmark mr-2"></i>
+            Quitar todos los filtros
+          </button>
+        </div>
       ) : (
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
           {visible.map((p) => (
@@ -476,7 +499,9 @@ const MemberManager: React.FC<MemberManagerProps> = ({
                   <label className="block text-xs uppercase tracking-wider text-slate-500 mb-1">Nivel</label>
                   <input
                     type="number"
-                    className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
+                    inputMode="numeric"
+                    autoComplete="off"
+                    className="w-full min-h-tap bg-slate-950 border border-slate-800 rounded px-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
                     value={formData.level}
                     onChange={(e) => setFormData({ ...formData, level: parseInt(e.target.value) || 1 })}
                   />
