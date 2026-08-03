@@ -1,7 +1,8 @@
 
-import React from 'react';
+import React, { useState } from 'react';
 import { Player, PlayerBuild, Role, MembershipStatus, GuildRank, WeaponSet, WarSide, WAR_SIDE_LABELS } from '../types';
 import { ROLE_COLORS, ROLE_ICONS, PLATFORM_ICONS, STATUS_COLORS } from '../constants';
+import Sheet from './Sheet';
 
 export const ROLE_NAMES: Record<Role, string> = {
   [Role.TANK]: 'Tanque',
@@ -68,6 +69,78 @@ const PlayerCard: React.FC<PlayerCardProps> = ({
   const rank = ranks.find((r) => r.id === player.rankId);
   const { from, to, orphaned } = buildColours(build, weaponSets);
   const gone = player.isActive === false;
+  const [menu, setMenu] = useState(false);
+
+  /**
+   * Las acciones de la tarjeta, como datos.
+   *
+   * Eran seis botones de icono de 20x24 px separados 8, sin una sola etiqueta:
+   * lo que hacía cada uno vivía en un `title`, que en un teléfono no existe. Y
+   * el primero de los seis daba de baja a alguien, pegado al que marca titular,
+   * que es el que más se pulsa.
+   *
+   * Ahora son una lista con su nombre escrito, cada una de 44 px de alto, con
+   * la destructiva apartada al pie. Marcar titular pasa de un toque sobre un
+   * objetivo que se falla a dos sobre uno que no.
+   */
+  const acciones = [
+    onToggleStarter && !gone && {
+      id: 'titular',
+      icono: player.isStarter ? 'fa-star' : 'fa-star',
+      familia: player.isStarter ? 'fa-solid' : 'fa-regular',
+      // Titular es "te han fijado a la alineación", que es lo que significa la
+      // grapa: va en su latón y no en el acento.
+      tono: player.isStarter ? 'text-staple' : 'text-slate-400',
+      texto: player.isStarter ? 'Quitar de titulares' : 'Marcar como titular',
+      hacer: () => onToggleStarter(player),
+    },
+    onCycleSide && !gone && {
+      id: 'bando',
+      icono: player.warSide === 'defense' ? 'fa-shield' : 'fa-khanda',
+      familia: 'fa-solid',
+      tono:
+        player.warSide === 'attack'
+          ? 'text-red-400'
+          : player.warSide === 'defense'
+            ? 'text-sky-400'
+            : 'text-slate-400',
+      texto: player.warSide
+        ? `${WAR_SIDE_LABELS[player.warSide as WarSide]} — cambiar`
+        : 'Sin bando — poner en Ataque',
+      hacer: () => onCycleSide(player),
+    },
+    onShowBuilds && {
+      id: 'builds',
+      icono: 'fa-hand-fist',
+      familia: 'fa-solid',
+      tono: 'text-slate-400',
+      texto: 'Builds y armas',
+      hacer: () => onShowBuilds(player),
+    },
+    onShowHistory && {
+      id: 'historial',
+      icono: 'fa-chart-line',
+      familia: 'fa-solid',
+      tono: 'text-slate-400',
+      texto: 'Ver evolución',
+      hacer: () => onShowHistory(player),
+    },
+    onEdit && {
+      id: 'editar',
+      icono: 'fa-pen-to-square',
+      familia: 'fa-solid',
+      tono: 'text-slate-400',
+      texto: 'Editar miembro',
+      hacer: () => onEdit(player),
+    },
+  ].filter(Boolean) as {
+    id: string;
+    icono: string;
+    familia: string;
+    tono: string;
+    texto: string;
+    hacer: () => void;
+  }[];
 
   return (
     <div
@@ -75,7 +148,7 @@ const PlayerCard: React.FC<PlayerCardProps> = ({
         gone
           ? 'border-slate-800 opacity-50 grayscale'
           : player.isStarter
-            ? 'border-amber-400 shadow-[0_0_0_1px_rgba(251,191,36,0.35)]'
+            ? 'border-staple shadow-[0_0_0_1px_rgb(var(--w-500)/0.35)]'
             : 'border-slate-800'
       } ${className}`}
       style={{
@@ -135,7 +208,7 @@ const PlayerCard: React.FC<PlayerCardProps> = ({
                   {player.sect} · Nv.{player.level}
                 </p>
                 <span
-                  className={`text-[8px] px-1.5 py-0.5 rounded border uppercase font-bold tracking-tighter ${
+                  className={`text-[11px] px-1.5 py-0.5 rounded border uppercase font-bold tracking-tighter ${
                     STATUS_COLORS[player.status || MembershipStatus.FULL_MEMBER]
                   }`}
                 >
@@ -143,25 +216,25 @@ const PlayerCard: React.FC<PlayerCardProps> = ({
                 </span>
                 {rank && (
                   <span
-                    className="text-[8px] px-1.5 py-0.5 rounded border uppercase font-bold tracking-tighter"
+                    className="text-[11px] px-1.5 py-0.5 rounded border uppercase font-bold tracking-tighter"
                     style={{ borderColor: rank.color, color: rank.color, backgroundColor: `${rank.color}15` }}
                   >
                     {rank.name}
                   </span>
                 )}
                 {build && (
-                  <span className="text-[9px] text-slate-400 truncate max-w-[140px]" title={build.weapons.join(' · ')}>
+                  <span className="text-[11px] text-slate-400 truncate max-w-[140px]" title={build.weapons.join(' · ')}>
                     {build.name}
                   </span>
                 )}
                 {gone && (
-                  <span className="text-[8px] px-1.5 py-0.5 rounded border border-slate-600 text-slate-400 uppercase font-bold tracking-tighter">
+                  <span className="text-[11px] px-1.5 py-0.5 rounded border border-slate-600 text-slate-400 uppercase font-bold tracking-tighter">
                     fuera del gremio
                   </span>
                 )}
                 {player.warSide && (
                   <span
-                    className={`text-[8px] px-1.5 py-0.5 rounded border uppercase font-bold tracking-tighter ${
+                    className={`text-[11px] px-1.5 py-0.5 rounded border uppercase font-bold tracking-tighter ${
                       player.warSide === 'attack'
                         ? 'border-red-600 text-red-300 bg-red-600/15'
                         : 'border-sky-600 text-sky-300 bg-sky-600/15'
@@ -172,7 +245,7 @@ const PlayerCard: React.FC<PlayerCardProps> = ({
                 )}
                 {orphaned && (
                   <span
-                    className="text-[9px] text-amber-500"
+                    className="text-[11px] text-amber-500"
                     title={`Estas armas ya no existen en ningún conjunto: ${build?.weapons.join(', ')}`}
                   >
                     <i className="fa-solid fa-triangle-exclamation mr-1"></i>
@@ -183,7 +256,7 @@ const PlayerCard: React.FC<PlayerCardProps> = ({
             ) : (
               <div className="flex items-center gap-1">
                 <span
-                  className={`text-[8px] uppercase font-bold tracking-tighter ${
+                  className={`text-[11px] uppercase font-bold tracking-tighter ${
                     player.status === MembershipStatus.APPRENTICE ? 'text-slate-500' : 'text-amber-600'
                   }`}
                 >
@@ -195,73 +268,64 @@ const PlayerCard: React.FC<PlayerCardProps> = ({
           </div>
         </div>
 
-        <div className="flex gap-2 shrink-0">
-          {onToggleActive && (
-            <button
-              onClick={() => onToggleActive(player)}
-              title={gone ? 'Readmitir en el gremio' : 'Marcar como fuera del gremio'}
-              className={`transition-colors ${
-                gone ? 'text-emerald-500 hover:text-emerald-400' : 'text-slate-600 hover:text-red-400'
-              }`}
-            >
-              <i className={`fa-solid ${gone ? 'fa-user-check' : 'fa-user-slash'}`}></i>
-            </button>
-          )}
-          {onToggleStarter && !gone && (
-            <button
-              onClick={() => onToggleStarter(player)}
-              title={player.isStarter ? 'Quitar de titulares' : 'Marcar como titular'}
-              className={`transition-colors ${
-                player.isStarter ? 'text-amber-400 hover:text-amber-300' : 'text-slate-600 hover:text-amber-500'
-              }`}
-            >
-              <i className={`${player.isStarter ? 'fa-solid' : 'fa-regular'} fa-star`}></i>
-            </button>
-          )}
-          {onCycleSide && !gone && (
-            <button
-              onClick={() => onCycleSide(player)}
-              title={
-                player.warSide
-                  ? `${WAR_SIDE_LABELS[player.warSide as WarSide]} — pulsa para cambiar`
-                  : 'Sin asignar — pulsa para poner en Ataque'
-              }
-              className={`transition-colors ${
-                player.warSide === 'attack'
-                  ? 'text-red-400 hover:text-red-300'
-                  : player.warSide === 'defense'
-                    ? 'text-sky-400 hover:text-sky-300'
-                    : 'text-slate-600 hover:text-slate-400'
-              }`}
-            >
-              <i className={`fa-solid ${player.warSide === 'defense' ? 'fa-shield' : 'fa-khanda'}`}></i>
-            </button>
-          )}
-          {onShowBuilds && (
-            <button
-              onClick={() => onShowBuilds(player)}
-              title="Builds y armas"
-              className="text-slate-400 hover:text-amber-500 transition-colors"
-            >
-              <i className="fa-solid fa-hand-fist"></i>
-            </button>
-          )}
-          {onShowHistory && (
-            <button
-              onClick={() => onShowHistory(player)}
-              title="Ver evolución"
-              className="text-slate-400 hover:text-amber-500 transition-colors"
-            >
-              <i className="fa-solid fa-chart-line"></i>
-            </button>
-          )}
-          {onEdit && (
-            <button onClick={() => onEdit(player)} title="Editar" className="text-slate-400 hover:text-slate-100 transition-colors">
-              <i className="fa-solid fa-pen-to-square"></i>
-            </button>
-          )}
-        </div>
+        {(acciones.length > 0 || onToggleActive) && (
+          <button
+            onClick={() => setMenu(true)}
+            aria-label={`Acciones de ${player.name}`}
+            aria-haspopup="dialog"
+            className="shrink-0 -mr-1 -mt-1 min-h-tap min-w-tap flex items-center justify-center rounded-md text-slate-400 hover:text-amber-500 transition-colors duration-micro"
+          >
+            <i className="fa-solid fa-ellipsis-vertical"></i>
+          </button>
+        )}
       </div>
+
+      {menu && (
+        <Sheet
+          title={player.name}
+          subtitle={`${ROLE_NAMES[player.role]} · ${player.sect} · Nv.${player.level}`}
+          size="sm"
+          onClose={() => setMenu(false)}
+        >
+          <div className="flex flex-col gap-1">
+            {acciones.map((accion) => (
+              <button
+                key={accion.id}
+                onClick={() => {
+                  accion.hacer();
+                  setMenu(false);
+                }}
+                className="min-h-tap flex items-center gap-3 px-3 -mx-1 rounded-md text-left text-slate-200 hover:bg-slate-800/60 transition-colors duration-micro"
+              >
+                <i className={`${accion.familia} ${accion.icono} ${accion.tono} w-5 text-center`}></i>
+                {accion.texto}
+              </button>
+            ))}
+          </div>
+
+          {onToggleActive && (
+            // Apartada, no escondida. Estaba a 8 px de la acción más frecuente
+            // de la tarjeta, que es la peor vecindad posible para algo que
+            // saca a alguien del gremio.
+            <div className="mt-4 pt-3 border-t border-slate-800">
+              <button
+                onClick={() => {
+                  onToggleActive(player);
+                  setMenu(false);
+                }}
+                className={`w-full min-h-tap flex items-center gap-3 px-3 -mx-1 rounded-md text-left transition-colors duration-micro ${
+                  gone
+                    ? 'text-emerald-400 hover:bg-emerald-500/10'
+                    : 'text-red-400 hover:bg-red-500/10'
+                }`}
+              >
+                <i className={`fa-solid ${gone ? 'fa-user-check' : 'fa-user-slash'} w-5 text-center`}></i>
+                {gone ? 'Readmitir en el gremio' : 'Marcar como fuera del gremio'}
+              </button>
+            </div>
+          )}
+        </Sheet>
+      )}
     </div>
   );
 };

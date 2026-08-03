@@ -120,6 +120,24 @@ export default {
           strong: step('--w-700'),
         },
       },
+      // La escala de docs/DIRECCION_VISUAL.md. Sólo los escalones que el
+      // sistema no tenía ya con el mismo valor.
+      fontSize: {
+        'figure-xl': ['40px', { lineHeight: '40px', letterSpacing: '-0.02em' }],
+        'figure-lg': ['28px', { lineHeight: '30px', letterSpacing: '-0.01em' }],
+        meta: ['13px', { lineHeight: '18px' }],
+      },
+      keyframes: {
+        // La hoja entra desde el borde por el que se apoya. Sólo transform y
+        // opacity: nada que obligue al navegador a recalcular la maqueta.
+        hoja: {
+          from: { transform: 'translateY(12%)', opacity: '0' },
+          to: { transform: 'translateY(0)', opacity: '1' },
+        },
+      },
+      animation: {
+        hoja: 'hoja var(--dur-sheet) var(--ease-glaze)',
+      },
       fontFamily: {
         // Newsreader sustituye a Cinzel: una capital romana de la columna
         // Trajana no tiene nada que ver con este mundo. Ésta lee como entintada.
