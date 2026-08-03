@@ -497,6 +497,10 @@ const App: React.FC = () => {
                 <i className="fa-solid fa-ellipsis"></i>
               </summary>
               <div className="absolute right-0 mt-2 w-60 bg-slate-900 border border-slate-800 rounded-lg shadow-2xl p-3 space-y-3 z-50">
+                <div>
+                  <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-1.5">Tema</p>
+                  <ThemeToggle />
+                </div>
                 <CollaborationPanel
                   peerId={myPeerId}
                   role={peerRole}
@@ -563,7 +567,13 @@ const App: React.FC = () => {
                   {ROLE_LABELS[session.user.role] ?? session.user.role}
                 </div>
               </div>
-              <ThemeToggle />
+              {/* Tres botones de 44px no caben junto al nombre del gremio en un
+                  teléfono: metidos aquí dejaban "ZONA ZERO" en "Z.". Abajo de
+                  lg viven en el mismo menú que el resto de herramientas, que es
+                  lo que ya hacían la colaboración y la importación. */}
+              <div className="hidden lg:block">
+                <ThemeToggle />
+              </div>
               <div className="flex bg-slate-950 p-1 rounded-lg border border-slate-800">
                 <button
                   onClick={handleChangePassword}
