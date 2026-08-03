@@ -483,7 +483,86 @@ const ResultsReader: React.FC<Props> = ({ images, participants, onClose, onApply
                 {rows.length > matched.length && ' Las que no coinciden con nadie se descartan.'}
               </p>
 
-              <div className="overflow-x-auto">
+              {/*
+                Una tarjeta por fila leída en el teléfono, la tabla desde md.
+
+                Son diez columnas, y ocho de ellas son cifras editables: es la
+                pantalla donde se corrige lo que la lectura automática entendió
+                mal. Dentro de una hoja de 343 px había que arrastrar de lado
+                para llegar a cada cifra, y al hacerlo se perdía de vista tanto
+                el nombre leído como a quién se le estaba asignando -- que es
+                justo el par que hay que tener delante para corregir.
+              */}
+              <div className="flex flex-col gap-2 md:hidden">
+                {rows.map((row, at) => (
+                  <article
+                    key={`m-${row.read}-${at}`}
+                    className={`rounded-md border p-3 ${
+                      row.playerId ? 'border-slate-800 bg-slate-950/40' : 'border-amber-800/70 bg-amber-500/5'
+                    }`}
+                  >
+                    <p className="text-[11px] uppercase tracking-wider text-slate-500">Leído</p>
+                    <p className="font-mono text-sm text-slate-200 break-all mb-2">{row.read}</p>
+
+                    <label className="block">
+                      <span className="text-[11px] uppercase tracking-wider text-slate-500">
+                        Corresponde a
+                      </span>
+                      <select
+                        value={row.playerId ?? ''}
+                        onChange={(e) =>
+                          setRows((prev) =>
+                            prev.map((r, i) => (i === at ? { ...r, playerId: e.target.value || null } : r)),
+                          )
+                        }
+                        className={`mt-0.5 w-full bg-slate-950 border rounded px-2 text-sm outline-none focus:ring-1 focus:ring-amber-500 ${
+                          row.playerId ? 'border-slate-800 text-slate-200' : 'border-amber-700 text-amber-500'
+                        }`}
+                      >
+                        <option value="">— descartar —</option>
+                        {participants.map((p) => (
+                          <option key={p.playerId} value={p.playerId}>
+                            {p.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1">
+                      {FIGURES.map((f) => (
+                        <div key={f.key} className="flex items-center justify-between gap-2">
+                          <span
+                            className={`text-[11px] uppercase tracking-wider truncate ${
+                              row.doubtful.includes(f.key) ? 'text-amber-500 font-bold' : 'text-slate-500'
+                            }`}
+                          >
+                            {f.label}
+                          </span>
+                          <FigureCell
+                            value={row.figures[f.key]}
+                            flagged={row.doubtful.includes(f.key)}
+                            onChange={(value) =>
+                              setRows((prev) =>
+                                prev.map((r, i) =>
+                                  i === at
+                                    ? {
+                                        ...r,
+                                        figures: { ...r.figures, [f.key]: value ?? 0 },
+                                        doubtful: r.doubtful.filter((key) => key !== f.key),
+                                      }
+                                    : r,
+                                ),
+                              )
+                            }
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </article>
+                ))}
+              </div>
+
+              <div className="hidden md:block overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="text-[10px] uppercase tracking-wider text-slate-500 text-left">
