@@ -14,6 +14,7 @@ import { ROLE_NAMES, buildColours } from './PlayerCard';
 import { SetBadge } from './BuildEditor';
 import MyWars from './MyWars';
 import GearSheet from './GearSheet';
+import Seccion from './Seccion';
 
 const ROLE_STYLE: Record<Role, string> = {
   [Role.TANK]: 'border-blue-500 text-blue-300 bg-blue-500/15',
@@ -244,9 +245,32 @@ const MyProfile: React.FC<Props> = ({ player, weaponSets, onEditBuilds }) => {
         )}
       </section>
 
-      <GearSheet playerId={player.id} canEdit />
+      {/*
+        Las dos últimas llegan plegadas.
 
-      <MyWars playerId={player.id} weaponSets={weaponSets} />
+        Son las que más ocupan y las que menos se miran, y ésta es la pantalla
+        que se abre sola en una visita de dos minutos. Plegadas siguen
+        anunciando qué guardan; y como el contenido no se monta hasta que se
+        abren, GearSheet deja de pedirle cinco cosas al servidor a todo el que
+        entra a mirar su actividad semanal.
+
+        El orden, los nombres y lo que hay dentro no cambian.
+      */}
+      <Seccion
+        titulo="Mi equipo"
+        icono="fa-shield-halved"
+        resumen="Piezas, líneas y sintonización"
+      >
+        <GearSheet playerId={player.id} canEdit />
+      </Seccion>
+
+      <Seccion
+        titulo="Mis guerras"
+        icono="fa-chess-knight"
+        resumen="Lo que has librado y tu impacto"
+      >
+        <MyWars playerId={player.id} weaponSets={weaponSets} />
+      </Seccion>
     </div>
   );
 };
