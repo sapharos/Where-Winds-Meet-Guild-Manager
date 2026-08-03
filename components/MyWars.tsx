@@ -55,24 +55,23 @@ const MyWars: React.FC<Props> = ({ playerId, weaponSets }) => {
   const [failed, setFailed] = useState<string | null>(null);
 
   useEffect(() => {
+    // Ninguna abierta de entrada. La primera se abría sola y desplegaba treinta
+    // participantes debajo, así que la lista de guerras -- que es lo que se
+    // viene a ver -- empezaba ya empujada fuera de la pantalla.
     api<War[]>(`/players/${playerId}/wars`)
-      .then((rows) => {
-        setWars(rows);
-        setOpen(rows[0]?.id ?? null);
-      })
+      .then(setWars)
       .catch((err) => setFailed(err instanceof Error ? err.message : 'No se pudo cargar'));
   }, [playerId]);
 
   if (!wars && !failed) return null;
 
   return (
-    <section className="bg-slate-900/60 border border-slate-800 rounded-xl p-6">
-      <div className="flex items-baseline justify-between gap-3 flex-wrap mb-4">
-        <h2 className="cinzel text-xl font-bold text-amber-500">Mis guerras</h2>
-        <span className="text-[11px] text-slate-500">
-          El impacto compara cada aporte con el mejor de esa misma guerra
-        </span>
-      </div>
+    // Sin título propio: lo pone la sección plegable que lo envuelve, y
+    // repetido salían dos "Mis guerras" seguidos.
+    <section>
+      <p className="text-[11px] text-slate-500 mb-4">
+        El impacto compara cada aporte con el mejor de esa misma guerra
+      </p>
 
       {failed && (
         <div className="text-sm rounded-lg px-4 py-2 flex items-center gap-3 border bg-red-950/60 border-red-900 text-red-200">
@@ -98,7 +97,8 @@ const MyWars: React.FC<Props> = ({ playerId, weaponSets }) => {
             <div key={war.id} className="border border-slate-800 rounded-lg overflow-hidden">
               <button
                 onClick={() => setOpen(showing ? null : war.id)}
-                className="w-full flex items-center gap-4 p-3 hover:bg-slate-800/40 transition-all text-left"
+                aria-expanded={showing}
+                className="w-full flex items-start gap-3 p-3 hover:bg-slate-800/40 transition-all text-left"
               >
                 <div
                   className="w-14 h-14 rounded-lg border flex flex-col items-center justify-center shrink-0"
@@ -116,15 +116,26 @@ const MyWars: React.FC<Props> = ({ playerId, weaponSets }) => {
                   <span className="text-[8px] uppercase tracking-wider text-slate-500">impacto</span>
                 </div>
 
+                {/*
+                  El nombre en su propia línea, las etiquetas debajo.
+
+                  Compartiendo línea, las dos insignias se quedaban su ancho
+                  entero -- son `shrink-0` -- y lo que se recortaba era el
+                  nombre de la guerra, hasta dejarlo en "A...". La insignia es
+                  el dato secundario; el nombre es el que se busca.
+                */}
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <p className="font-bold text-slate-100 truncate">{war.name}</p>
-                    <span className="text-[9px] uppercase tracking-wider text-slate-500 border border-slate-700 rounded px-1 py-0.5 shrink-0">
+                  <p className="font-bold text-slate-100 break-words">{war.name}</p>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    {when(war.startedAt)} · {place}.º de {ranked.length}
+                  </p>
+                  <div className="flex flex-wrap items-center gap-1 mt-1.5">
+                    <span className="text-[11px] uppercase tracking-wider text-slate-500 border border-slate-700 rounded px-1.5 py-0.5">
                       {WAR_MATCH_TYPE_LABELS[war.matchType]}
                     </span>
                     {war.outcome && (
                       <span
-                        className={`text-[9px] uppercase tracking-wider font-bold rounded px-1 py-0.5 border shrink-0 ${
+                        className={`text-[11px] uppercase tracking-wider font-bold rounded px-1.5 py-0.5 border ${
                           war.outcome === 'win'
                             ? 'border-emerald-700 text-emerald-400 bg-emerald-500/10'
                             : 'border-red-800 text-red-400 bg-red-500/10'
@@ -134,13 +145,13 @@ const MyWars: React.FC<Props> = ({ playerId, weaponSets }) => {
                       </span>
                     )}
                   </div>
-                  <p className="text-[11px] text-slate-500">
-                    {when(war.startedAt)} · {place}.º de {ranked.length}
-                  </p>
                 </div>
 
                 <i
-                  className={`fa-solid ${showing ? 'fa-chevron-up' : 'fa-chevron-down'} text-slate-600 text-xs`}
+                  className={`fa-solid fa-chevron-down text-slate-600 text-xs mt-1.5 shrink-0 transition-transform duration-micro ${
+                    showing ? 'rotate-180' : ''
+                  }`}
+                  aria-hidden
                 ></i>
               </button>
 
@@ -187,95 +198,221 @@ const Table: React.FC<{ war: War; ranked: Impact[]; playerId: string }> = ({
   playerId,
 }) => {
   const rows = new Map<string, Participation>(war.participants.map((p) => [p.playerId, p]));
+
+  /** Por qué se ordena y qué cifra se enseña. El impacto es el de entrada. */
+  const [por, setPor] = useState<string>('impact');
+  /** Quién tiene el desglose abierto. Uno a la vez: la lista es de treinta. */
+  const [abierto, setAbierto] = useState<string | null>(null);
+
+  const etiqueta = por === 'impact' ? 'Impacto' : (FIGURES.find((f) => f.key === por)?.label ?? '');
+
+  const valor = (entry: Impact): number | null =>
+    por === 'impact' ? entry.score : (rows.get(entry.playerId)?.stats?.[por] ?? null);
+
+  /**
+   * La lista ordenada por lo que se haya elegido.
+   *
+   * `ranked` llega ordenado por impacto y se deja intacto -- el puesto que se
+   * enseña es el del impacto, que es el que significa algo y el que aparece en
+   * "10.º de 30" arriba. Cambiar la cifra reordena la lista, no renumera el
+   * ranking: alguien puede ser el primero en daño y el séptimo de la guerra, y
+   * las dos cosas son ciertas a la vez.
+   */
+  const puesto = new Map(ranked.map((e, at) => [e.playerId, at + 1]));
+  const ordenados = [...ranked].sort((a, b) => {
+    const x = valor(a);
+    const y = valor(b);
+    // Quien no tiene esa cifra anotada va al final, no al principio: un hueco
+    // no es un cero.
+    if (x === null && y === null) return 0;
+    if (x === null) return 1;
+    if (y === null) return -1;
+    return y - x;
+  });
+
+  const selector = (
+    <label className="flex items-center gap-2 text-meta text-slate-500 mb-2">
+      Ordenar por
+      <select
+        value={por}
+        onChange={(e) => setPor(e.target.value)}
+        className="flex-1 sm:flex-none bg-slate-950 border border-slate-800 rounded px-2 text-sm text-slate-200 outline-none focus:ring-1 focus:ring-amber-500"
+      >
+        <option value="impact">Impacto</option>
+        {FIGURES.map((f) => (
+          <option key={f.key} value={f.key}>
+            {f.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+
   return (
     <>
       {/*
-        En el móvil, una fila por persona con su puesto, su impacto y nada más.
+        En el móvil, una fila por persona: puesto, nombre y la cifra elegida.
 
-        Esta tabla vive dentro de "Mi perfil", que es la pantalla que se abre
-        sola: son once columnas de cifras dentro de 343 px. Lo que un miembro
-        viene a mirar es dónde quedó él, y para eso basta el puesto y el
-        impacto; el desglose completo sigue estando en Sala de Guerra →
-        Historial, que es donde se anota. La fila propia se marca, que es lo
-        único que hacía legible la tabla y aquí también.
+        Antes enseñaba sólo el impacto y no había forma de llegar al resto: once
+        columnas no caben en 343 px, así que el desglose de los demás quedaba
+        únicamente en la tabla del escritorio. Ahora se elige qué cifra mirar,
+        la lista se reordena por ella, y tocar a alguien abre las ocho suyas.
+        Los datos son los mismos que ya venían en la respuesta; lo que faltaba
+        era la manera de pedirlos.
       */}
-      <ol className="flex flex-col gap-1 md:hidden">
-        {ranked.map((entry, at) => {
-          const row = rows.get(entry.playerId);
-          const self = entry.playerId === playerId;
-          return (
-            <li
-              key={entry.playerId}
-              className={`flex items-center gap-3 rounded px-2 py-1.5 ${
-                self ? 'bg-amber-500/10 ring-1 ring-amber-500/40' : ''
-              }`}
-            >
-              <span className="w-6 shrink-0 text-right text-slate-600 tabular-nums text-meta">
-                {at + 1}
-              </span>
-              <span
-                className={`flex-1 min-w-0 truncate ${self ? 'text-amber-400 font-bold' : 'text-slate-200'}`}
-              >
-                {entry.name}
-              </span>
-              {row && <span className="text-[11px] text-slate-600">{WAR_SIDE_LABELS[row.side]}</span>}
-              <span
-                className="w-9 text-right font-bold tabular-nums"
-                style={{ color: impactShade(entry.score) }}
-              >
-                {entry.score}
-              </span>
-            </li>
-          );
-        })}
-      </ol>
-
-      <div className="hidden md:block overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="text-[10px] uppercase tracking-wider text-slate-500 text-left">
-            <th className="py-1 pr-3">#</th>
-            <th className="py-1 pr-3">Miembro</th>
-            <th className="py-1 pr-3 text-right">Impacto</th>
-            {FIGURES.map((f) => (
-              <th key={f.key} className="py-1 pr-3 text-right">
-                {f.label}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {ranked.map((entry, at) => {
+      <div className="md:hidden">
+        {selector}
+        <ol className="flex flex-col gap-1">
+          {ordenados.map((entry) => {
             const row = rows.get(entry.playerId);
             const self = entry.playerId === playerId;
+            const mostrando = abierto === entry.playerId;
+            const cifra = valor(entry);
             return (
-              <tr
-                key={entry.playerId}
-                className={`border-t border-slate-800/70 ${self ? 'bg-amber-500/10' : ''}`}
-              >
-                <td className="py-1 pr-3 text-slate-600 tabular-nums">{at + 1}</td>
-                <td className={`py-1 pr-3 truncate ${self ? 'text-amber-400 font-bold' : 'text-slate-200'}`}>
-                  {entry.name}
-                  {row && (
-                    <span className="text-[10px] text-slate-600 ml-2">{WAR_SIDE_LABELS[row.side]}</span>
-                  )}
-                </td>
-                <td
-                  className="py-1 pr-3 text-right font-bold tabular-nums"
-                  style={{ color: impactShade(entry.score) }}
+              <li key={entry.playerId}>
+                <button
+                  onClick={() => setAbierto(mostrando ? null : entry.playerId)}
+                  aria-expanded={mostrando}
+                  className={`w-full min-h-tap flex items-center gap-3 rounded px-2 text-left transition-colors duration-micro ${
+                    self ? 'bg-amber-500/10 ring-1 ring-amber-500/40' : 'hover:bg-slate-800/40'
+                  }`}
                 >
-                  {entry.score}
-                </td>
-                {FIGURES.map((f) => (
-                  <td key={f.key} className="py-1 pr-3 text-right tabular-nums text-slate-400">
-                    {row?.stats?.[f.key]?.toLocaleString('es') ?? '—'}
-                  </td>
-                ))}
-              </tr>
+                  <span className="w-6 shrink-0 text-right text-slate-600 tabular-nums text-meta">
+                    {puesto.get(entry.playerId)}
+                  </span>
+                  <span
+                    className={`flex-1 min-w-0 truncate ${self ? 'text-amber-400 font-bold' : 'text-slate-200'}`}
+                  >
+                    {entry.name}
+                  </span>
+                  {row && (
+                    <span className="text-[11px] text-slate-600 shrink-0">
+                      {WAR_SIDE_LABELS[row.side]}
+                    </span>
+                  )}
+                  <span
+                    className="text-right font-bold tabular-nums shrink-0"
+                    style={por === 'impact' ? { color: impactShade(entry.score) } : undefined}
+                  >
+                    {cifra === null ? '—' : cifra.toLocaleString('es')}
+                  </span>
+                  <i
+                    className={`fa-solid fa-chevron-down text-slate-600 text-xs shrink-0 transition-transform duration-micro ${
+                      mostrando ? 'rotate-180' : ''
+                    }`}
+                    aria-hidden
+                  ></i>
+                </button>
+
+                {mostrando && (
+                  // Una columna hasta 400 px y dos a partir de ahí: en dos,
+                  // "Daño de asedio" caía en tres renglones y el bloque se
+                  // volvía un dentado. Es un detalle que se abre a propósito,
+                  // así que se lee entero antes que apretado.
+                  <div className="mx-2 mb-1 mt-1 rounded border border-slate-800 bg-slate-950/50 p-2 grid grid-cols-1 xs:grid-cols-2 gap-x-4 gap-y-1">
+                    {/* col-span-full y no col-span-2: en la rejilla de una sola
+                        columna, pedir dos crea una segunda columna implícita
+                        -- de ancho automático, así que ni siquiera pareja -- y
+                        el bloque volvía a partirse justo donde no debía. */}
+                    <div className="flex items-baseline justify-between gap-2 col-span-full pb-1 border-b border-slate-800">
+                      <span className="text-[11px] uppercase tracking-wider text-slate-500">
+                        Impacto
+                      </span>
+                      <span
+                        className="text-sm font-bold tabular-nums"
+                        style={{ color: impactShade(entry.score) }}
+                      >
+                        {entry.score}
+                      </span>
+                    </div>
+                    {FIGURES.map((f) => (
+                      <div key={f.key} className="flex items-baseline justify-between gap-2">
+                        {/* Sin `truncate`: "Daño recibido" y "Daño de asedio"
+                            se quedaban en "Daño recibi..." y "Daño ...", que
+                            son la misma palabra dos veces. Envuelven. */}
+                        <span
+                          className={`text-[11px] uppercase tracking-wider leading-tight ${
+                            f.key === por ? 'text-amber-500 font-bold' : 'text-slate-500'
+                          }`}
+                        >
+                          {f.label}
+                        </span>
+                        <span className="text-sm tabular-nums text-slate-200 shrink-0">
+                          {row?.stats?.[f.key]?.toLocaleString('es') ?? '—'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </li>
             );
           })}
-        </tbody>
-      </table>
+        </ol>
+      </div>
+
+      <div className="hidden md:block">
+        {selector}
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-[10px] uppercase tracking-wider text-slate-500 text-left">
+                <th className="py-1 pr-3">#</th>
+                <th className="py-1 pr-3">Miembro</th>
+                {/* La columna por la que se ordena se marca, para que la lista
+                    no parezca desordenada cuando no se ordena por impacto. */}
+                <th className={`py-1 pr-3 text-right ${por === 'impact' ? 'text-amber-500' : ''}`}>
+                  Impacto
+                </th>
+                {FIGURES.map((f) => (
+                  <th
+                    key={f.key}
+                    className={`py-1 pr-3 text-right ${f.key === por ? 'text-amber-500' : ''}`}
+                  >
+                    {f.label}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {ordenados.map((entry) => {
+                const row = rows.get(entry.playerId);
+                const self = entry.playerId === playerId;
+                return (
+                  <tr
+                    key={entry.playerId}
+                    className={`border-t border-slate-800/70 ${self ? 'bg-amber-500/10' : ''}`}
+                  >
+                    <td className="py-1 pr-3 text-slate-600 tabular-nums">
+                      {puesto.get(entry.playerId)}
+                    </td>
+                    <td className={`py-1 pr-3 truncate ${self ? 'text-amber-400 font-bold' : 'text-slate-200'}`}>
+                      {entry.name}
+                      {row && (
+                        <span className="text-[10px] text-slate-600 ml-2">{WAR_SIDE_LABELS[row.side]}</span>
+                      )}
+                    </td>
+                    <td
+                      className="py-1 pr-3 text-right font-bold tabular-nums"
+                      style={{ color: impactShade(entry.score) }}
+                    >
+                      {entry.score}
+                    </td>
+                    {FIGURES.map((f) => (
+                      <td
+                        key={f.key}
+                        className={`py-1 pr-3 text-right tabular-nums ${
+                          f.key === por ? 'text-slate-100 font-semibold' : 'text-slate-400'
+                        }`}
+                      >
+                        {row?.stats?.[f.key]?.toLocaleString('es') ?? '—'}
+                      </td>
+                    ))}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       </div>
     </>
   );

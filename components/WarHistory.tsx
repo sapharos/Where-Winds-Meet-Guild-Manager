@@ -611,10 +611,13 @@ const WarHistory: React.FC<Props> = ({ canEdit, weaponSets, onClose, onChanged }
                         </span>
                       </div>
 
-                      <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1">
+                      {/* Igual que en Mis guerras: una columna hasta 400 px, dos
+                          a partir de ahí. En dos, "Daño de asedio" se recortaba
+                          a "Daño d..." y quedaba indistinguible de "Daño". */}
+                      <div className="mt-2 grid grid-cols-1 xs:grid-cols-2 gap-x-4 gap-y-1">
                         {FIGURES.map((f) => (
-                          <div key={f.key} className="flex items-center justify-between gap-2">
-                            <span className="text-[11px] uppercase tracking-wider text-slate-500 truncate">
+                          <div key={f.key} className="flex items-baseline justify-between gap-2">
+                            <span className="text-[11px] uppercase tracking-wider text-slate-500 leading-tight">
                               {f.label}
                             </span>
                             <FigureCell
