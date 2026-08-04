@@ -444,12 +444,5 @@ export interface ScanRecord extends ScanFields {
   scannedAt: string;
 }
 
-// Collaboration types
-export type PeerRole = 'HOST' | 'CLIENT' | 'STANDALONE';
-
-export interface SyncPacket {
-  players: Player[];
-  sessions: GuildWarSession[];
-  ranks: GuildRank[];
-  timestamp: number;
-}
+// Los tipos de la colaboración por PeerJS vivieron aquí hasta agosto de 2026,
+// cuando la función se retiró entera: era de antes de que existiera la API.

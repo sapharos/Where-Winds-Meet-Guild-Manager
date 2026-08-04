@@ -1,13 +1,11 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Peer } from 'peerjs';
-import { Player, GuildWarSession, Lane, TacticalGroup, MembershipStatus, GuildRank, PeerRole, SyncPacket, ROLE_LABELS, PlayerBuild, WeaponSet, WarSide } from './types';
+import { Player, GuildWarSession, Lane, TacticalGroup, MembershipStatus, GuildRank, ROLE_LABELS, PlayerBuild, WeaponSet, WarSide } from './types';
 import { storageService } from './services/storageService';
 import { authService, api, ApiError, Session } from './services/authService';
 import { DEFAULT_GROUPS } from './constants';
 import MemberManager from './components/MemberManager';
 import WarBoard from './components/WarBoard';
-import CollaborationPanel from './components/CollaborationPanel';
 import LoginScreen from './components/LoginScreen';
 import DiscordClaim from './components/DiscordClaim';
 import MyProfile from './components/MyProfile';
@@ -51,23 +49,14 @@ const App: React.FC = () => {
   const [saveError, setSaveError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Collaboration State
-  const [peerRole, setPeerRole] = useState<PeerRole>('STANDALONE');
-  const [myPeerId, setMyPeerId] = useState<string | null>(null);
-  const peerRef = useRef<any>(null);
-  const connectionsRef = useRef<any[]>([]);
-  const [connectedPeers, setConnectedPeers] = useState(0);
-
   const can = useCallback(
     (permission: string) => session?.permissions.includes(permission) ?? false,
     [session],
   );
 
-  // Two independent reasons a section can be read-only: the role does not grant
-  // the permission, or this browser is following someone else's broadcast.
-  const rosterLocked = peerRole === 'CLIENT' || !can('roster.edit');
-  const ranksLocked = peerRole === 'CLIENT' || !can('ranks.manage');
-  const warLocked = peerRole === 'CLIENT' || !can('war.edit');
+  const rosterLocked = !can('roster.edit');
+  const ranksLocked = !can('ranks.manage');
+  const warLocked = !can('war.edit');
 
   // Surfaces a write failure instead of letting the UI show state the server
   // never accepted. An expired session drops back to the login screen rather
@@ -181,109 +170,10 @@ const App: React.FC = () => {
     if (session?.user.playerId) setActiveTab('me');
   }, [session?.user.playerId]);
 
-  // PeerJS logic
-  const broadcastState = useCallback((p: Player[], s: GuildWarSession[], r: GuildRank[]) => {
-    if (peerRole !== 'HOST' || connectionsRef.current.length === 0) return;
-    const packet: SyncPacket = {
-      players: p,
-      sessions: s,
-      ranks: r,
-      timestamp: Date.now()
-    };
-    connectionsRef.current.forEach(conn => {
-      if (conn.open) conn.send(packet);
-    });
-  }, [peerRole]);
-
-  // Sync state whenever it changes IF we are the HOST
-  useEffect(() => {
-    if (peerRole === 'HOST') {
-      broadcastState(players, sessions, ranks);
-    }
-  }, [players, sessions, ranks, peerRole, broadcastState]);
-
-  const handleHost = () => {
-    const peer = new Peer();
-    peerRef.current = peer;
-
-    peer.on('open', (id) => {
-      setMyPeerId(id);
-      setPeerRole('HOST');
-    });
-
-    peer.on('connection', (conn) => {
-      connectionsRef.current.push(conn);
-      setConnectedPeers(prev => prev + 1);
-      
-      conn.on('open', () => {
-        // Send initial state to new connection
-        const packet: SyncPacket = {
-          players,
-          sessions,
-          ranks,
-          timestamp: Date.now()
-        };
-        conn.send(packet);
-      });
-
-      conn.on('close', () => {
-        connectionsRef.current = connectionsRef.current.filter(c => c.peer !== conn.peer);
-        setConnectedPeers(prev => Math.max(0, prev - 1));
-      });
-    });
-
-    peer.on('error', (err) => {
-      console.error('Peer error:', err);
-      alert('Error de colaboración: ' + err.type);
-    });
-  };
-
-  const handleJoin = (hostId: string) => {
-    const peer = new Peer();
-    peerRef.current = peer;
-
-    peer.on('open', () => {
-      const conn = peer.connect(hostId);
-      
-      conn.on('open', () => {
-        setPeerRole('CLIENT');
-      });
-
-      conn.on('data', (data: any) => {
-        const packet = data as SyncPacket;
-        if (packet.players && packet.sessions && packet.ranks) {
-          setPlayers(packet.players);
-          setSessions(packet.sessions);
-          setRanks(packet.ranks);
-          if (packet.sessions.length > 0) {
-            setActiveSessionId(packet.sessions[0].id);
-          }
-        }
-      });
-
-      conn.on('close', () => {
-        alert('El comandante se ha desconectado.');
-        handleDisconnect();
-      });
-    });
-
-    peer.on('error', (err) => {
-      alert('No se pudo conectar: ' + err.type);
-      handleDisconnect();
-    });
-  };
-
-  const handleDisconnect = () => {
-    if (peerRef.current) {
-      peerRef.current.destroy();
-      peerRef.current = null;
-    }
-    connectionsRef.current = [];
-    setConnectedPeers(0);
-    setMyPeerId(null);
-    setPeerRole('STANDALONE');
-    void loadAllData(); // Revert to the server's copy
-  };
+  // La colaboración por PeerJS vivió aquí hasta agosto de 2026. Era de antes de
+  // que existiera el servidor: dos navegadores compartían estado de tú a tú
+  // porque no había otro sitio donde compartirlo. Con la API como única fuente
+  // de verdad se quitó entero, botones incluidos, a petición del dueño.
 
   const handleAddPlayer = (p: Player) => {
     if (rosterLocked) return;
@@ -326,7 +216,7 @@ const App: React.FC = () => {
   const handleImportClick = () => fileInputRef.current?.click();
 
   const handleFileImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (peerRole === 'CLIENT' || !can('data.import')) return;
+    if (!can('data.import')) return;
     const file = e.target.files?.[0];
     if (file) {
       const success = await storageService.importAllData(file);
@@ -378,7 +268,6 @@ const App: React.FC = () => {
   };
 
   const handleLogout = async () => {
-    if (peerRef.current) handleDisconnect();
     await authService.logout().catch(() => undefined);
     setSession(null);
     setPlayers([]);
@@ -473,49 +362,31 @@ const App: React.FC = () => {
             Sharing a line is what squeezed the labels into three lines each. */}
         <div className="max-w-[1600px] mx-auto px-4 sm:px-6 pt-3 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
-            <div
-              className={`w-10 h-10 shrink-0 bg-gradient-to-br from-amber-600 to-amber-900 rounded-lg flex items-center justify-center shadow-lg border border-amber-500/30 ${
-                peerRole === 'HOST' ? 'pulse-gold' : ''
-              }`}
-            >
+            <div className="w-10 h-10 shrink-0 bg-gradient-to-br from-amber-600 to-amber-900 rounded-lg flex items-center justify-center shadow-lg border border-amber-500/30">
               <i className="fa-solid fa-wind text-xl text-white"></i>
             </div>
             <div className="min-w-0">
               <h1 className="cinzel text-lg sm:text-xl font-bold tracking-widest text-slate-100 leading-none truncate">
                 ZONA ZERO
               </h1>
-              <div className="flex items-center gap-2 mt-0.5">
-                <p className="hidden sm:block text-[10px] uppercase tracking-[0.2em] text-amber-500 font-bold">
-                  Mando Estratégico
-                </p>
-                {peerRole === 'HOST' && (
-                  <span className="bg-amber-600 text-[8px] px-1.5 py-0.5 rounded text-white font-bold animate-pulse">
-                    EDITOR
-                  </span>
-                )}
-                {peerRole === 'CLIENT' && (
-                  <span className="bg-blue-600 text-[8px] px-1.5 py-0.5 rounded text-white font-bold">
-                    OBSERVADOR
-                  </span>
-                )}
-              </div>
+              <p className="hidden sm:block mt-0.5 text-[10px] uppercase tracking-[0.2em] text-amber-500 font-bold">
+                Mando Estratégico
+              </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-            <div className="hidden lg:block">
-              <CollaborationPanel
-                peerId={myPeerId}
-                role={peerRole}
-                onHost={handleHost}
-                onJoin={handleJoin}
-                onDisconnect={handleDisconnect}
-                connectedCount={connectedPeers}
-              />
-            </div>
+          {/*
+            Una sola fila de herramientas, alineadas al mismo alto.
 
-            {/* Below large screens the same tools live behind one button. A
-                native details element needs no state and closes itself. */}
+            Aquí en medio vivían los botones de Transmitir y Conectarme de la
+            colaboración P2P, apilados en dos pisos que doblaban la altura de la
+            cabecera y partían el resto en islas. La colaboración se quitó
+            entera -- era de antes de que existiera el servidor -- así que la
+            fila queda: exportar/importar, quién eres, tema, llave y salida.
+          */}
+          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+            {/* Below large screens the tools live behind one button. A native
+                details element needs no state and closes itself. */}
             <details className="lg:hidden relative">
               <summary
                 aria-label="Más herramientas"
@@ -528,14 +399,6 @@ const App: React.FC = () => {
                   <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-1.5">Tema</p>
                   <ThemeToggle />
                 </div>
-                <CollaborationPanel
-                  peerId={myPeerId}
-                  role={peerRole}
-                  onHost={handleHost}
-                  onJoin={handleJoin}
-                  onDisconnect={handleDisconnect}
-                  connectedCount={connectedPeers}
-                />
                 <div className="flex gap-2">
                   {can('data.export') && (
                     <button
@@ -549,8 +412,7 @@ const App: React.FC = () => {
                   {can('data.import') && (
                     <button
                       onClick={handleImportClick}
-                      disabled={peerRole === 'CLIENT'}
-                      className="flex-1 text-xs py-2 rounded border border-slate-800 text-slate-400 hover:text-amber-500 disabled:text-slate-700 transition-all"
+                      className="flex-1 text-xs py-2 rounded border border-slate-800 text-slate-400 hover:text-amber-500 transition-all"
                     >
                       <i className="fa-solid fa-upload mr-1.5"></i>
                       Importar
@@ -560,31 +422,28 @@ const App: React.FC = () => {
               </div>
             </details>
 
-            <div className="hidden lg:flex bg-slate-950 p-1 rounded-lg border border-slate-800">
-              {can('data.export') && (
-                <button
-                  onClick={handleExport}
-                  className="p-2 text-slate-400 hover:text-amber-500 hover:bg-slate-900 rounded transition-all"
-                  title="Exportar los datos del gremio"
-                >
-                  <i className="fa-solid fa-download"></i>
-                </button>
-              )}
-              {can('data.import') && (
-                <button
-                  onClick={handleImportClick}
-                  disabled={peerRole === 'CLIENT'}
-                  className={`p-2 rounded transition-all ${
-                    peerRole === 'CLIENT'
-                      ? 'text-slate-700 cursor-not-allowed'
-                      : 'text-slate-400 hover:text-amber-500 hover:bg-slate-900'
-                  }`}
-                  title="Importar datos del gremio"
-                >
-                  <i className="fa-solid fa-upload"></i>
-                </button>
-              )}
-            </div>
+            {(can('data.export') || can('data.import')) && (
+              <div className="hidden lg:flex bg-slate-950 p-1 rounded-lg border border-slate-800">
+                {can('data.export') && (
+                  <button
+                    onClick={handleExport}
+                    className="p-2 text-slate-400 hover:text-amber-500 hover:bg-slate-900 rounded transition-all"
+                    title="Exportar los datos del gremio"
+                  >
+                    <i className="fa-solid fa-download"></i>
+                  </button>
+                )}
+                {can('data.import') && (
+                  <button
+                    onClick={handleImportClick}
+                    className="p-2 text-slate-400 hover:text-amber-500 hover:bg-slate-900 rounded transition-all"
+                    title="Importar datos del gremio"
+                  >
+                    <i className="fa-solid fa-upload"></i>
+                  </button>
+                )}
+              </div>
+            )}
             <input type="file" ref={fileInputRef} className="hidden" accept=".json" onChange={handleFileImport} />
 
             <div className="flex items-center gap-2">
@@ -720,10 +579,7 @@ const App: React.FC = () => {
       {buildsFor && (
         <BuildEditor
           player={buildsFor}
-          canEdit={
-            peerRole !== 'CLIENT' &&
-            (can('builds.manage') || buildsFor.id === session.user.playerId)
-          }
+          canEdit={can('builds.manage') || buildsFor.id === session.user.playerId}
           onClose={() => setBuildsFor(null)}
           onSaved={() => void loadAllData({ quiet: true })}
         />
