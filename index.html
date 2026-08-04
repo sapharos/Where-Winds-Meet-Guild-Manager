@@ -16,6 +16,12 @@
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
     <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png">
     <link rel="apple-touch-icon" sizes="180x180" href="/favicon-180.png">
+    <!-- Lo que hace la aplicación instalable. La ruta va absoluta como las de
+         los favicons: Vite le antepone la base al servir y al construir, así
+         que aterriza bien tanto en la raíz del contenedor como bajo
+         /Where-Winds-Meet-Guild-Manager/ en desarrollo. Dentro del manifest
+         todo es relativo a su propia URL, y por eso no hay más que tocar. -->
+    <link rel="manifest" href="/manifest.webmanifest">
     <!-- Uno por tema, para que la barra del navegador acompañe en vez de
          delatar el tema contrario. Los valores son --n-950 de cada tema. -->
     <meta name="theme-color" content="#dde3df" media="(prefers-color-scheme: light)">

@@ -13,6 +13,7 @@ import AdminPanel from './components/AdminPanel';
 import MemberHistory from './components/MemberHistory';
 import BuildEditor from './components/BuildEditor';
 import ThemeToggle from './components/ThemeToggle';
+import InstalarApp from './components/InstalarApp';
 import { Bloque, Tarjetas } from './components/Esqueleto';
 
 const App: React.FC = () => {
@@ -419,6 +420,10 @@ const App: React.FC = () => {
                     </button>
                   )}
                 </div>
+                {/* Quien entró sin instalar desde la pantalla de acceso tiene
+                    aquí la segunda oportunidad; el componente se retira solo
+                    cuando ya corre instalada o la plataforma no ofrece nada. */}
+                <InstalarApp />
               </div>
             </details>
 

@@ -4,10 +4,14 @@ import ReactDOM from 'react-dom/client';
 import './styles/app.css';
 import App from './App';
 import { instalarTeclado } from './services/teclado';
+import { capturarInstalacion } from './services/instalacion';
 
 // Antes de montar: la medida del teclado la usa el CSS, y una hoja que se abra
 // con el teclado ya puesto debe encoger desde la primera pintura.
 instalarTeclado();
+// También antes de montar: Chrome dispara beforeinstallprompt en cuanto lee el
+// manifest, y si nadie está escuchando la oferta de instalar se pierde.
+capturarInstalacion();
 
 /**
  * Los iconos que un miembro puede elegir para un conjunto de armas o una unidad

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../services/authService';
+import InstalarApp from './InstalarApp';
 
 interface Props {
   onLogin: (username: string, password: string) => Promise<void>;
@@ -112,6 +113,12 @@ const LoginScreen: React.FC<Props> = ({ onLogin }) => {
             </>
           )}
         </form>
+
+        {/* Debajo del formulario y no dentro: instalar es cosa del aparato,
+            no de la cuenta, y aquí la ve todo el mundo al abrir el sistema. */}
+        <div className="mt-4">
+          <InstalarApp />
+        </div>
       </div>
     </div>
   );
