@@ -353,6 +353,26 @@ CREATE INDEX IF NOT EXISTS war_strategies_side_idx ON war_strategies (guild_id, 
 -- because a plan is exactly where "we need an escort party of five" is decided.
 ALTER TABLE war_strategies ADD COLUMN IF NOT EXISTS units JSONB NOT NULL DEFAULT '[]'::jsonb;
 
+-- A saved line-up: the deployment of one side, photographed under a name so it
+-- can be fielded again. A snapshot and not live rows, because that is what
+-- "save for later" means -- the roster will drift underneath it, and applying
+-- one deals with the drift then, not now.
+--
+-- members: [{ playerId, lane, unitIds, buildId, position }]. Bare player ids
+-- on purpose, like unit_ids and build_id above: a member who has left simply
+-- fails to come back when the line-up is applied, and is reported rather than
+-- resurrected.
+CREATE TABLE IF NOT EXISTS war_saved_lineups (
+  id         TEXT PRIMARY KEY,
+  guild_id   TEXT NOT NULL REFERENCES guilds(id) ON DELETE CASCADE,
+  side       TEXT NOT NULL,
+  name       TEXT NOT NULL,
+  members    JSONB NOT NULL DEFAULT '[]'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS war_saved_lineups_side_idx ON war_saved_lineups (guild_id, side);
+
 CREATE TABLE IF NOT EXISTS wars (
   id         TEXT PRIMARY KEY,
   guild_id   TEXT NOT NULL REFERENCES guilds(id) ON DELETE CASCADE,

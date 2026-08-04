@@ -18,12 +18,21 @@
 import { Deployment, GuildRank, Player, PlayerBuild, WarSide, WeaponSet } from '../types';
 import * as fake from './guild';
 
+interface LineupGuardado {
+  id: string;
+  side: WarSide;
+  name: string;
+  members: { playerId: string; lane: string; unitIds: string[]; buildId: string | null }[];
+  createdAt: string;
+}
+
 interface Store {
   players: Player[];
   ranks: GuildRank[];
   builds: PlayerBuild[];
   weaponSets: WeaponSet[];
   deployments: Deployment[];
+  lineups: LineupGuardado[];
   active: Record<WarSide, string | null>;
   locked: Record<WarSide, boolean>;
   current: ReturnType<typeof fake.board>['current'] | null;
@@ -35,6 +44,24 @@ const store: Store = {
   builds: structuredClone(fake.builds),
   weaponSets: structuredClone(fake.weaponSets),
   deployments: structuredClone(fake.deployments),
+  // Una guardada de fábrica: la foto del ataque inicial, para que la hoja de
+  // formaciones tenga algo que enseñar y que aplicar.
+  lineups: [
+    {
+      id: 'lu-1',
+      side: 'attack',
+      name: 'Titulares de liga',
+      members: fake.deployments
+        .filter((d) => d.side === 'attack')
+        .map((d) => ({
+          playerId: d.playerId,
+          lane: d.lane,
+          unitIds: d.unitIds ?? [],
+          buildId: d.buildId ?? null,
+        })),
+      createdAt: new Date(Date.now() - 4 * 86400000).toISOString(),
+    },
+  ],
   active: { attack: 'st-1', defense: 'st-2' },
   locked: { attack: false, defense: false },
   current: null,
@@ -69,6 +96,7 @@ const GET: [RegExp, Ruta][] = [
       now: new Date().toISOString(),
     }),
   ],
+  [/^\/war\/lineups$/, () => store.lineups],
   [/^\/war\/wars$/, () => fake.warRows],
   [/^\/war\/wars\/([^/]+)$/, (m) => fake.warDetail(m[1])],
   [/^\/players\/([^/]+)\/scans$/, (m) => fake.scansOf(m[1])],
@@ -135,6 +163,73 @@ const ESCRITURAS: [string, RegExp, Ruta][] = [
   }],
   ['DELETE', /^\/war\/deployments\/([^/]+)$/, (m) => {
     store.deployments = store.deployments.filter((d) => d.side !== m[1]);
+    return { ok: true };
+  }],
+  ['POST', /^\/war\/lineups$/, (_m, _req, body) => {
+    const side = body?.side as WarSide;
+    const members = store.deployments
+      .filter((d) => d.side === side)
+      .map((d) => ({
+        playerId: d.playerId,
+        lane: d.lane,
+        unitIds: d.unitIds ?? [],
+        buildId: d.buildId ?? null,
+      }));
+    const id = `lu-${store.lineups.length + 1}`;
+    store.lineups.push({
+      id,
+      side,
+      name: String(body?.name ?? '').trim() || 'Sin nombre',
+      members,
+      createdAt: new Date().toISOString(),
+    });
+    return { id, members: members.length };
+  }],
+  // El mismo trato honesto que el servidor de verdad: reemplaza el bando y
+  // devuelve a quién no pudo readmitir y por qué.
+  ['POST', /^\/war\/lineups\/([^/]+)\/apply$/, (m) => {
+    const lineup = store.lineups.find((l) => l.id === m[1]);
+    if (!lineup) return { error: 'esa formacion no existe' };
+    const other: WarSide = lineup.side === 'attack' ? 'defense' : 'attack';
+    const enfrente = new Set(
+      store.deployments.filter((d) => d.side === other).map((d) => d.playerId),
+    );
+    const vivos = new Map(store.players.map((p) => [p.id, p]));
+
+    store.deployments = store.deployments.filter((d) => d.side !== lineup.side);
+    const omitted: { playerId: string; name: string; reason: string }[] = [];
+    let applied = 0;
+    for (const member of lineup.members) {
+      const who = vivos.get(member.playerId);
+      if (!who || who.isActive === false) {
+        omitted.push({
+          playerId: member.playerId,
+          name: who?.name ?? member.playerId,
+          reason: 'ya no está en el gremio',
+        });
+        continue;
+      }
+      if (enfrente.has(member.playerId)) {
+        omitted.push({
+          playerId: member.playerId,
+          name: who.name,
+          reason: `ya desplegado en ${other === 'attack' ? 'Ataque' : 'Defensa'}`,
+        });
+        continue;
+      }
+      store.deployments.push({
+        side: lineup.side,
+        lane: member.lane as Deployment['lane'],
+        playerId: member.playerId,
+        unitIds: member.unitIds,
+        buildId: member.buildId,
+      });
+      applied++;
+    }
+    return { side: lineup.side, applied, omitted };
+  }],
+  ['DELETE', /^\/war\/lineups\/([^/]+)$/, (m) => {
+    store.lineups = store.lineups.filter((l) => l.id !== m[1]);
     return { ok: true };
   }],
   ['PUT', /^\/war\/active\/([^/]+)$/, (m, _req, body) => {

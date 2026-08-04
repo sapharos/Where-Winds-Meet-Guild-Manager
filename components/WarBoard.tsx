@@ -6,6 +6,7 @@ import {
   Player,
   PlayerBuild,
   Role,
+  SavedLineup,
   WAR_CAPACITY,
   WAR_LANES,
   WAR_MATCH_TYPE_LABELS,
@@ -106,6 +107,13 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
   const [history, setHistory] = useState(false);
   // Quién tiene el menú de acciones abierto, en el tablero o en el banquillo.
   const [abierto, setAbierto] = useState<string | null>(null);
+  // Formaciones guardadas: la hoja, el nombre en curso y el resultado del
+  // último aplicar. El aviso es aparte del error porque no es un fallo: "3 no
+  // volvieron y te digo por qué" es información, no una excusa.
+  const [formaciones, setFormaciones] = useState<SavedLineup[]>([]);
+  const [formacionesAbiertas, setFormacionesAbiertas] = useState(false);
+  const [nombreNuevo, setNombreNuevo] = useState('');
+  const [aviso, setAviso] = useState<string | null>(null);
 
   // What the board holds right now, for handlers that fire faster than a render.
   const latest = useRef<Deployment[]>([]);
@@ -117,6 +125,7 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
     const plans = await api<WarStrategy[]>('/war/strategies').catch(() => []);
     // Strategies written before units existed come back without them.
     setStrategies(plans.map((s) => ({ ...s, units: s.units ?? [] })));
+    setFormaciones(await api<SavedLineup[]>('/war/lineups').catch(() => []));
     const board = await api<WarBoardState>('/war/board').catch(() => null);
     if (board) {
       setInForce(board.active);
@@ -386,6 +395,70 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
     await load();
   };
 
+  /** Fotografía el tablero de este bando bajo el nombre escrito en la hoja. */
+  const guardarFormacion = async () => {
+    setError(null);
+    try {
+      await api('/war/lineups', {
+        method: 'POST',
+        body: JSON.stringify({ side, name: nombreNuevo }),
+      });
+      setNombreNuevo('');
+      setAviso(`Formación guardada con los ${here.length} de ${WAR_SIDE_LABELS[side]}.`);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo guardar la formación');
+    }
+  };
+
+  /**
+   * Vuelve a poner en el tablero una formación guardada.
+   *
+   * Reemplaza el bando entero, así que se pregunta antes cuando hay gente. El
+   * servidor devuelve a quién no pudo readmitir y por qué -- bajas, gente ya
+   * desplegada enfrente, cupos -- y eso se enseña, porque un aplicar que calla
+   * a los que faltan se lee como que el guardado los perdió.
+   */
+  const aplicarFormacion = async (lineup: SavedLineup) => {
+    if (
+      here.length > 0 &&
+      !window.confirm(
+        `Aplicar «${lineup.name}» reemplaza a los ${here.length} desplegados de ${WAR_SIDE_LABELS[side]}. ¿Seguir?`,
+      )
+    )
+      return;
+
+    setError(null);
+    try {
+      const out = await api<{ applied: number; omitted: { name: string; reason: string }[] }>(
+        `/war/lineups/${lineup.id}/apply`,
+        { method: 'POST' },
+      );
+      setFormacionesAbiertas(false);
+      setAviso(
+        out.omitted.length
+          ? `${out.applied} desplegados. No volvieron ${out.omitted.length}: ${out.omitted
+              .map((o) => `${o.name} (${o.reason})`)
+              .join(', ')}.`
+          : `${out.applied} desplegados, la formación volvió entera.`,
+      );
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo aplicar la formación');
+    }
+  };
+
+  const borrarFormacion = async (lineup: SavedLineup) => {
+    if (!window.confirm(`¿Borrar la formación guardada «${lineup.name}»?`)) return;
+    setError(null);
+    try {
+      await api(`/war/lineups/${lineup.id}`, { method: 'DELETE' });
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo borrar la formación');
+    }
+  };
+
   return (
     <div className="space-y-4">
       {/* Above the two boards, because both halves fight to the same clock. */}
@@ -441,6 +514,19 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
             >
               <i className="fa-solid fa-scroll"></i>
               Historial
+            </button>
+            <button
+              onClick={() => setFormacionesAbiertas(true)}
+              title="Guardar la formación actual y volver a una guardada"
+              className="text-sm text-slate-400 hover:text-amber-500 border border-slate-800 hover:border-amber-700 rounded px-3 py-2 transition-all flex items-center gap-2"
+            >
+              <i className="fa-solid fa-clipboard-list"></i>
+              Formaciones
+              {formaciones.filter((f) => f.side === side).length > 0 && (
+                <span className="text-[11px] text-slate-500 tabular-nums">
+                  {formaciones.filter((f) => f.side === side).length}
+                </span>
+              )}
             </button>
             <button
               onClick={() => setPlanning(true)}
@@ -545,6 +631,21 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
           <div className="mt-3 text-sm rounded-lg px-4 py-2 flex items-center gap-3 border bg-red-950/60 border-red-900 text-red-200">
             <i className="fa-solid fa-triangle-exclamation"></i>
             {error}
+          </div>
+        )}
+
+        {/* En latón y no en rojo: no es un fallo, es el parte de lo que pasó. */}
+        {aviso && (
+          <div className="mt-3 text-sm rounded-lg px-4 py-2 flex items-start gap-3 border bg-amber-500/10 border-amber-800/60 text-amber-200">
+            <i className="fa-solid fa-circle-info mt-0.5 shrink-0"></i>
+            <span className="min-w-0">{aviso}</span>
+            <button
+              onClick={() => setAviso(null)}
+              aria-label="Cerrar el aviso"
+              className="tap-suelto ml-auto shrink-0 text-amber-400/70 hover:text-amber-200"
+            >
+              <i className="fa-solid fa-xmark"></i>
+            </button>
           </div>
         )}
       </div>
@@ -1080,6 +1181,94 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
           onClose={() => setHistory(false)}
           onChanged={() => void load()}
         />
+      )}
+
+      {formacionesAbiertas && (
+        <Sheet
+          title={`Formaciones de ${WAR_SIDE_LABELS[side]}`}
+          subtitle="El tablero de este bando, fotografiado con nombre para volver a él."
+          size="sm"
+          onClose={() => setFormacionesAbiertas(false)}
+        >
+          {arranging && here.length > 0 && (
+            <div className="mb-4 pb-4 border-b border-slate-800">
+              <label className="block text-[11px] uppercase tracking-wider text-slate-500 mb-1">
+                Guardar la formación actual ({here.length} desplegados)
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={nombreNuevo}
+                  onChange={(e) => setNombreNuevo(e.target.value)}
+                  placeholder={`p. ej. Titulares de liga (${WAR_SIDE_LABELS[side]})`}
+                  enterKeyHint="done"
+                  autoComplete="off"
+                  className="flex-1 min-w-0 bg-slate-950 border border-slate-800 rounded px-3 text-sm outline-none focus:ring-1 focus:ring-amber-500"
+                />
+                <button
+                  onClick={() => void guardarFormacion()}
+                  className="shrink-0 bg-amber-600 hover:bg-amber-500 text-white text-sm font-bold px-4 rounded transition-all"
+                >
+                  <i className="fa-solid fa-floppy-disk mr-1.5"></i>
+                  Guardar
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="flex flex-col gap-2">
+            {formaciones
+              .filter((f) => f.side === side)
+              .map((f) => (
+                <div key={f.id} className="rounded-md border border-slate-800 bg-slate-950/40 p-3">
+                  <div className="flex items-center gap-2">
+                    <span className="min-w-0 flex-1 font-semibold text-slate-100 truncate">
+                      {f.name}
+                    </span>
+                    <span className="shrink-0 text-meta text-slate-500 tabular-nums">
+                      {f.members.length} miembros
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    Guardada el{' '}
+                    {new Date(f.createdAt).toLocaleDateString('es', {
+                      day: 'numeric',
+                      month: 'short',
+                      year: 'numeric',
+                    })}
+                  </p>
+                  {arranging && (
+                    <div className="mt-2 flex gap-2">
+                      <button
+                        onClick={() => void aplicarFormacion(f)}
+                        className="flex-1 min-h-tap rounded border border-amber-700 text-amber-400 hover:bg-amber-500/10 text-sm font-semibold transition-all"
+                      >
+                        <i className="fa-solid fa-rotate-left mr-1.5"></i>
+                        Aplicar
+                      </button>
+                      <button
+                        onClick={() => void borrarFormacion(f)}
+                        aria-label={`Borrar ${f.name}`}
+                        className="shrink-0 min-h-tap min-w-tap rounded border border-slate-800 text-slate-500 hover:text-red-400 transition-all"
+                      >
+                        <i className="fa-solid fa-trash-can"></i>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+
+            {formaciones.filter((f) => f.side === side).length === 0 && (
+              <p className="text-sm text-slate-500">
+                {arranging
+                  ? here.length > 0
+                    ? 'Todavía no hay ninguna guardada para este bando. Ponle nombre arriba y guarda la actual.'
+                    : 'Todavía no hay ninguna guardada. Despliega gente en el tablero y podrás guardar la formación.'
+                  : 'Todavía no hay ninguna formación guardada para este bando.'}
+              </p>
+            )}
+          </div>
+        </Sheet>
       )}
 
       {starting && <StartWarModal onClose={() => setStarting(false)} onStart={begin} />}

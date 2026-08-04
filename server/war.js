@@ -723,4 +723,156 @@ async function pruneUnits(side) {
   );
 }
 
+/* -------------------------------------------------------------------------
+   Formaciones guardadas: el tablero de un bando, fotografiado con nombre.
+   ------------------------------------------------------------------------- */
+
+export async function listLineups() {
+  const { rows } = await pool.query(
+    `SELECT id, side, name, members, created_at AS "createdAt"
+       FROM war_saved_lineups WHERE guild_id = $1 ORDER BY side, name`,
+    [GUILD_ID],
+  );
+  return rows;
+}
+
+/**
+ * Photograph the current deployment of one side under a name.
+ *
+ * It reads the board rather than accepting a body, on purpose: the board is
+ * already the only editor of line-ups, and a second way to write one would be
+ * a second place for the two to disagree. Arrange, then save what you see.
+ */
+export async function saveLineup(side, name) {
+  if (!SIDES.includes(side)) throw Object.assign(new Error('unknown side'), { status: 400 });
+
+  const { rows } = await pool.query(
+    `SELECT player_id AS "playerId", lane, unit_ids AS "unitIds",
+            build_id AS "buildId", position
+       FROM war_deployments WHERE guild_id = $1 AND side = $2
+      ORDER BY lane, position`,
+    [GUILD_ID, side],
+  );
+  // An empty photograph is not worth keeping, and saving one by accident --
+  // right after clearing the board -- would quietly shadow a real one.
+  if (!rows.length) {
+    throw Object.assign(new Error('no hay nadie desplegado en este bando'), { status: 409 });
+  }
+
+  const id = randomUUID();
+  await pool.query(
+    `INSERT INTO war_saved_lineups (id, guild_id, side, name, members)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [id, GUILD_ID, side, String(name ?? '').trim() || 'Sin nombre', JSON.stringify(rows)],
+  );
+  return { id, members: rows.length };
+}
+
+/**
+ * Field a saved line-up again, and say honestly what could not come back.
+ *
+ * The roster drifts under a snapshot: people leave, get fielded on the other
+ * side, or the war fills up. Applying replaces this side's whole board inside
+ * one transaction -- half a line-up is not a line-up -- but each member is
+ * admitted one by one against today's rules, and the ones refused come back
+ * in the answer with their reason. Silently dropping them would read as the
+ * save having lost people.
+ */
+export async function applyLineup(id) {
+  const { rows } = await pool.query(
+    `SELECT side, members FROM war_saved_lineups WHERE id = $1 AND guild_id = $2`,
+    [id, GUILD_ID],
+  );
+  if (!rows.length) throw Object.assign(new Error('esa formacion no existe'), { status: 404 });
+
+  const { side, members } = rows[0];
+  await assertOpen(side);
+
+  const other = side === 'attack' ? 'defense' : 'attack';
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Who is still in the guild, and who is already spoken for elsewhere.
+    const roster = await client.query(
+      `SELECT id, name, is_active AS "isActive" FROM players WHERE guild_id = $1`,
+      [GUILD_ID],
+    );
+    const known = new Map(roster.rows.map((p) => [p.id, p]));
+    const elsewhere = new Set(
+      (
+        await client.query(
+          `SELECT player_id FROM war_deployments WHERE guild_id = $1 AND side = $2`,
+          [GUILD_ID, other],
+        )
+      ).rows.map((r) => r.player_id),
+    );
+
+    await client.query(`DELETE FROM war_deployments WHERE guild_id = $1 AND side = $2`, [
+      GUILD_ID,
+      side,
+    ]);
+
+    // The war's allowance is shared with the other side, so what is left is
+    // what the other board has not already spent.
+    let room = WAR_CAPACITY - elsewhere.size;
+    const perLane = Object.fromEntries(LANES.map((lane) => [lane, 0]));
+    const omitted = [];
+    let position = 0;
+
+    for (const member of Array.isArray(members) ? members : []) {
+      const who = known.get(member.playerId);
+      const label = who?.name ?? member.playerId;
+      if (!who || who.isActive === false) {
+        omitted.push({ playerId: member.playerId, name: label, reason: 'ya no está en el gremio' });
+        continue;
+      }
+      if (elsewhere.has(member.playerId)) {
+        omitted.push({
+          playerId: member.playerId,
+          name: label,
+          reason: `ya desplegado en ${other === 'attack' ? 'Ataque' : 'Defensa'}`,
+        });
+        continue;
+      }
+      if (!LANES.includes(member.lane) || perLane[member.lane] >= LANE_CAPACITY) {
+        omitted.push({ playerId: member.playerId, name: label, reason: 'su línea está llena' });
+        continue;
+      }
+      if (room <= 0) {
+        omitted.push({ playerId: member.playerId, name: label, reason: 'sin cupo en la guerra' });
+        continue;
+      }
+
+      await client.query(
+        `INSERT INTO war_deployments (guild_id, side, lane, player_id, position, unit_ids, build_id)
+         VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)`,
+        [
+          GUILD_ID,
+          side,
+          member.lane,
+          member.playerId,
+          position++,
+          JSON.stringify(Array.isArray(member.unitIds) ? member.unitIds : []),
+          member.buildId ?? null,
+        ],
+      );
+      perLane[member.lane]++;
+      room--;
+    }
+
+    await client.query('COMMIT');
+    return { side, applied: position, omitted };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+export async function deleteLineup(id) {
+  await pool.query(`DELETE FROM war_saved_lineups WHERE id = $1 AND guild_id = $2`, [id, GUILD_ID]);
+}
+
 export { EMPTY_LANE };

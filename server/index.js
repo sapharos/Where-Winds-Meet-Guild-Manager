@@ -43,6 +43,10 @@ import {
   addWarImage,
   removeWarImage,
   setContribution,
+  listLineups,
+  saveLineup,
+  applyLineup,
+  deleteLineup,
 } from './war.js';
 import {
   discordEnabled,
@@ -589,6 +593,25 @@ app.put('/api/war/strategies', requireAuth, requirePermission('war.edit'), asHan
 
 app.delete('/api/war/strategies/:id', requireAuth, requirePermission('war.edit'), asHandler(async (req, res) => {
   await deleteStrategy(req.params.id);
+  res.json({ ok: true });
+}));
+
+// Saved line-ups: the deployment of one side photographed under a name.
+// Readable by the guild like the strategies; writing them is arranging a war.
+app.get('/api/war/lineups', requireAuth, asHandler(async (_req, res) => {
+  res.json(await listLineups());
+}));
+
+app.post('/api/war/lineups', requireAuth, requirePermission('war.edit'), asHandler(async (req, res) => {
+  res.json(await saveLineup(req.body?.side, req.body?.name));
+}));
+
+app.post('/api/war/lineups/:id/apply', requireAuth, requirePermission('war.edit'), asHandler(async (req, res) => {
+  res.json(await applyLineup(req.params.id));
+}));
+
+app.delete('/api/war/lineups/:id', requireAuth, requirePermission('war.edit'), asHandler(async (req, res) => {
+  await deleteLineup(req.params.id);
   res.json({ ok: true });
 }));
 

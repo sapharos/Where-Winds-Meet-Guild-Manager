@@ -68,6 +68,21 @@ export interface TacticalUnit extends RoleTargets {
   notes?: string | null;
 }
 
+/**
+ * Una formación guardada: el despliegue de un bando, fotografiado con nombre.
+ *
+ * Es una instantánea y no filas vivas: el roster deriva por debajo, y aplicar
+ * una se encarga de la deriva en ese momento -- quien ya no está, quien pelea
+ * en el otro bando -- devolviendo a los omitidos con su motivo.
+ */
+export interface SavedLineup {
+  id: string;
+  side: WarSide;
+  name: string;
+  members: { playerId: string; lane: WarLane; unitIds?: string[]; buildId?: string | null }[];
+  createdAt: string;
+}
+
 export interface WarStrategy {
   id: string;
   side: WarSide;
