@@ -80,10 +80,12 @@ const AdminPanel: React.FC<Props> = ({
   const [vozSucia, setVozSucia] = useState(false);
   /** El panel de sonidos del servidor y qué sonido toca en cada aviso de guerra. */
   const [sonidos, setSonidos] = useState<DiscordSoundboardSound[]>([]);
-  const [cuerno, setCuerno] = useState<{ jungle: string | null; boss: string | null }>({
-    jungle: null,
-    boss: null,
-  });
+  const [cuerno, setCuerno] = useState<{
+    jungle: string | null;
+    boss: string | null;
+    /** Dónde suena. Vacío = todos los canales configurados. */
+    slots: string[];
+  }>({ jungle: null, boss: null, slots: [] });
   /**
    * Qué rol se está mirando en el teléfono, donde la matriz va de uno en uno.
    *
@@ -121,10 +123,9 @@ const AdminPanel: React.FC<Props> = ({
           );
           setSonidos(await api<DiscordSoundboardSound[]>('/discord/soundboard').catch(() => []));
           setCuerno(
-            await api<{ jungle: string | null; boss: string | null }>('/war/horn').catch(() => ({
-              jungle: null,
-              boss: null,
-            })),
+            await api<{ jungle: string | null; boss: string | null; slots: string[] }>(
+              '/war/horn',
+            ).catch(() => ({ jungle: null, boss: null, slots: [] })),
           );
         }
       }
@@ -251,15 +252,14 @@ const AdminPanel: React.FC<Props> = ({
     }
   };
 
-  /** Guarda al momento: elegir el sonido de un aviso ya es la decisión entera. */
-  const guardarCuerno = async (evento: 'jungle' | 'boss', soundId: string) => {
-    const siguiente = { ...cuerno, [evento]: soundId || null };
+  /** Guarda al momento: elegir un sonido o marcar un canal ya es la decisión entera. */
+  const guardarCuerno = async (cambio: Partial<typeof cuerno>) => {
+    const siguiente = { ...cuerno, ...cambio };
     setCuerno(siguiente);
     try {
-      setCuerno(await api<{ jungle: string | null; boss: string | null }>('/war/horn', {
-        method: 'PUT',
-        body: JSON.stringify(siguiente),
-      }));
+      setCuerno(
+        await api<typeof cuerno>('/war/horn', { method: 'PUT', body: JSON.stringify(siguiente) }),
+      );
       report('Cuerno de guerra guardado.');
     } catch (err) {
       report(err instanceof Error ? err.message : 'No se pudo guardar el cuerno', false);
@@ -903,7 +903,7 @@ const AdminPanel: React.FC<Props> = ({
                     <select
                       className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
                       value={cuerno[evento] ?? ''}
-                      onChange={(e) => void guardarCuerno(evento, e.target.value)}
+                      onChange={(e) => void guardarCuerno({ [evento]: e.target.value || null })}
                     >
                       <option value="">— apagado —</option>
                       {sonidos.map((s) => (
@@ -915,6 +915,40 @@ const AdminPanel: React.FC<Props> = ({
                     </select>
                   </label>
                 ))}
+              </div>
+            )}
+
+            {sonidos.length > 0 && (
+              <div className="mt-4">
+                <p className="text-[11px] uppercase tracking-wider text-slate-500 mb-1.5">
+                  Dónde suena
+                </p>
+                <p className="text-xs text-slate-500 mb-2">
+                  Marca los canales que deben recibir el aviso, automático o lanzado a mano. Sin
+                  ninguno marcado suena en todos los configurados.
+                </p>
+                <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-x-3">
+                  {VOICE_SLOT_LABELS.filter((l) => mapaVoz[l.slot]).map(({ slot, label }) => (
+                    <label
+                      key={slot}
+                      className="min-h-tap flex items-center gap-2.5 text-sm text-slate-300 cursor-pointer"
+                    >
+                      <input
+                        type="checkbox"
+                        className="w-4 h-4 accent-amber-600"
+                        checked={cuerno.slots.includes(slot)}
+                        onChange={() =>
+                          void guardarCuerno({
+                            slots: cuerno.slots.includes(slot)
+                              ? cuerno.slots.filter((s) => s !== slot)
+                              : [...cuerno.slots, slot],
+                          })
+                        }
+                      />
+                      {label}
+                    </label>
+                  ))}
+                </div>
               </div>
             )}
           </div>

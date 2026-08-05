@@ -93,9 +93,10 @@ const SONIDOS = [
   { id: '300000000000000002', name: 'Tambor de asalto', emoji: '🥁' },
   { id: '300000000000000003', name: 'Campana del boss', emoji: '🔔' },
 ];
-let cuerno: { jungle: string | null; boss: string | null } = {
+let cuerno: { jungle: string | null; boss: string | null; slots: string[] } = {
   jungle: '300000000000000001',
   boss: null,
+  slots: [],
 };
 
 const MIEMBROS_DISCORD: DiscordMember[] = [
@@ -225,7 +226,11 @@ const ESCRITURAS: [string, RegExp, Ruta][] = [
     return { channels: mapaVoz };
   }],
   ['PUT', /^\/war\/horn$/, (_m, _req, body) => {
-    cuerno = { jungle: body?.jungle ?? null, boss: body?.boss ?? null };
+    cuerno = {
+      jungle: body?.jungle ?? null,
+      boss: body?.boss ?? null,
+      slots: Array.isArray(body?.slots) ? body.slots : [],
+    };
     return cuerno;
   }],
   // El barrido de mentira: suena en todos menos en uno, para que la interfaz
@@ -247,7 +252,10 @@ const ESCRITURAS: [string, RegExp, Ruta][] = [
     if (!cuerno[event]) {
       return { error: 'ese aviso no tiene sonido configurado (Administración → Cuerno automático)' };
     }
-    const ids = [...new Set(Object.values(mapaVoz))];
+    const ranuras = cuerno.slots.length
+      ? cuerno.slots.filter((s) => mapaVoz[s])
+      : Object.keys(mapaVoz);
+    const ids = [...new Set(ranuras.map((s) => mapaVoz[s]))];
     const results = ids.map((channelId) => ({ channelId, ok: true }));
     return { played: results.length, results };
   }],

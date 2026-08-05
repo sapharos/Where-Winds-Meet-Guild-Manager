@@ -17,7 +17,7 @@ import { pool, GUILD_ID } from './db.js';
 import { currentWar } from './war.js';
 import { botEnabled, playSoundboardSound } from './discordBot.js';
 import { GatewayVoice } from './discordGateway.js';
-import { getVoiceChannels } from './voice.js';
+import { VOICE_SLOTS, getVoiceChannels } from './voice.js';
 
 const KEY = `war_horn:${GUILD_ID}`;
 
@@ -29,15 +29,27 @@ const JUNGLE_EVERY = 5 * MINUTE;
 const BOSS_AT = [6 * MINUTE, 16 * MINUTE];
 const WARN_BEFORE = MINUTE;
 
-/** { jungle: soundId | null, boss: soundId | null } */
+/**
+ * { jungle: soundId | null, boss: soundId | null, slots: string[] }
+ *
+ * `slots` dice en qué ranuras suena el aviso -- el mismo recorte para el
+ * automático y el manual. Vacío significa todos los canales configurados,
+ * que es además lo que reciben las configuraciones guardadas antes de que
+ * el recorte existiera.
+ */
 export async function getHorn() {
   const { rows } = await pool.query(`SELECT value FROM app_settings WHERE key = $1`, [KEY]);
-  if (!rows.length) return { jungle: null, boss: null };
+  const vacio = { jungle: null, boss: null, slots: [] };
+  if (!rows.length) return vacio;
   try {
     const parsed = JSON.parse(rows[0].value);
-    return { jungle: parsed.jungle ?? null, boss: parsed.boss ?? null };
+    return {
+      jungle: parsed.jungle ?? null,
+      boss: parsed.boss ?? null,
+      slots: Array.isArray(parsed.slots) ? parsed.slots : [],
+    };
   } catch {
-    return { jungle: null, boss: null };
+    return vacio;
   }
 }
 
@@ -47,6 +59,9 @@ export async function setHorn(config) {
     const value = config?.[event];
     limpio[event] = typeof value === 'string' && /^\d{5,25}$/.test(value) ? value : null;
   }
+  limpio.slots = (Array.isArray(config?.slots) ? config.slots : []).filter((s) =>
+    VOICE_SLOTS.includes(s),
+  );
   await pool.query(
     `INSERT INTO app_settings (key, value) VALUES ($1, $2)
        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
@@ -107,9 +122,15 @@ export async function warnEvent(type) {
     );
   }
   const channels = await getVoiceChannels();
-  const objetivo = [...new Set(Object.values(channels))];
+  // El recorte elegido en Administración; sin recorte, todos los configurados.
+  const ranuras = horn.slots.length
+    ? horn.slots.filter((s) => channels[s])
+    : Object.keys(channels);
+  const objetivo = [...new Set(ranuras.map((s) => channels[s]))];
   if (!objetivo.length) {
-    throw Object.assign(new Error('no hay canales de voz configurados'), { status: 409 });
+    throw Object.assign(new Error('ninguno de los canales del aviso está configurado'), {
+      status: 409,
+    });
   }
   return sweepSound(horn[type], objetivo);
 }
