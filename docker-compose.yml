@@ -35,6 +35,10 @@ services:
       # offered; the password form keeps working either way.
       DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID:-}
       DISCORD_CLIENT_SECRET: ${DISCORD_CLIENT_SECRET:-}
+      # The bot of that same application, for looking guild members up when
+      # linking them by hand. Empty just hides that feature.
+      DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN:-}
+      DISCORD_GUILD_ID: ${DISCORD_GUILD_ID:-}
       # The address members reach the app at, which is where Discord sends them
       # back. Must match the redirect URI registered with Discord exactly.
       PUBLIC_URL: ${PUBLIC_URL:-}

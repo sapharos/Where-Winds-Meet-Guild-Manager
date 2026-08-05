@@ -3,8 +3,18 @@ import { authService, api } from '../services/authService';
 import WeaponSets from './WeaponSets';
 import TablaAncha from './TablaAncha';
 import ScanImport from './ScanImport';
+import BuscadorDiscord from './BuscadorDiscord';
 import { Filas } from './Esqueleto';
-import { AuthUser, ManagedUser, PERMISSION_LABELS, PermissionCatalog, Player, UserRole, ROLE_LABELS } from '../types';
+import {
+  AuthUser,
+  DiscordMember,
+  ManagedUser,
+  PERMISSION_LABELS,
+  PermissionCatalog,
+  Player,
+  UserRole,
+  ROLE_LABELS,
+} from '../types';
 
 // Mirrors the server's LOCKED table so the boxes it will refuse to clear are
 // shown as fixed rather than silently springing back after a save.
@@ -54,6 +64,12 @@ const AdminPanel: React.FC<Props> = ({
   const [newPassword, setNewPassword] = useState('');
   const [newRole, setNewRole] = useState<UserRole>('member');
   const [requests, setRequests] = useState<Registration[]>([]);
+  /** Si el servidor tiene el bot configurado; sin él no se ofrece vincular. */
+  const [botDiscord, setBotDiscord] = useState(false);
+  /** La cuenta a la que se está eligiendo Discord, o null con el buscador cerrado. */
+  const [enlazando, setEnlazando] = useState<ManagedUser | null>(null);
+  /** El jugador elegido para crearle cuenta desde Discord. */
+  const [jugadorNuevo, setJugadorNuevo] = useState('');
   /**
    * Qué rol se está mirando en el teléfono, donde la matriz va de uno en uno.
    *
@@ -80,6 +96,7 @@ const AdminPanel: React.FC<Props> = ({
       if (canManageUsers) {
         setUsers(await authService.listUsers());
         setRequests(await api<Registration[]>('/registrations').catch(() => []));
+        setBotDiscord(await authService.discordBotStatus().then((s) => s.bot).catch(() => false));
       }
     } catch (err) {
       report(err instanceof Error ? err.message : 'No se pudo cargar la configuración', false);
@@ -170,6 +187,47 @@ const AdminPanel: React.FC<Props> = ({
       report('Usuario eliminado.');
     } catch (err) {
       report(err instanceof Error ? err.message : 'No se pudo eliminar la cuenta', false);
+    }
+  };
+
+  const vincularDiscord = async (user: ManagedUser, member: DiscordMember) => {
+    try {
+      await authService.linkDiscord(user.id, member);
+      setEnlazando(null);
+      setUsers(await authService.listUsers());
+      report(`Discord de ${user.username} enlazado a @${member.username}.`);
+    } catch (err) {
+      report(err instanceof Error ? err.message : 'No se pudo enlazar', false);
+    }
+  };
+
+  const desvincularDiscord = async (user: ManagedUser) => {
+    // Una cuenta creada desde Discord no tiene contraseña: quitarle el enlace
+    // es cerrarle la puerta del todo, y eso se dice antes, no se descubre.
+    if (
+      !window.confirm(
+        `¿Quitar el Discord de "${user.username}"? Si la cuenta no tiene contraseña, no podrá entrar hasta que se enlace de nuevo.`,
+      )
+    )
+      return;
+    try {
+      await authService.linkDiscord(user.id, null);
+      setUsers(await authService.listUsers());
+      report('Enlace de Discord retirado.');
+    } catch (err) {
+      report(err instanceof Error ? err.message : 'No se pudo desenlazar', false);
+    }
+  };
+
+  const crearDesdeDiscord = async (member: DiscordMember) => {
+    const jugador = players.find((p) => p.id === jugadorNuevo);
+    try {
+      await authService.createDiscordUser(jugadorNuevo, member);
+      setJugadorNuevo('');
+      setUsers(await authService.listUsers());
+      report(`Cuenta creada para ${jugador?.name ?? 'el miembro'}: entrará con el Discord @${member.username}.`);
+    } catch (err) {
+      report(err instanceof Error ? err.message : 'No se pudo crear la cuenta', false);
     }
   };
 
@@ -493,14 +551,67 @@ const AdminPanel: React.FC<Props> = ({
             </button>
           </form>
 
-          <TablaAncha aviso="Desliza para ver rol, estado y acciones">
-            <table className="w-full text-sm min-w-[560px]">
+          {botDiscord && (
+            <div className="mb-6 bg-slate-950/60 border border-slate-800 rounded-lg p-4">
+              <p className="text-sm text-slate-300 mb-1">
+                <i className="fa-brands fa-discord mr-2 text-[#8ea1ff]"></i>
+                Crear cuenta desde Discord
+              </p>
+              <p className="text-xs text-slate-500 mb-3">
+                Elige a quién del roster y búscalo en el servidor de Discord. La cuenta sale sin
+                contraseña y entra solo con su Discord, como las aprobadas por solicitud. Aquí no
+                hay prueba de que esa cuenta sea suya: la prueba eres tú.
+              </p>
+              <div className="grid md:grid-cols-2 gap-3">
+                <select
+                  className="bg-slate-950 border border-slate-800 rounded p-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
+                  value={jugadorNuevo}
+                  onChange={(e) => setJugadorNuevo(e.target.value)}
+                >
+                  <option value="">— Miembro del roster sin cuenta —</option>
+                  {players
+                    .filter((p) => !users.some((u) => u.playerId === p.id))
+                    .map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                </select>
+                {/* El buscador aparece al elegir jugador: buscar primero y
+                    elegir después invita a enlazar al revés. */}
+                {jugadorNuevo && <BuscadorDiscord onPick={(m) => void crearDesdeDiscord(m)} />}
+              </div>
+            </div>
+          )}
+
+          {enlazando && (
+            <div className="mb-4 bg-slate-950 border border-amber-800/60 rounded-lg p-4">
+              <div className="flex items-center justify-between gap-3 mb-3">
+                <p className="text-sm text-slate-300">
+                  Enlazar Discord a{' '}
+                  <span className="font-semibold text-slate-100">{enlazando.username}</span>
+                </p>
+                <button
+                  onClick={() => setEnlazando(null)}
+                  className="text-slate-500 hover:text-slate-300 p-1"
+                  aria-label="Cerrar el buscador"
+                >
+                  <i className="fa-solid fa-xmark"></i>
+                </button>
+              </div>
+              <BuscadorDiscord autoFocus onPick={(m) => void vincularDiscord(enlazando, m)} />
+            </div>
+          )}
+
+          <TablaAncha aviso="Desliza para ver rol, Discord, estado y acciones">
+            <table className="w-full text-sm min-w-[680px]">
               <thead>
                 <tr className="text-left text-slate-400">
                   <th className="p-2 border-b border-slate-800 font-semibold sticky left-0 bg-slate-900">
                     Usuario
                   </th>
                   <th className="p-2 border-b border-slate-800 font-semibold">Rol</th>
+                  <th className="p-2 border-b border-slate-800 font-semibold">Discord</th>
                   <th className="p-2 border-b border-slate-800 font-semibold">Estado</th>
                   <th className="p-2 border-b border-slate-800 font-semibold text-right">Acciones</th>
                 </tr>
@@ -536,6 +647,36 @@ const AdminPanel: React.FC<Props> = ({
                           );
                         })}
                       </select>
+                    </td>
+                    <td className="p-2 border-b border-slate-800/60 whitespace-nowrap">
+                      {user.discordId ? (
+                        <span className="text-xs text-[#8ea1ff]">
+                          <i className="fa-brands fa-discord mr-1.5"></i>
+                          {user.discordUsername ?? user.discordId}
+                          <button
+                            onClick={() => desvincularDiscord(user)}
+                            title="Quitar el enlace con Discord"
+                            className="ml-1.5 p-1 text-slate-500 hover:text-red-400 transition-all"
+                          >
+                            <i className="fa-solid fa-link-slash"></i>
+                          </button>
+                        </span>
+                      ) : botDiscord ? (
+                        <button
+                          onClick={() => setEnlazando(user)}
+                          className="text-xs py-1 px-2 rounded border border-slate-800 text-slate-400 hover:text-amber-500 transition-all"
+                        >
+                          <i className="fa-solid fa-link mr-1.5"></i>
+                          Enlazar
+                        </button>
+                      ) : (
+                        <span
+                          className="text-xs text-slate-600"
+                          title="Sin enlazar. Para enlazar desde aquí hace falta el bot de Discord configurado."
+                        >
+                          —
+                        </span>
+                      )}
                     </td>
                     <td className="p-2 border-b border-slate-800/60">
                       <span className={user.disabled ? 'text-slate-500' : 'text-emerald-400'}>

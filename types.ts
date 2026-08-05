@@ -403,6 +403,17 @@ export interface AuthUser {
 export interface ManagedUser extends AuthUser {
   disabled: boolean;
   createdAt?: string;
+  // Enlazado al entrar con Discord, o a mano por un líder desde el panel.
+  discordId?: string | null;
+  discordUsername?: string | null;
+}
+
+/** Un miembro del servidor de Discord, tal como lo devuelve el bot. */
+export interface DiscordMember {
+  id: string;
+  username: string;
+  globalName: string | null;
+  nick: string | null;
 }
 
 export interface PermissionCatalog {

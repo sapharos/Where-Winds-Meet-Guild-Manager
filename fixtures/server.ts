@@ -15,7 +15,16 @@
  * Sólo lo carga banco.html, que no entra en el build de producción.
  */
 
-import { Deployment, GuildRank, Player, PlayerBuild, WarSide, WeaponSet } from '../types';
+import {
+  Deployment,
+  DiscordMember,
+  GuildRank,
+  ManagedUser,
+  Player,
+  PlayerBuild,
+  WarSide,
+  WeaponSet,
+} from '../types';
 import * as fake from './guild';
 
 interface LineupGuardado {
@@ -36,7 +45,25 @@ interface Store {
   active: Record<WarSide, string | null>;
   locked: Record<WarSide, boolean>;
   current: ReturnType<typeof fake.board>['current'] | null;
+  usuarios: ManagedUser[];
 }
+
+/**
+ * El servidor de Discord inventado, para probar el vinculador del panel.
+ *
+ * Los apodos coinciden con nombres del roster falso a propósito: enlazar es
+ * reconocer a la misma persona en las dos listas, y eso es lo que hay que
+ * poder ensayar. El penúltimo no se parece a nadie, porque también hay que ver
+ * qué pasa al elegir a quien no corresponde.
+ */
+const MIEMBROS_DISCORD: DiscordMember[] = [
+  { id: '100000000000000001', username: 'meilin_zz', globalName: 'Mei Lin', nick: 'Mei Lin' },
+  { id: '100000000000000002', username: 'weichen88', globalName: 'Wei Chen', nick: 'Wei · Vanguardia' },
+  { id: '100000000000000003', username: 'jinwei.zhao', globalName: 'Jinwei', nick: 'Jinwei Zhao' },
+  { id: '100000000000000004', username: 'ruolan', globalName: null, nick: null },
+  { id: '100000000000000005', username: 'baihu_tiger', globalName: 'Bai Hu', nick: '白虎' },
+  { id: '100000000000000006', username: 'forastero', globalName: 'Un Forastero', nick: null },
+];
 
 const store: Store = {
   players: structuredClone(fake.players),
@@ -65,6 +92,20 @@ const store: Store = {
   active: { attack: 'st-1', defense: 'st-2' },
   locked: { attack: false, defense: false },
   current: null,
+  usuarios: [
+    { ...fake.session.user, disabled: false, createdAt: new Date().toISOString() },
+    // Una ya enlazada, para ver la columna con el enlace puesto y poder quitarlo.
+    {
+      id: 'u-2',
+      username: 'weichen88',
+      role: 'member',
+      playerId: 'p-2',
+      disabled: false,
+      createdAt: new Date().toISOString(),
+      discordId: '100000000000000002',
+      discordUsername: 'weichen88',
+    },
+  ],
 };
 
 const json = (body: unknown, status = 200) =>
@@ -77,7 +118,9 @@ const json = (body: unknown, status = 200) =>
 const LATENCIA = Number(new URLSearchParams(location.search).get('lat') ?? 180);
 const espera = () => new Promise((done) => setTimeout(done, LATENCIA));
 
-type Ruta = (m: RegExpMatchArray, req: Request, body: any) => unknown;
+// La URL entera va aparte del match: el patrón casa contra el pathname y hay
+// rutas (la búsqueda de Discord) que necesitan leer la query string.
+type Ruta = (m: RegExpMatchArray, req: Request, body: any, url: URL) => unknown;
 
 const GET: [RegExp, Ruta][] = [
   [/^\/auth\/me$/, () => fake.session],
@@ -109,7 +152,17 @@ const GET: [RegExp, Ruta][] = [
   [/^\/gear\/ceilings$/, () => []],
   [/^\/gear\/labels$/, () => []],
   [/^\/registrations$/, () => []],
-  [/^\/users$/, () => [{ ...fake.session.user, disabled: false, createdAt: new Date().toISOString() }]],
+  [/^\/users$/, () => store.usuarios],
+  [/^\/discord\/status$/, () => ({ bot: true })],
+  [/^\/discord\/members$/, (_m, _req, _body, url) => {
+    const q = (url.searchParams.get('q') ?? '').trim().toLowerCase();
+    if (!q) return [];
+    // Como el de verdad: por el principio del nombre, no por el medio.
+    const empieza = (s: string | null) => s !== null && s.toLowerCase().startsWith(q);
+    return MIEMBROS_DISCORD.filter(
+      (m) => empieza(m.username) || empieza(m.globalName) || empieza(m.nick),
+    ).slice(0, 10);
+  }],
   [
     /^\/permissions$/,
     () => ({
@@ -121,6 +174,33 @@ const GET: [RegExp, Ruta][] = [
 ];
 
 const ESCRITURAS: [string, RegExp, Ruta][] = [
+  ['PATCH', /^\/users\/([^/]+)\/discord$/, (m, _req, body) => {
+    store.usuarios = store.usuarios.map((u) =>
+      u.id === m[1]
+        ? {
+            ...u,
+            discordId: body?.discordId ?? null,
+            discordUsername: body?.discordId ? (body?.discordUsername ?? null) : null,
+          }
+        : u,
+    );
+    return { ok: true };
+  }],
+  ['POST', /^\/users\/discord$/, (_m, _req, body) => {
+    const username = String(body?.discordUsername ?? '');
+    const nuevo: ManagedUser = {
+      id: `u-${store.usuarios.length + 1}`,
+      username,
+      role: 'member',
+      playerId: body?.playerId ?? null,
+      disabled: false,
+      createdAt: new Date().toISOString(),
+      discordId: String(body?.discordId ?? ''),
+      discordUsername: username,
+    };
+    store.usuarios = [...store.usuarios, nuevo];
+    return nuevo;
+  }],
   ['PATCH', /^\/players\/([^/]+)\/flags$/, (m, _req, body) => {
     store.players = store.players.map((p) => (p.id === m[1] ? { ...p, ...body } : p));
     return { ok: true };
@@ -275,7 +355,8 @@ export function instalarServidorFalso(): void {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     if (!url.includes('/api/')) return real(input as RequestInfo, init);
 
-    const path = new URL(url, location.origin).pathname.replace(/^\/api/, '');
+    const entera = new URL(url, location.origin);
+    const path = entera.pathname.replace(/^\/api/, '');
     const method = (init?.method ?? 'GET').toUpperCase();
     const body = init?.body ? JSON.parse(init.body as string) : undefined;
 
@@ -285,7 +366,7 @@ export function instalarServidorFalso(): void {
       for (const [pattern, handler] of GET) {
         const found = path.match(pattern);
         if (found) {
-          const out = handler(found, input as Request, body);
+          const out = handler(found, input as Request, body, entera);
           return out === null ? json({ error: 'no existe' }, 404) : json(out);
         }
       }
@@ -293,7 +374,7 @@ export function instalarServidorFalso(): void {
       for (const [verb, pattern, handler] of ESCRITURAS) {
         if (verb !== method) continue;
         const found = path.match(pattern);
-        if (found) return json(handler(found, input as Request, body));
+        if (found) return json(handler(found, input as Request, body, entera));
       }
       // Cualquier otra escritura se acepta sin guardar nada. Es mentira, y por
       // eso lo dice en la consola: una pantalla que parece guardar y no guarda

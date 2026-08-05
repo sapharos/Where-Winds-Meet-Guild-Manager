@@ -1,5 +1,5 @@
 
-import { AuthUser, ManagedUser, PermissionCatalog, UserRole } from '../types';
+import { AuthUser, DiscordMember, ManagedUser, PermissionCatalog, UserRole } from '../types';
 
 const API = '/api';
 
@@ -51,6 +51,28 @@ export const authService = {
     api<{ ok: true }>(`/users/${id}`, { method: 'PATCH', body: JSON.stringify(changes) }),
 
   deleteUser: (id: string) => api<{ ok: true }>(`/users/${id}`, { method: 'DELETE' }),
+
+  /** Si el bot de Discord está configurado en el servidor; decide si el panel ofrece vincular. */
+  discordBotStatus: () => api<{ bot: boolean }>('/discord/status'),
+
+  searchDiscordMembers: (q: string) =>
+    api<DiscordMember[]>(`/discord/members?q=${encodeURIComponent(q)}`),
+
+  /** Enlaza (o con null desenlaza) el Discord de una cuenta existente. */
+  linkDiscord: (userId: string, member: DiscordMember | null) =>
+    api<{ ok: true }>(`/users/${userId}/discord`, {
+      method: 'PATCH',
+      body: JSON.stringify(
+        member ? { discordId: member.id, discordUsername: member.username } : { discordId: null },
+      ),
+    }),
+
+  /** Crea la cuenta de un jugador desde su Discord, sin flujo de aprobación. */
+  createDiscordUser: (playerId: string, member: DiscordMember) =>
+    api<ManagedUser>('/users/discord', {
+      method: 'POST',
+      body: JSON.stringify({ playerId, discordId: member.id, discordUsername: member.username }),
+    }),
 
   getPermissions: () => api<PermissionCatalog>('/permissions'),
 

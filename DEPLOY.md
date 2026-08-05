@@ -121,6 +121,31 @@ every existing session.
 Set `COOKIE_SECURE=true` once the app is served over HTTPS, so the cookie is
 never sent in the clear.
 
+## The Discord bot
+
+Optional, and separate from signing in with Discord. With `DISCORD_BOT_TOKEN`
+and `DISCORD_GUILD_ID` set, the **Administración** tab can search the guild's
+Discord server and link members to their accounts by hand — no sign-in round
+trip needed — and create passwordless accounts straight from a roster entry
+plus a Discord identity.
+
+Setting it up, once:
+
+1. In [discord.com/developers](https://discord.com/developers/applications),
+   open the same application used for signing in, go to **Bot**, and copy the
+   token. That is `DISCORD_BOT_TOKEN`.
+2. Invite the bot to the guild's Discord server (needs *Manage Server* there):
+   `https://discord.com/oauth2/authorize?client_id=<DISCORD_CLIENT_ID>&scope=bot%20applications.commands`
+   No permissions are requested; member search needs none.
+3. With developer mode on (User Settings → Advanced), right-click the server's
+   name and *Copy Server ID*. That is `DISCORD_GUILD_ID`.
+
+Linking by hand replaces the proof of ownership that the OAuth flow gives with
+the linker's own judgement, and a linked Discord signs straight in as that
+account — so the whole feature sits behind the *Gestionar usuarios* permission,
+and the panel shows both the server nickname and the global username before
+anything is saved.
+
 ## What this does not do yet
 
 **Last write wins.** Each save replaces a whole collection in one transaction, so

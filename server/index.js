@@ -59,6 +59,7 @@ import {
   approveRegistration,
   rejectRegistration,
 } from './discord.js';
+import { botEnabled, searchGuildMembers } from './discordBot.js';
 import {
   initAuth,
   hashPassword,
@@ -202,7 +203,8 @@ app.post('/api/registrations/:id/reject', requireAuth, requirePermission('users.
 
 app.get('/api/users', requireAuth, requirePermission('users.manage'), asHandler(async (_req, res) => {
   const { rows } = await pool.query(
-    `SELECT id, username, role, disabled, player_id AS "playerId", created_at AS "createdAt"
+    `SELECT id, username, role, disabled, player_id AS "playerId", created_at AS "createdAt",
+            discord_id AS "discordId", discord_username AS "discordUsername"
        FROM users WHERE guild_id = $1 ORDER BY username`,
     [GUILD_ID],
   );
@@ -347,6 +349,111 @@ app.delete('/api/users/:id', requireAuth, requirePermission('users.manage'), asH
   }
   await pool.query(`DELETE FROM users WHERE id = $1 AND guild_id = $2`, [id, GUILD_ID]);
   res.json({ ok: true });
+}));
+
+/* ------------------------------------------------------------- discord bot */
+
+// El ID de Discord es un snowflake: sólo dígitos. Validarlo aquí evita que un
+// nombre pegado por error en el campo equivocado acabe guardado como llave.
+const DISCORD_ID = /^\d{5,25}$/;
+
+app.get('/api/discord/status', requireAuth, requirePermission('users.manage'), (_req, res) => {
+  res.json({ bot: botEnabled() });
+});
+
+app.get('/api/discord/members', requireAuth, requirePermission('users.manage'), asHandler(async (req, res) => {
+  if (!botEnabled()) {
+    return res.status(503).json({ error: 'el bot de Discord no está configurado' });
+  }
+  const q = String(req.query.q ?? '').trim();
+  res.json(q ? await searchGuildMembers(q) : []);
+}));
+
+/**
+ * Vincular (o desvincular) el Discord de una cuenta existente, a mano.
+ *
+ * El camino normal sigue siendo que cada miembro entre con Discord y lo
+ * demuestre. Esto es el atajo del líder que ya sabe quién es quién: no hay
+ * prueba de propiedad, sólo su criterio, y por eso queda detrás del mismo
+ * permiso que crear y borrar cuentas. Lo que guarda es una llave de entrada --
+ * quien inicie sesión con ese Discord entra como esta cuenta.
+ */
+app.patch('/api/users/:id/discord', requireAuth, requirePermission('users.manage'), asHandler(async (req, res) => {
+  const { discordId, discordUsername } = req.body ?? {};
+  const { id } = req.params;
+
+  const { rows } = await pool.query(
+    `SELECT 1 FROM users WHERE id = $1 AND guild_id = $2`, [id, GUILD_ID],
+  );
+  if (!rows.length) return res.status(404).json({ error: 'no such user' });
+
+  if (discordId === null) {
+    await pool.query(
+      `UPDATE users SET discord_id = NULL, discord_username = NULL WHERE id = $1 AND guild_id = $2`,
+      [id, GUILD_ID],
+    );
+    return res.json({ ok: true });
+  }
+
+  if (!DISCORD_ID.test(String(discordId ?? ''))) {
+    return res.status(400).json({ error: 'discordId must be a Discord snowflake' });
+  }
+  try {
+    await pool.query(
+      `UPDATE users SET discord_id = $1, discord_username = $2 WHERE id = $3 AND guild_id = $4`,
+      [String(discordId), String(discordUsername ?? '').trim() || null, id, GUILD_ID],
+    );
+  } catch (err) {
+    if (err.code === '23505') {
+      return res.status(409).json({ error: 'ese Discord ya está enlazado a otra cuenta' });
+    }
+    throw err;
+  }
+  res.json({ ok: true });
+}));
+
+/**
+ * Crear la cuenta de un jugador directamente desde su identidad de Discord,
+ * sin que pase por el flujo de reclamar y aprobar. La cuenta sale igual que
+ * una aprobada: sin contraseña, sólo entra con Discord, y con el rol más bajo
+ * -- subirlo después es un cambio normal en la tabla de cuentas.
+ */
+app.post('/api/users/discord', requireAuth, requirePermission('users.manage'), asHandler(async (req, res) => {
+  const { playerId, discordId, discordUsername } = req.body ?? {};
+  if (!DISCORD_ID.test(String(discordId ?? ''))) {
+    return res.status(400).json({ error: 'discordId must be a Discord snowflake' });
+  }
+  const username = String(discordUsername ?? '').trim();
+  if (!username) return res.status(400).json({ error: 'discordUsername required' });
+
+  const player = await pool.query(
+    `SELECT 1 FROM players WHERE guild_id = $1 AND id = $2`, [GUILD_ID, playerId],
+  );
+  if (!player.rows.length) return res.status(404).json({ error: 'no such member' });
+
+  const taken = await pool.query(
+    `SELECT username FROM users WHERE guild_id = $1 AND player_id = $2`, [GUILD_ID, playerId],
+  );
+  if (taken.rows.length) {
+    return res.status(409).json({ error: `ese miembro ya tiene la cuenta "${taken.rows[0].username}"` });
+  }
+
+  const id = randomUUID();
+  try {
+    // Sin contraseña: '-' no es el hash de nada, así que el formulario clásico
+    // nunca podrá acertar. Es el mismo criterio que la aprobación de registro.
+    await pool.query(
+      `INSERT INTO users (id, guild_id, username, password_hash, role, player_id, discord_id, discord_username)
+       VALUES ($1, $2, $3, '-', 'member', $4, $5, $6)`,
+      [id, GUILD_ID, username, playerId, String(discordId), username],
+    );
+  } catch (err) {
+    if (err.code === '23505') {
+      return res.status(409).json({ error: 'ya existe una cuenta con ese nombre o Discord' });
+    }
+    throw err;
+  }
+  res.status(201).json({ id, username, role: 'member' });
 }));
 
 /* ------------------------------------------------------------ permissions */
