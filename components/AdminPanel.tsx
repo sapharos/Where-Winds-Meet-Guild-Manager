@@ -27,6 +27,7 @@ import {
  */
 const RANURAS_VOZ: { slot: string; label: string }[] = [
   { slot: 'general', label: 'Reunión general' },
+  { slot: 'leaders', label: 'Líderes de línea' },
   { slot: 'attack', label: 'Bando · Ataque' },
   { slot: 'defense', label: 'Bando · Defensa' },
   ...WAR_LANES.map((l) => ({ slot: `attack:${l.id}`, label: `Ataque · ${l.label}` })),

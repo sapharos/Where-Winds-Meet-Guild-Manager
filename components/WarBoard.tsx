@@ -468,7 +468,7 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit, canVo
    * voz (Discord no lo cuenta por REST), así que el recuento de después es
    * toda la verdad disponible.
    */
-  const moverVoz = async (mode: 'general' | 'sides' | 'lanes') => {
+  const moverVoz = async (mode: 'general' | 'sides' | 'lanes' | 'leaders') => {
     setMoviendo(true);
     setError(null);
     try {
@@ -490,6 +490,20 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit, canVo
       setError(err instanceof Error ? err.message : 'No se pudo mover a nadie');
     } finally {
       setMoviendo(false);
+    }
+  };
+
+  /** Nombrar o destituir al que habla por la línea. El marcador es del bando visible. */
+  const toggleLider = async (playerId: string, actual: boolean) => {
+    setError(null);
+    try {
+      await api(`/war/deployments/${side}/${playerId}/leader`, {
+        method: 'PUT',
+        body: JSON.stringify({ leader: !actual }),
+      });
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo cambiar el liderazgo');
     }
   };
 
@@ -598,6 +612,7 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit, canVo
                       { mode: 'general', icon: 'fa-users', label: 'Reunir en el canal general' },
                       { mode: 'sides', icon: 'fa-people-arrows', label: 'Separar por bando' },
                       { mode: 'lanes', icon: 'fa-diagram-project', label: 'Repartir a las líneas' },
+                      { mode: 'leaders', icon: 'fa-crown', label: 'Reunir líderes en su canal' },
                     ] as const
                   ).map(({ mode, icon, label }) => (
                     <button
@@ -955,7 +970,15 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit, canVo
                     >
                       <div className="flex items-center justify-between gap-2">
                         <div className="min-w-0">
-                          <p className="text-sm text-slate-100 truncate">{p.name}</p>
+                          <p className="text-sm text-slate-100 truncate">
+                            {here.find((d) => d.playerId === p.id)?.isLaneLeader && (
+                              <i
+                                className="fa-solid fa-crown text-amber-400 text-[10px] mr-1.5"
+                                title="Líder de línea"
+                              ></i>
+                            )}
+                            {p.name}
+                          </p>
                           <p className="text-[10px] text-slate-500 flex items-center gap-1.5">
                             {rolesOf(p).map((r) => (
                               <span key={r} className={ROLE_TEXT[r]} title={ROLE_NAMES[r]}>
@@ -1191,6 +1214,28 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit, canVo
                 );
               })}
             </div>
+
+            {suya && (
+              <div className="mt-4 pt-3 border-t border-slate-800">
+                {/* El liderazgo vive aquí y no en la tarjeta: es una decisión
+                    de mando, no un ajuste frecuente, y la corona en la tarjeta
+                    ya dice quién lo tiene. */}
+                <button
+                  onClick={() => {
+                    void toggleLider(p.id, Boolean(suya.isLaneLeader));
+                    setAbierto(null);
+                  }}
+                  className="w-full min-h-tap flex items-center gap-3 px-3 -mx-1 rounded-md text-left text-slate-200 hover:bg-slate-800/60 transition-colors duration-micro"
+                >
+                  <i
+                    className={`fa-solid fa-crown w-5 text-center ${
+                      suya.isLaneLeader ? 'text-slate-500' : 'text-amber-400'
+                    }`}
+                  ></i>
+                  {suya.isLaneLeader ? 'Quitar el liderazgo de línea' : 'Nombrar líder de la línea'}
+                </button>
+              </div>
+            )}
 
             {mine.length > 1 && (
               <div className="mt-4 pt-3 border-t border-slate-800">

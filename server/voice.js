@@ -20,9 +20,10 @@ import { moveToVoice } from './discordBot.js';
 
 const KEY = `war_voice:${GUILD_ID}`;
 
-/** Las ranuras válidas: general, cada bando, y bando:línea. */
+/** Las ranuras válidas: general, líderes, cada bando, y bando:línea. */
 export const VOICE_SLOTS = [
   'general',
+  'leaders',
   ...SIDES,
   ...SIDES.flatMap((side) => LANES.map((lane) => `${side}:${lane}`)),
 ];
@@ -64,13 +65,15 @@ export async function deployVoice(mode) {
   const targetOf = (d) =>
     mode === 'general'
       ? channels.general
-      : mode === 'sides'
-        ? channels[d.side]
-        : channels[`${d.side}:${d.lane}`];
+      : mode === 'leaders'
+        ? channels.leaders
+        : mode === 'sides'
+          ? channels[d.side]
+          : channels[`${d.side}:${d.lane}`];
 
-  const { rows: deployed } = await pool.query(
+  const { rows } = await pool.query(
     `SELECT d.side, d.lane, d.player_id AS "playerId", p.name,
-            u.discord_id AS "discordId"
+            d.is_lane_leader AS "isLaneLeader", u.discord_id AS "discordId"
        FROM war_deployments d
        JOIN players p ON p.guild_id = d.guild_id AND p.id = d.player_id
        LEFT JOIN users u ON u.guild_id = d.guild_id AND u.player_id = d.player_id
@@ -78,6 +81,9 @@ export async function deployVoice(mode) {
       ORDER BY d.side, d.lane, p.name`,
     [GUILD_ID],
   );
+  // Reunir líderes mueve sólo a los líderes y deja al resto donde está: es la
+  // reunión de mandos en mitad de la batalla, no un toque de retirada.
+  const deployed = mode === 'leaders' ? rows.filter((d) => d.isLaneLeader) : rows;
 
   let moved = 0;
   const skipped = [];

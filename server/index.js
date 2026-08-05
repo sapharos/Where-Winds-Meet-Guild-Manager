@@ -26,6 +26,7 @@ import {
   place,
   setUnits,
   setBuild,
+  setLaneLeader,
   clearSide,
   listStrategies,
   saveStrategy,
@@ -395,8 +396,8 @@ app.post('/api/war/voice/move', requireAuth, requirePermission('war.voice'), asH
     return res.status(503).json({ error: 'el bot de Discord no está configurado' });
   }
   const mode = req.body?.mode;
-  if (!['general', 'sides', 'lanes'].includes(mode)) {
-    return res.status(400).json({ error: 'mode must be general, sides or lanes' });
+  if (!['general', 'sides', 'lanes', 'leaders'].includes(mode)) {
+    return res.status(400).json({ error: 'mode must be general, sides, lanes or leaders' });
   }
   res.json(await deployVoice(mode));
 }));
@@ -654,6 +655,10 @@ app.delete('/api/war/deployments/:side', requireAuth, requirePermission('war.edi
 // A unit is a job, a lane is a position: setting one must never clear the other.
 app.put('/api/war/deployments/:side/:playerId/units', requireAuth, requirePermission('war.edit'), asHandler(async (req, res) => {
   res.json(await setUnits(req.params.side, req.params.playerId, req.body?.units ?? []));
+}));
+
+app.put('/api/war/deployments/:side/:playerId/leader', requireAuth, requirePermission('war.edit'), asHandler(async (req, res) => {
+  res.json(await setLaneLeader(req.params.side, req.params.playerId, req.body?.leader));
 }));
 
 app.put('/api/war/deployments/:side/:playerId/build', requireAuth, requirePermission('war.edit'), asHandler(async (req, res) => {

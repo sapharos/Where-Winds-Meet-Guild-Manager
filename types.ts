@@ -47,6 +47,8 @@ export interface Deployment {
   // Which of their builds they are meant to bring to this war. Unset means the
   // one they usually play.
   buildId?: string | null;
+  // Quien habla por la línea. Puede haber varios por línea a propósito.
+  isLaneLeader?: boolean;
 }
 
 export interface RoleTargets {
@@ -79,7 +81,13 @@ export interface SavedLineup {
   id: string;
   side: WarSide;
   name: string;
-  members: { playerId: string; lane: WarLane; unitIds?: string[]; buildId?: string | null }[];
+  members: {
+    playerId: string;
+    lane: WarLane;
+    unitIds?: string[];
+    buildId?: string | null;
+    isLaneLeader?: boolean;
+  }[];
   createdAt: string;
 }
 

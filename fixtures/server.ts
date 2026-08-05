@@ -68,6 +68,7 @@ const CANALES_VOZ = [
   { id: '200000000000000008', name: 'Defensa · Centro' },
   { id: '200000000000000009', name: 'Defensa · Derecha' },
   { id: '200000000000000010', name: 'Taberna' },
+  { id: '200000000000000011', name: 'Líderes' },
 ];
 
 // Preconfigurado, para que la Sala de Guerra enseñe el botón de voz sin pasar
@@ -75,6 +76,7 @@ const CANALES_VOZ = [
 // "canal sin configurar".
 let mapaVoz: Record<string, string> = {
   general: '200000000000000001',
+  leaders: '200000000000000011',
   attack: '200000000000000002',
   defense: '200000000000000003',
   'attack:left': '200000000000000004',
@@ -212,20 +214,28 @@ const ESCRITURAS: [string, RegExp, Ruta][] = [
   // El reparto de mentira: mueve a los que tienen "Discord" (los vinculados en
   // usuarios) y deja fuera al resto con su motivo, que es la parte de la
   // respuesta que la interfaz tiene que saber pintar.
-  ['POST', /^\/war\/voice\/move$/, () => {
+  ['PUT', /^\/war\/deployments\/([^/]+)\/([^/]+)\/leader$/, (m, _req, body) => {
+    store.deployments = store.deployments.map((d) =>
+      d.side === m[1] && d.playerId === m[2] ? { ...d, isLaneLeader: Boolean(body?.leader) } : d,
+    );
+    return { leader: Boolean(body?.leader) };
+  }],
+  ['POST', /^\/war\/voice\/move$/, (_m, _req, body) => {
     const conDiscord = new Set(
       store.usuarios.filter((u) => u.discordId && u.playerId).map((u) => u.playerId),
     );
     const nombres = new Map(store.players.map((p) => [p.id, p.name]));
+    const objetivo =
+      body?.mode === 'leaders' ? store.deployments.filter((d) => d.isLaneLeader) : store.deployments;
     let moved = 0;
     const skipped: { name: string; reason: string }[] = [];
-    for (const d of store.deployments) {
+    for (const d of objetivo) {
       const name = nombres.get(d.playerId) ?? d.playerId;
       if (!conDiscord.has(d.playerId)) skipped.push({ name, reason: 'sin Discord vinculado' });
       else if (moved % 5 === 4) skipped.push({ name, reason: 'no está en voz' });
       else moved++;
     }
-    return { total: store.deployments.length, moved, skipped };
+    return { total: objetivo.length, moved, skipped };
   }],
   ['PATCH', /^\/users\/([^/]+)\/player$/, (m, _req, body) => {
     store.usuarios = store.usuarios.map((u) =>

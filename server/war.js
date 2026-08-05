@@ -13,7 +13,7 @@ const valid = (side, lane) => SIDES.includes(side) && LANES.includes(lane);
 export async function getDeployments() {
   const { rows } = await pool.query(
     `SELECT side, lane, player_id AS "playerId", unit_ids AS "unitIds",
-            build_id AS "buildId", position
+            build_id AS "buildId", position, is_lane_leader AS "isLaneLeader"
        FROM war_deployments WHERE guild_id = $1 ORDER BY side, lane, position`,
     [GUILD_ID],
   );
@@ -42,6 +42,26 @@ export async function setUnits(side, playerId, unitIds) {
   );
   if (!rowCount) throw Object.assign(new Error('ese miembro no esta desplegado'), { status: 409 });
   return { units: clean };
+}
+
+/**
+ * Marca o desmarca a un desplegado como líder de su línea.
+ *
+ * El marcador viaja con la persona si luego cambia de línea: quien manda no
+ * deja de mandar por moverse, y si el traslado lo degrada, quitárselo es un
+ * clic. Varios líderes en la misma línea se permiten a conciencia.
+ */
+export async function setLaneLeader(side, playerId, leader) {
+  if (!SIDES.includes(side)) throw Object.assign(new Error('unknown side'), { status: 400 });
+  await assertOpen(side);
+
+  const { rowCount } = await pool.query(
+    `UPDATE war_deployments SET is_lane_leader = $1
+      WHERE guild_id = $2 AND side = $3 AND player_id = $4`,
+    [Boolean(leader), GUILD_ID, side, playerId],
+  );
+  if (!rowCount) throw Object.assign(new Error('ese miembro no esta desplegado'), { status: 409 });
+  return { leader: Boolean(leader) };
 }
 
 /**
@@ -748,7 +768,7 @@ export async function saveLineup(side, name) {
 
   const { rows } = await pool.query(
     `SELECT player_id AS "playerId", lane, unit_ids AS "unitIds",
-            build_id AS "buildId", position
+            build_id AS "buildId", position, is_lane_leader AS "isLaneLeader"
        FROM war_deployments WHERE guild_id = $1 AND side = $2
       ORDER BY lane, position`,
     [GUILD_ID, side],
@@ -845,8 +865,8 @@ export async function applyLineup(id) {
       }
 
       await client.query(
-        `INSERT INTO war_deployments (guild_id, side, lane, player_id, position, unit_ids, build_id)
-         VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)`,
+        `INSERT INTO war_deployments (guild_id, side, lane, player_id, position, unit_ids, build_id, is_lane_leader)
+         VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8)`,
         [
           GUILD_ID,
           side,
@@ -855,6 +875,8 @@ export async function applyLineup(id) {
           position++,
           JSON.stringify(Array.isArray(member.unitIds) ? member.unitIds : []),
           member.buildId ?? null,
+          // Las fotos de antes de que existieran líderes vuelven sin ninguno.
+          Boolean(member.isLaneLeader),
         ],
       );
       perLane[member.lane]++;

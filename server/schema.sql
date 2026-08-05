@@ -335,6 +335,12 @@ END $$;
 -- should fall back to whatever they usually play, not break the board.
 ALTER TABLE war_deployments ADD COLUMN IF NOT EXISTS build_id TEXT;
 
+-- Who speaks for the lane. A flag on the deployment rather than a table of its
+-- own: leading here is a property of being fielded, and leaves the board with
+-- the member. Several per lane are allowed on purpose -- a lane with two
+-- shot-callers is the guild's business, not the schema's.
+ALTER TABLE war_deployments ADD COLUMN IF NOT EXISTS is_lane_leader BOOLEAN NOT NULL DEFAULT false;
+
 CREATE TABLE IF NOT EXISTS war_strategies (
   id          TEXT PRIMARY KEY,
   guild_id    TEXT NOT NULL REFERENCES guilds(id) ON DELETE CASCADE,
