@@ -95,6 +95,15 @@ const AdminPanel: React.FC<Props> = ({
    * rol que de verdad se ajusta.
    */
   const [rolElegido, setRolElegido] = useState<string | null>(null);
+  /**
+   * Qué sección de Administración se está mirando.
+   *
+   * Eran seis secciones apiladas y llegar a la última era recorrer la página
+   * entera con el pulgar. Una a la vez, como las pestañas principales: el
+   * trabajo real aquí es siempre sobre una sola -- ajustar permisos, vincular
+   * cuentas, elegir sonidos -- y las demás sólo estorban mientras tanto.
+   */
+  const [seccion, setSeccion] = useState<string | null>(null);
 
   const report = (text: string, ok = true) => setMessage({ text, ok });
 
@@ -326,6 +335,20 @@ const AdminPanel: React.FC<Props> = ({
     </section>
   );
 
+  /** Las pestañas que este visitante puede usar; la primera es la de llegada. */
+  const secciones = [
+    ...(canScan ? [{ id: 'escaneo', label: 'Escaneo', icon: 'fa-file-import', badge: 0 }] : []),
+    { id: 'permisos', label: 'Permisos', icon: 'fa-list-check', badge: 0 },
+    ...(canManageUsers
+      ? [{ id: 'cuentas', label: 'Cuentas', icon: 'fa-users-gear', badge: requests.length }]
+      : []),
+    ...(canManageUsers && botDiscord
+      ? [{ id: 'voz', label: 'Voz y cuerno', icon: 'fa-headset', badge: 0 }]
+      : []),
+    { id: 'armas', label: 'Conjuntos de armas', icon: 'fa-khanda', badge: 0 },
+  ];
+  const activa = secciones.some((s) => s.id === seccion) ? seccion : secciones[0].id;
+
   if (!catalog) {
     return (
       <div className="space-y-6">
@@ -359,7 +382,30 @@ const AdminPanel: React.FC<Props> = ({
 
   return (
     <div className="space-y-6">
-      {escaneo}
+      {/* Como la navegación principal: pastillas, y desliza si no caben. */}
+      <nav className="overflow-x-auto no-bar">
+        <div className="flex gap-1 w-max bg-slate-950 p-1 rounded-lg border border-slate-800">
+          {secciones.map((s) => (
+            <button
+              key={s.id}
+              onClick={() => setSeccion(s.id)}
+              className={`px-4 py-2 rounded-md text-sm font-semibold transition-all flex items-center gap-2 whitespace-nowrap ${
+                activa === s.id ? 'bg-amber-700 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'
+              }`}
+            >
+              <i className={`fa-solid ${s.icon}`}></i>
+              {s.label}
+              {/* Las solicitudes pendientes se anuncian desde fuera: si sólo
+                  se ven al entrar en Cuentas, esperan a que alguien pase. */}
+              {s.badge > 0 && (
+                <span className="text-[11px] bg-amber-500 text-slate-950 font-bold rounded-full px-1.5 tabular-nums">
+                  {s.badge}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+      </nav>
 
       {message && (
         <div
@@ -374,6 +420,9 @@ const AdminPanel: React.FC<Props> = ({
         </div>
       )}
 
+      {activa === 'escaneo' && escaneo}
+
+      {activa === 'permisos' && (
       <section className="bg-slate-900/60 border border-slate-800 rounded-xl p-6">
         <div className="flex items-center justify-between mb-1 gap-4 flex-wrap">
           <h2 className="cinzel text-2xl font-bold text-amber-500">Permisos por rol</h2>
@@ -535,8 +584,9 @@ const AdminPanel: React.FC<Props> = ({
           </table>
         </TablaAncha>
       </section>
+      )}
 
-      {canManageUsers && requests.length > 0 && (
+      {activa === 'cuentas' && canManageUsers && requests.length > 0 && (
         <section className="bg-slate-900/60 border border-amber-800/60 rounded-xl p-6">
           <h2 className="cinzel text-2xl font-bold text-amber-500 mb-1">
             Solicitudes de acceso
@@ -582,9 +632,9 @@ const AdminPanel: React.FC<Props> = ({
         </section>
       )}
 
-      <WeaponSets canEdit={canManageBuilds} onSaved={onWeaponSetsChanged} />
+      {activa === 'armas' && <WeaponSets canEdit={canManageBuilds} onSaved={onWeaponSetsChanged} />}
 
-      {canManageUsers && (
+      {activa === 'cuentas' && canManageUsers && (
         <section className="bg-slate-900/60 border border-slate-800 rounded-xl p-6">
           <h2 className="cinzel text-2xl font-bold text-amber-500 mb-5">Cuentas</h2>
 
@@ -814,7 +864,7 @@ const AdminPanel: React.FC<Props> = ({
         </section>
       )}
 
-      {canManageUsers && botDiscord && (
+      {activa === 'voz' && canManageUsers && botDiscord && (
         <section className="bg-slate-900/60 border border-slate-800 rounded-xl p-6">
           <div className="flex items-center justify-between mb-1 gap-4 flex-wrap">
             <h2 className="cinzel text-2xl font-bold text-amber-500">Canales de voz de guerra</h2>
