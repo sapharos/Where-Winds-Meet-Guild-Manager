@@ -87,6 +87,17 @@ let mapaVoz: Record<string, string> = {
   'defense:right': '200000000000000009',
 };
 
+/** El panel de sonidos inventado y el cuerno configurado a medias. */
+const SONIDOS = [
+  { id: '300000000000000001', name: 'Cuerno de guerra', emoji: '📯' },
+  { id: '300000000000000002', name: 'Tambor de asalto', emoji: '🥁' },
+  { id: '300000000000000003', name: 'Campana del boss', emoji: '🔔' },
+];
+let cuerno: { jungle: string | null; boss: string | null } = {
+  jungle: '300000000000000001',
+  boss: null,
+};
+
 const MIEMBROS_DISCORD: DiscordMember[] = [
   { id: '100000000000000001', username: 'meilin_zz', globalName: 'Mei Lin', nick: 'Mei Lin' },
   { id: '100000000000000002', username: 'weichen88', globalName: 'Wei Chen', nick: 'Wei · Vanguardia' },
@@ -186,7 +197,9 @@ const GET: [RegExp, Ruta][] = [
   [/^\/users$/, () => store.usuarios],
   [/^\/discord\/status$/, () => ({ bot: true })],
   [/^\/discord\/voice-channels$/, () => CANALES_VOZ],
+  [/^\/discord\/soundboard$/, () => SONIDOS],
   [/^\/war\/voice-channels$/, () => ({ bot: true, channels: mapaVoz })],
+  [/^\/war\/horn$/, () => cuerno],
   [/^\/discord\/members$/, (_m, _req, _body, url) => {
     const q = (url.searchParams.get('q') ?? '').trim().toLowerCase();
     if (!q) return [];
@@ -210,6 +223,22 @@ const ESCRITURAS: [string, RegExp, Ruta][] = [
   ['PUT', /^\/war\/voice-channels$/, (_m, _req, body) => {
     mapaVoz = body?.channels ?? {};
     return { channels: mapaVoz };
+  }],
+  ['PUT', /^\/war\/horn$/, (_m, _req, body) => {
+    cuerno = { jungle: body?.jungle ?? null, boss: body?.boss ?? null };
+    return cuerno;
+  }],
+  // El barrido de mentira: suena en todos menos en uno, para que la interfaz
+  // tenga que pintar también el fallo con su motivo.
+  ['POST', /^\/war\/horn\/play$/, (_m, _req, body) => {
+    const slots: string[] = Array.isArray(body?.slots) ? body.slots : [];
+    const ids = [...new Set(slots.map((s) => mapaVoz[s]).filter(Boolean))];
+    const results = ids.map((channelId, at) =>
+      at === ids.length - 1 && ids.length > 2
+        ? { channelId, ok: false, reason: 'no se pudo entrar (¿permiso de Conectar?)' }
+        : { channelId, ok: true },
+    );
+    return { played: results.filter((r) => r.ok).length, results };
   }],
   // El reparto de mentira: mueve a los que tienen "Discord" (los vinculados en
   // usuarios) y deja fuera al resto con su motivo, que es la parte de la

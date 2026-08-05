@@ -1,0 +1,157 @@
+/**
+ * El cuerno de guerra: un sonido del panel, canal por canal.
+ *
+ * Un bot sólo puede ocupar un canal de voz a la vez, así que "sonar en todos"
+ * es un barrido: entra, suena, salta al siguiente. A un par de segundos por
+ * canal las seis líneas se recorren en menos de quince, que para un aviso con
+ * un minuto de antelación sobra.
+ *
+ * La mitad automática vive aquí también: la guerra dura treinta minutos, la
+ * jungla vuelve cada cinco y el boss llega al sexto y al decimosexto -- el
+ * mismo calendario que pintan los relojes de la Sala de Guerra, calculado
+ * desde el mismo startedAt. El planificador mira cada pocos segundos si toca
+ * avisar y dispara el barrido un minuto antes de cada evento.
+ */
+
+import { pool, GUILD_ID } from './db.js';
+import { currentWar } from './war.js';
+import { botEnabled, playSoundboardSound } from './discordBot.js';
+import { GatewayVoice } from './discordGateway.js';
+import { getVoiceChannels } from './voice.js';
+
+const KEY = `war_horn:${GUILD_ID}`;
+
+const MINUTE = 60_000;
+/** El calendario de los relojes, duplicado a conciencia: components/WarTimers.tsx
+    lo dibuja y esto lo hace sonar; si el juego cambia los tiempos, son dos sitios. */
+const WAR_LENGTH = 30 * MINUTE;
+const JUNGLE_EVERY = 5 * MINUTE;
+const BOSS_AT = [6 * MINUTE, 16 * MINUTE];
+const WARN_BEFORE = MINUTE;
+
+/** { jungle: soundId | null, boss: soundId | null } */
+export async function getHorn() {
+  const { rows } = await pool.query(`SELECT value FROM app_settings WHERE key = $1`, [KEY]);
+  if (!rows.length) return { jungle: null, boss: null };
+  try {
+    const parsed = JSON.parse(rows[0].value);
+    return { jungle: parsed.jungle ?? null, boss: parsed.boss ?? null };
+  } catch {
+    return { jungle: null, boss: null };
+  }
+}
+
+export async function setHorn(config) {
+  const limpio = {};
+  for (const event of ['jungle', 'boss']) {
+    const value = config?.[event];
+    limpio[event] = typeof value === 'string' && /^\d{5,25}$/.test(value) ? value : null;
+  }
+  await pool.query(
+    `INSERT INTO app_settings (key, value) VALUES ($1, $2)
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+    [KEY, JSON.stringify(limpio)],
+  );
+  return limpio;
+}
+
+/** Un barrido cada vez: dos cuernos entrelazados se pisarían los saltos. */
+let barriendo = false;
+
+/**
+ * Suena `soundId` en cada canal, en orden, y cuenta el resultado.
+ * Devuelve { played, results: [{ channelId, ok, reason? }] }.
+ */
+export async function sweepSound(soundId, channelIds) {
+  if (barriendo) {
+    throw Object.assign(new Error('ya hay un barrido de sonido en marcha'), { status: 409 });
+  }
+  barriendo = true;
+  const results = [];
+  const gateway = new GatewayVoice();
+  try {
+    await gateway.connect();
+    for (const channelId of channelIds) {
+      if (!(await gateway.join(channelId))) {
+        results.push({ channelId, ok: false, reason: 'no se pudo entrar (¿permiso de Conectar?)' });
+        continue;
+      }
+      const out = await playSoundboardSound(channelId, soundId);
+      results.push({ channelId, ok: out.played, reason: out.reason });
+      // Un respiro antes de saltar: que el sonido arranque donde estamos
+      // antes de que el bot desaparezca hacia el siguiente canal.
+      await new Promise((done) => setTimeout(done, 1200));
+    }
+    await gateway.disconnect();
+  } finally {
+    barriendo = false;
+  }
+  return { played: results.filter((r) => r.ok).length, results };
+}
+
+/* ------------------------------------------------------- el automático */
+
+/** Los eventos de una guerra, como instantes absolutos desde su comienzo. */
+function schedule(startedAt) {
+  // pg devuelve la fecha como objeto Date; el cliente REST, como texto.
+  const began = new Date(startedAt).getTime();
+  const events = [];
+  for (let at = JUNGLE_EVERY; at <= WAR_LENGTH; at += JUNGLE_EVERY) {
+    events.push({ key: `jungle-${at}`, type: 'jungle', when: began + at });
+  }
+  for (const at of BOSS_AT) events.push({ key: `boss-${at}`, type: 'boss', when: began + at });
+  return events;
+}
+
+// Lo ya sonado, por guerra. En memoria a conciencia: si el contenedor se
+// reinicia en mitad de una guerra lo peor posible es un aviso repetido, y
+// guardarlo en la base para evitar eso no compra lo que cuesta.
+const sonados = new Map();
+
+async function tick() {
+  if (!botEnabled()) return;
+  const war = await currentWar();
+  if (!war) {
+    sonados.clear();
+    return;
+  }
+  const horn = await getHorn();
+  if (!horn.jungle && !horn.boss) return;
+
+  const now = Date.now();
+  let fired = sonados.get(war.id);
+  if (!fired) {
+    fired = new Set();
+    sonados.set(war.id, fired);
+    // Entrar a media guerra (o tras un reinicio) no debe descargar de golpe
+    // todos los avisos que ya pasaron: lo pasado, pasado está.
+    for (const e of schedule(war.startedAt)) if (now >= e.when - WARN_BEFORE) fired.add(e.key);
+    return;
+  }
+
+  for (const event of schedule(war.startedAt)) {
+    const soundId = horn[event.type];
+    if (!soundId || fired.has(event.key)) continue;
+    if (now < event.when - WARN_BEFORE || now >= event.when) continue;
+    fired.add(event.key);
+
+    const channels = await getVoiceChannels();
+    // Todos los canales de guerra configurados, sin repetir: el aviso debe
+    // llegar estén repartidos por líneas o todavía juntos en el general.
+    const objetivo = [...new Set(Object.values(channels))];
+    if (!objetivo.length) return;
+    try {
+      const out = await sweepSound(soundId, objetivo);
+      console.log(`[cuerno] ${event.key}: sonó en ${out.played}/${objetivo.length} canales`);
+    } catch (err) {
+      console.error(`[cuerno] ${event.key} falló:`, err.message);
+    }
+  }
+}
+
+/** Se llama una vez al arrancar. Un latido corto: el margen de aviso es de un minuto. */
+export function startHornScheduler() {
+  setInterval(() => {
+    tick().catch((err) => console.error('[cuerno] tick falló:', err.message));
+  }, 5_000);
+}

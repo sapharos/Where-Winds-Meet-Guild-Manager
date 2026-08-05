@@ -2,11 +2,13 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../services/authService';
 import {
   Deployment,
+  DiscordSoundboardSound,
   LANE_CAPACITY,
   Player,
   PlayerBuild,
   Role,
   SavedLineup,
+  VOICE_SLOT_LABELS,
   WAR_CAPACITY,
   WAR_LANES,
   WAR_MATCH_TYPE_LABELS,
@@ -116,10 +118,17 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit, canVo
   const [formacionesAbiertas, setFormacionesAbiertas] = useState(false);
   const [nombreNuevo, setNombreNuevo] = useState('');
   const [aviso, setAviso] = useState<string | null>(null);
-  // La voz: si hay canales configurados (decide si el botón existe) y si hay
-  // un reparto en marcha (los movimientos van de uno en uno y tardan).
-  const [vozLista, setVozLista] = useState(false);
+  // La voz: qué canal tiene cada ranura (decide si el botón existe y qué
+  // ofrece el cuerno) y si hay un reparto en marcha (van de uno en uno).
+  const [vozCanales, setVozCanales] = useState<Record<string, string>>({});
   const [moviendo, setMoviendo] = useState(false);
+  const vozLista = Object.keys(vozCanales).length > 0;
+  // El cuerno manual: la hoja, el panel de sonidos, y la selección en curso.
+  const [cuernoAbierto, setCuernoAbierto] = useState(false);
+  const [sonidos, setSonidos] = useState<DiscordSoundboardSound[] | null>(null);
+  const [sonidoElegido, setSonidoElegido] = useState('');
+  const [ranurasCuerno, setRanurasCuerno] = useState<Set<string>>(new Set());
+  const [tocando, setTocando] = useState(false);
 
   // What the board holds right now, for handlers that fire faster than a render.
   const latest = useRef<Deployment[]>([]);
@@ -143,7 +152,7 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit, canVo
       const voz = await api<{ bot: boolean; channels: Record<string, string> }>(
         '/war/voice-channels',
       ).catch(() => null);
-      setVozLista(Boolean(voz?.bot && Object.keys(voz.channels).length));
+      setVozCanales(voz?.bot ? voz.channels : {});
     }
   };
 
@@ -493,6 +502,52 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit, canVo
     }
   };
 
+  /** Abre la hoja del cuerno, trayendo el panel de sonidos la primera vez. */
+  const abrirCuerno = async () => {
+    setCuernoAbierto(true);
+    // Preselecciona las líneas configuradas: el caso normal es avisar al frente.
+    setRanurasCuerno(
+      new Set(
+        VOICE_SLOT_LABELS.filter((l) => l.slot.includes(':') && vozCanales[l.slot]).map(
+          (l) => l.slot,
+        ),
+      ),
+    );
+    if (sonidos === null) {
+      setSonidos(await api<DiscordSoundboardSound[]>('/discord/soundboard').catch(() => []));
+    }
+  };
+
+  /** El barrido: entra a cada canal elegido, suena, y cuenta el resultado. */
+  const tocarCuerno = async () => {
+    setTocando(true);
+    setError(null);
+    try {
+      const out = await api<{
+        played: number;
+        results: { channelId: string; ok: boolean; reason?: string }[];
+      }>('/war/horn/play', {
+        method: 'POST',
+        body: JSON.stringify({ soundId: sonidoElegido, slots: [...ranurasCuerno] }),
+      });
+      const nombreDe = (channelId: string) =>
+        VOICE_SLOT_LABELS.find((l) => vozCanales[l.slot] === channelId)?.label ?? 'un canal';
+      const fallos = out.results.filter((r) => !r.ok);
+      setAviso(
+        fallos.length
+          ? `El sonido llegó a ${out.played} de ${out.results.length} canales. Falló en ${fallos
+              .map((f) => `${nombreDe(f.channelId)} (${f.reason ?? 'sin motivo'})`)
+              .join(', ')}.`
+          : `El sonido recorrió los ${out.played} canales.`,
+      );
+      setCuernoAbierto(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo tocar el cuerno');
+    } finally {
+      setTocando(false);
+    }
+  };
+
   /** Nombrar o destituir al que habla por la línea. El marcador es del bando visible. */
   const toggleLider = async (playerId: string, actual: boolean) => {
     setError(null);
@@ -628,6 +683,17 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit, canVo
                       {label}
                     </button>
                   ))}
+                  <button
+                    disabled={moviendo || tocando}
+                    onClick={(e) => {
+                      e.currentTarget.closest('details')?.removeAttribute('open');
+                      void abrirCuerno();
+                    }}
+                    className="w-full min-h-tap text-left text-sm text-slate-300 hover:text-amber-500 hover:bg-slate-950 disabled:text-slate-600 disabled:cursor-not-allowed rounded px-3 py-2 transition-all flex items-center gap-3 border-t border-slate-800"
+                  >
+                    <i className="fa-solid fa-bullhorn w-4 text-center"></i>
+                    Tocar un sonido…
+                  </button>
                   <p className="text-[10px] text-slate-600 px-3 pt-1 leading-relaxed">
                     Sólo mueve a quien ya está en un canal de voz y tiene su Discord vinculado; el
                     resultado dice quién quedó fuera y por qué.
@@ -1302,6 +1368,84 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit, canVo
           </Sheet>
         );
       })()}
+
+      {cuernoAbierto && (
+        <Sheet
+          title="Cuerno de guerra"
+          subtitle="Un sonido del panel del servidor, canal por canal. El bot entra, suena y salta al siguiente: no es simultáneo, tarda un par de segundos por canal."
+          size="sm"
+          onClose={() => setCuernoAbierto(false)}
+        >
+          {sonidos === null ? (
+            <p className="text-sm text-slate-500 py-4 text-center">
+              <i className="fa-solid fa-circle-notch fa-spin mr-2"></i>
+              Leyendo el panel de sonidos…
+            </p>
+          ) : sonidos.length === 0 ? (
+            <p className="text-sm text-slate-400">
+              El panel de sonidos del servidor está vacío o el bot no puede leerlo. Los sonidos se
+              suben desde Discord: Ajustes del servidor → Panel de sonidos.
+            </p>
+          ) : (
+            <>
+              <label className="block mb-4">
+                <span className="block text-[11px] uppercase tracking-wider text-slate-500 mb-1">
+                  Sonido
+                </span>
+                <select
+                  value={sonidoElegido}
+                  onChange={(e) => setSonidoElegido(e.target.value)}
+                  className="w-full min-h-tap bg-slate-950 border border-slate-800 rounded px-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
+                >
+                  <option value="">— elige un sonido —</option>
+                  {sonidos.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.emoji ? `${s.emoji} ` : ''}
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <p className="text-[11px] uppercase tracking-wider text-slate-500 mb-1.5">
+                En qué canales
+              </p>
+              <div className="flex flex-col">
+                {VOICE_SLOT_LABELS.filter((l) => vozCanales[l.slot]).map(({ slot, label }) => (
+                  <label
+                    key={slot}
+                    className="min-h-tap flex items-center gap-3 px-3 -mx-1 rounded-md cursor-pointer text-sm text-slate-200 hover:bg-slate-800/60 transition-colors duration-micro"
+                  >
+                    <input
+                      type="checkbox"
+                      className="w-4 h-4 accent-amber-600"
+                      checked={ranurasCuerno.has(slot)}
+                      onChange={() =>
+                        setRanurasCuerno((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(slot)) next.delete(slot);
+                          else next.add(slot);
+                          return next;
+                        })
+                      }
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
+
+              <button
+                onClick={() => void tocarCuerno()}
+                disabled={tocando || !sonidoElegido || ranurasCuerno.size === 0}
+                className="mt-4 w-full bg-amber-600 hover:bg-amber-500 disabled:bg-slate-800 disabled:text-slate-600 disabled:cursor-not-allowed text-white font-bold py-2 px-4 rounded transition-all flex items-center justify-center gap-2"
+              >
+                <i className={`fa-solid ${tocando ? 'fa-circle-notch fa-spin' : 'fa-bullhorn'}`}></i>
+                {tocando ? 'Recorriendo canales…' : `Hacerlo sonar en ${ranurasCuerno.size} canales`}
+              </button>
+            </>
+          )}
+        </Sheet>
+      )}
 
       {history && (
         <WarHistory

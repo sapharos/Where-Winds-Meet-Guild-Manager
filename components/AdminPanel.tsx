@@ -15,24 +15,10 @@ import {
   Player,
   UserRole,
   ROLE_LABELS,
+  DiscordSoundboardSound,
+  VOICE_SLOT_LABELS,
   VoiceChannelMap,
-  WAR_LANES,
 } from '../types';
-
-/**
- * Las ranuras de voz de la guerra, en el orden en que se leen: la reunión,
- * los dos bandos, y las tres líneas de cada uno. Los ids calcan los del
- * servidor (VOICE_SLOTS): cambiarlos aquí sin cambiarlos allí es guardar en
- * ranuras que nadie leerá.
- */
-const RANURAS_VOZ: { slot: string; label: string }[] = [
-  { slot: 'general', label: 'Reunión general' },
-  { slot: 'leaders', label: 'Líderes de línea' },
-  { slot: 'attack', label: 'Bando · Ataque' },
-  { slot: 'defense', label: 'Bando · Defensa' },
-  ...WAR_LANES.map((l) => ({ slot: `attack:${l.id}`, label: `Ataque · ${l.label}` })),
-  ...WAR_LANES.map((l) => ({ slot: `defense:${l.id}`, label: `Defensa · ${l.label}` })),
-];
 
 // Mirrors the server's LOCKED table so the boxes it will refuse to clear are
 // shown as fixed rather than silently springing back after a save.
@@ -92,6 +78,12 @@ const AdminPanel: React.FC<Props> = ({
   const [canalesVoz, setCanalesVoz] = useState<DiscordVoiceChannel[] | null>(null);
   const [mapaVoz, setMapaVoz] = useState<VoiceChannelMap>({});
   const [vozSucia, setVozSucia] = useState(false);
+  /** El panel de sonidos del servidor y qué sonido toca en cada aviso de guerra. */
+  const [sonidos, setSonidos] = useState<DiscordSoundboardSound[]>([]);
+  const [cuerno, setCuerno] = useState<{ jungle: string | null; boss: string | null }>({
+    jungle: null,
+    boss: null,
+  });
   /**
    * Qué rol se está mirando en el teléfono, donde la matriz va de uno en uno.
    *
@@ -126,6 +118,13 @@ const AdminPanel: React.FC<Props> = ({
             await api<{ channels: VoiceChannelMap }>('/war/voice-channels')
               .then((v) => v.channels)
               .catch(() => ({})),
+          );
+          setSonidos(await api<DiscordSoundboardSound[]>('/discord/soundboard').catch(() => []));
+          setCuerno(
+            await api<{ jungle: string | null; boss: string | null }>('/war/horn').catch(() => ({
+              jungle: null,
+              boss: null,
+            })),
           );
         }
       }
@@ -249,6 +248,21 @@ const AdminPanel: React.FC<Props> = ({
       report('Canales de voz guardados.');
     } catch (err) {
       report(err instanceof Error ? err.message : 'No se pudieron guardar los canales', false);
+    }
+  };
+
+  /** Guarda al momento: elegir el sonido de un aviso ya es la decisión entera. */
+  const guardarCuerno = async (evento: 'jungle' | 'boss', soundId: string) => {
+    const siguiente = { ...cuerno, [evento]: soundId || null };
+    setCuerno(siguiente);
+    try {
+      setCuerno(await api<{ jungle: string | null; boss: string | null }>('/war/horn', {
+        method: 'PUT',
+        body: JSON.stringify(siguiente),
+      }));
+      report('Cuerno de guerra guardado.');
+    } catch (err) {
+      report(err instanceof Error ? err.message : 'No se pudo guardar el cuerno', false);
     }
   };
 
@@ -827,7 +841,7 @@ const AdminPanel: React.FC<Props> = ({
             </p>
           ) : (
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {RANURAS_VOZ.map(({ slot, label }) => (
+              {VOICE_SLOT_LABELS.map(({ slot, label }) => (
                 <label key={slot} className="block">
                   <span className="block text-[11px] uppercase tracking-wider text-slate-500 mb-1">
                     {label}
@@ -857,6 +871,53 @@ const AdminPanel: React.FC<Props> = ({
               ))}
             </div>
           )}
+
+          <div className="mt-6 pt-4 border-t border-slate-800">
+            <p className="text-sm text-slate-300 mb-1">
+              <i className="fa-solid fa-bullhorn mr-2 text-amber-500"></i>
+              Cuerno automático
+            </p>
+            <p className="text-xs text-slate-500 mb-3">
+              Con la guerra en marcha, un minuto antes de cada jungla y de cada boss el bot recorre
+              los canales configurados haciendo sonar el sonido elegido del panel de sonidos del
+              servidor. Necesita que el bot pueda Conectar, Hablar y Usar el panel de sonidos en esos
+              canales. «Apagado» no suena.
+            </p>
+            {sonidos.length === 0 ? (
+              <p className="text-xs text-slate-500 bg-slate-950 border border-slate-800 rounded-lg p-3">
+                El panel de sonidos del servidor está vacío o el bot no puede leerlo. Los sonidos se
+                suben desde Discord: Ajustes del servidor → Panel de sonidos.
+              </p>
+            ) : (
+              <div className="grid sm:grid-cols-2 gap-3 max-w-xl">
+                {(
+                  [
+                    { evento: 'jungle', label: 'Aviso de jungla' },
+                    { evento: 'boss', label: 'Aviso de boss' },
+                  ] as const
+                ).map(({ evento, label }) => (
+                  <label key={evento} className="block">
+                    <span className="block text-[11px] uppercase tracking-wider text-slate-500 mb-1">
+                      {label}
+                    </span>
+                    <select
+                      className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
+                      value={cuerno[evento] ?? ''}
+                      onChange={(e) => void guardarCuerno(evento, e.target.value)}
+                    >
+                      <option value="">— apagado —</option>
+                      {sonidos.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.emoji ? `${s.emoji} ` : ''}
+                          {s.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
         </section>
       )}
     </div>

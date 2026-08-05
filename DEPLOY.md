@@ -163,6 +163,22 @@ Two things Discord requires for this to work:
   channel in the server, and only if their Discord is linked to their account.
   The result message names whoever could not be moved and why.
 
+### The war horn
+
+The bot can play a sound from the server's **soundboard** across the war voice
+channels — manually from the Voz menu (pick a sound, pick channels), and
+automatically one minute before each jungle and boss timer while a war is
+running (configured next to the voice channels in Administración).
+
+A bot can only sit in one voice channel at a time, so this is a sweep: it
+joins each channel, fires the sound, and hops to the next — a couple of
+seconds per channel, not simultaneous. For a one-minute warning that is
+plenty.
+
+It needs three more permissions in those voice channels: **Connect**,
+**Speak**, and **Use Soundboard**. The sounds themselves are managed in
+Discord (Server Settings → Soundboard); the app only lists and plays them.
+
 ## What this does not do yet
 
 **Last write wins.** Each save replaces a whole collection in one transaction, so

@@ -438,6 +438,28 @@ export interface DiscordVoiceChannel {
  */
 export type VoiceChannelMap = Record<string, string>;
 
+/**
+ * Las ranuras con su nombre de cara, en el orden en que se leen. Los ids
+ * calcan los VOICE_SLOTS del servidor: cambiarlos aquí sin cambiarlos allí es
+ * guardar en ranuras que nadie leerá. Lo usan la configuración del panel y el
+ * cuerno de la Sala de Guerra, por eso vive junto a los tipos.
+ */
+export const VOICE_SLOT_LABELS: { slot: string; label: string }[] = [
+  { slot: 'general', label: 'Reunión general' },
+  { slot: 'leaders', label: 'Líderes de línea' },
+  { slot: 'attack', label: 'Bando · Ataque' },
+  { slot: 'defense', label: 'Bando · Defensa' },
+  ...WAR_LANES.map((l) => ({ slot: `attack:${l.id}`, label: `Ataque · ${l.label}` })),
+  ...WAR_LANES.map((l) => ({ slot: `defense:${l.id}`, label: `Defensa · ${l.label}` })),
+];
+
+/** Un sonido del panel de sonidos del servidor de Discord. */
+export interface DiscordSoundboardSound {
+  id: string;
+  name: string;
+  emoji: string | null;
+}
+
 export interface PermissionCatalog {
   roles: UserRole[];
   permissions: string[];

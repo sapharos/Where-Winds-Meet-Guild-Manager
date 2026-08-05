@@ -91,6 +91,40 @@ export async function listVoiceChannels() {
 }
 
 /**
+ * Los sonidos del panel del servidor, para elegir el cuerno de guerra.
+ * El panel lo administra el gremio desde Discord; aquí sólo se lee.
+ */
+export async function listSoundboardSounds() {
+  const { items } = await botFetch(`/guilds/${process.env.DISCORD_GUILD_ID}/soundboard-sounds`);
+  return items
+    .filter((s) => s.available !== false)
+    .map((s) => ({ id: s.sound_id, name: s.name, emoji: s.emoji_name ?? null }));
+}
+
+/**
+ * Dispara un sonido del panel en un canal de voz.
+ *
+ * Discord sólo lo acepta si el bot tiene un estado de voz en ese canal --
+ * plantarlo es asunto del cliente de Gateway, no de esta llamada. El error de
+ * "no estás en el canal" se devuelve como veredicto, igual que el reparto:
+ * durante un barrido es un resultado más, no una excepción que lo aborta.
+ */
+export async function playSoundboardSound(channelId, soundId) {
+  try {
+    await botFetch(`/channels/${channelId}/send-soundboard-sound`, {
+      method: 'POST',
+      body: JSON.stringify({ sound_id: soundId }),
+    });
+    return { played: true };
+  } catch (err) {
+    if (err.discordCode === 50013) {
+      return { played: false, reason: 'faltan permisos de voz o panel de sonidos' };
+    }
+    return { played: false, reason: err.message };
+  }
+}
+
+/**
  * Mueve a un miembro a un canal de voz.
  *
  * Devuelve un veredicto en vez de lanzar, porque "no está en voz" no es un

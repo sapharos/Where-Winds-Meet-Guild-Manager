@@ -60,8 +60,9 @@ import {
   approveRegistration,
   rejectRegistration,
 } from './discord.js';
-import { botEnabled, searchGuildMembers, listVoiceChannels } from './discordBot.js';
+import { botEnabled, searchGuildMembers, listVoiceChannels, listSoundboardSounds } from './discordBot.js';
 import { VOICE_SLOTS, getVoiceChannels, setVoiceChannels, deployVoice } from './voice.js';
+import { getHorn, setHorn, sweepSound, startHornScheduler } from './horn.js';
 import {
   initAuth,
   hashPassword,
@@ -400,6 +401,45 @@ app.post('/api/war/voice/move', requireAuth, requirePermission('war.voice'), asH
     return res.status(400).json({ error: 'mode must be general, sides, lanes or leaders' });
   }
   res.json(await deployVoice(mode));
+}));
+
+/* -------------------------------------------------------------- war horn */
+
+// Sólo sesión: la lista de sonidos no es secreta y la leen dos pantallas con
+// permisos distintos (el cuerno manual con war.voice, la configuración con
+// users.manage). Tocarlos sigue detrás de sus permisos.
+app.get('/api/discord/soundboard', requireAuth, asHandler(async (_req, res) => {
+  if (!botEnabled()) {
+    return res.status(503).json({ error: 'el bot de Discord no está configurado' });
+  }
+  res.json(await listSoundboardSounds());
+}));
+
+app.get('/api/war/horn', requireAuth, asHandler(async (_req, res) => {
+  res.json(await getHorn());
+}));
+
+app.put('/api/war/horn', requireAuth, requirePermission('users.manage'), asHandler(async (req, res) => {
+  res.json(await setHorn(req.body ?? {}));
+}));
+
+app.post('/api/war/horn/play', requireAuth, requirePermission('war.voice'), asHandler(async (req, res) => {
+  if (!botEnabled()) {
+    return res.status(503).json({ error: 'el bot de Discord no está configurado' });
+  }
+  const { soundId, slots } = req.body ?? {};
+  if (!/^\d{5,25}$/.test(String(soundId ?? ''))) {
+    return res.status(400).json({ error: 'soundId must be a Discord snowflake' });
+  }
+  const channels = await getVoiceChannels();
+  const wanted = (Array.isArray(slots) ? slots : []).filter((s) => channels[s]);
+  if (!wanted.length) {
+    return res.status(400).json({ error: 'ninguna de esas ranuras tiene canal configurado' });
+  }
+  // El mismo canal puede estar en dos ranuras; sonaría dos veces.
+  const ids = [...new Set(wanted.map((s) => channels[s]))];
+  const out = await sweepSound(String(soundId), ids);
+  res.json(out);
 }));
 
 /**
@@ -889,6 +929,8 @@ migrate()
   .then(seedWeaponSets)
   .then(migrateLegacyStats)
   .then(() => {
+    // El cuerno automático de jungla y boss. Sin bot configurado no hace nada.
+    startHornScheduler();
     app.listen(PORT, () => console.log(`API listening on ${PORT}`));
   })
   .catch((err) => {
