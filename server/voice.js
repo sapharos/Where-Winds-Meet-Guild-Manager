@@ -53,14 +53,20 @@ export async function setVoiceChannels(map) {
 }
 
 /**
- * Mueve a todos los desplegados según el modo: todos al general, cada bando a
- * su canal, o cada uno a su línea. Devuelve el recuento con nombres.
+ * Mueve a los desplegados de un bando según el modo: al general, al canal del
+ * bando, cada uno a su línea, o sólo los líderes al suyo. Devuelve el
+ * recuento con nombres.
+ *
+ * Sólo un bando cada vez, el que se está mirando: los dos tableros los suelen
+ * llevar personas distintas, y quien ordena su frente no debe arrastrar al
+ * otro -- el primer uso real movió a la defensa entera desde la pantalla de
+ * ataque, y ese botón no decía eso.
  *
  * Va en serie y no en paralelo a conciencia: treinta PATCH simultáneos contra
  * el mismo servidor de Discord es pedir un 429 seguro; de uno en uno tarda
  * unos segundos y llega entero.
  */
-export async function deployVoice(mode) {
+export async function deployVoice(mode, side) {
   const channels = await getVoiceChannels();
   const targetOf = (d) =>
     mode === 'general'
@@ -77,9 +83,9 @@ export async function deployVoice(mode) {
        FROM war_deployments d
        JOIN players p ON p.guild_id = d.guild_id AND p.id = d.player_id
        LEFT JOIN users u ON u.guild_id = d.guild_id AND u.player_id = d.player_id
-      WHERE d.guild_id = $1
-      ORDER BY d.side, d.lane, p.name`,
-    [GUILD_ID],
+      WHERE d.guild_id = $1 AND d.side = $2
+      ORDER BY d.lane, p.name`,
+    [GUILD_ID, side],
   );
   // Reunir líderes mueve sólo a los líderes y deja al resto donde está: es la
   // reunión de mandos en mitad de la batalla, no un toque de retirada.

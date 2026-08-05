@@ -496,15 +496,18 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit, canVo
         total: number;
         moved: number;
         skipped: { name: string; reason: string }[];
-      }>('/war/voice/move', { method: 'POST', body: JSON.stringify({ mode }) });
+      }>('/war/voice/move', { method: 'POST', body: JSON.stringify({ mode, side }) });
+      // El bando por delante: el botón sólo tocó este tablero, y el aviso
+      // debe decirlo para que nadie crea que la otra mitad también se movió.
+      const bando = WAR_SIDE_LABELS[side];
       setAviso(
         out.total === 0
-          ? 'No hay nadie desplegado que mover.'
+          ? `No hay nadie desplegado en ${bando} que mover.`
           : out.skipped.length
-            ? `${out.moved} de ${out.total} movidos a voz. Quedaron ${out.skipped.length}: ${out.skipped
+            ? `${bando}: ${out.moved} de ${out.total} movidos a voz. Quedaron ${out.skipped.length}: ${out.skipped
                 .map((s) => `${s.name} (${s.reason})`)
                 .join(', ')}.`
-            : `Los ${out.moved} desplegados están en su canal.`,
+            : `${bando}: los ${out.moved} desplegados están en su canal.`,
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo mover a nadie');
@@ -686,22 +689,29 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit, canVo
               <i className="fa-solid fa-chess"></i>
               Estrategias
             </button>
-            {/* Sólo existe cuando puede cumplir: con permiso, bot y canales
-                configurados. Un botón de voz que no mueve a nadie es ruido. */}
+            {/* Sólo existen cuando pueden cumplir: con permiso, bot y canales
+                configurados. Un botón de voz que no mueve a nadie es ruido.
+                Van en dos menús a conciencia: mover gente es del bando que se
+                está mirando, y el cuerno es de la guerra entera -- mezclados,
+                el primer uso real acabó moviendo a la defensa desde la
+                pantalla de ataque. */}
             {canVoice && vozLista && (
               <details className="relative">
                 <summary
                   className="list-none text-sm text-slate-400 hover:text-amber-500 border border-slate-800 hover:border-amber-700 rounded px-3 py-2 transition-all flex items-center gap-2 cursor-pointer"
-                  title="Mover a los desplegados entre los canales de voz"
+                  title={`Mover a los desplegados de ${WAR_SIDE_LABELS[side]} entre los canales de voz`}
                 >
                   <i className={`fa-solid ${moviendo ? 'fa-circle-notch fa-spin' : 'fa-headset'}`}></i>
                   Voz
                 </summary>
                 <div className="absolute right-0 mt-2 w-64 bg-slate-900 border border-slate-800 rounded-lg shadow-2xl p-2 z-50 space-y-1">
+                  <p className="text-[10px] uppercase tracking-wider text-slate-500 px-3 pt-1">
+                    Sólo {WAR_SIDE_LABELS[side]}
+                  </p>
                   {(
                     [
                       { mode: 'general', icon: 'fa-users', label: 'Reunir en el canal general' },
-                      { mode: 'sides', icon: 'fa-people-arrows', label: 'Separar por bando' },
+                      { mode: 'sides', icon: 'fa-people-arrows', label: 'Llevar al canal del bando' },
                       { mode: 'lanes', icon: 'fa-diagram-project', label: 'Repartir a las líneas' },
                       { mode: 'leaders', icon: 'fa-crown', label: 'Reunir líderes en su canal' },
                     ] as const
@@ -719,13 +729,31 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit, canVo
                       {label}
                     </button>
                   ))}
+                  <p className="text-[10px] text-slate-600 px-3 pt-1 leading-relaxed">
+                    Mueve a los desplegados de {WAR_SIDE_LABELS[side]} que ya están en un canal de
+                    voz y tienen su Discord vinculado; el resultado dice quién quedó fuera y por
+                    qué. El otro bando se maneja desde su propia pestaña.
+                  </p>
+                </div>
+              </details>
+            )}
+            {canVoice && vozLista && (
+              <details className="relative">
+                <summary
+                  className="list-none text-sm text-slate-400 hover:text-amber-500 border border-slate-800 hover:border-amber-700 rounded px-3 py-2 transition-all flex items-center gap-2 cursor-pointer"
+                  title="Sonidos del panel en los canales de voz"
+                >
+                  <i className={`fa-solid ${tocando ? 'fa-circle-notch fa-spin' : 'fa-bullhorn'}`}></i>
+                  Cuerno
+                </summary>
+                <div className="absolute right-0 mt-2 w-64 bg-slate-900 border border-slate-800 rounded-lg shadow-2xl p-2 z-50 space-y-1">
                   <button
                     disabled={moviendo || tocando}
                     onClick={(e) => {
                       e.currentTarget.closest('details')?.removeAttribute('open');
                       void abrirCuerno();
                     }}
-                    className="w-full min-h-tap text-left text-sm text-slate-300 hover:text-amber-500 hover:bg-slate-950 disabled:text-slate-600 disabled:cursor-not-allowed rounded px-3 py-2 transition-all flex items-center gap-3 border-t border-slate-800"
+                    className="w-full min-h-tap text-left text-sm text-slate-300 hover:text-amber-500 hover:bg-slate-950 disabled:text-slate-600 disabled:cursor-not-allowed rounded px-3 py-2 transition-all flex items-center gap-3"
                   >
                     <i className="fa-solid fa-bullhorn w-4 text-center"></i>
                     Tocar un sonido…
@@ -755,8 +783,8 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit, canVo
                       </button>
                     ))}
                   <p className="text-[10px] text-slate-600 px-3 pt-1 leading-relaxed">
-                    Sólo mueve a quien ya está en un canal de voz y tiene su Discord vinculado; el
-                    resultado dice quién quedó fuera y por qué.
+                    Suena en los canales elegidos en Administración, sin importar qué bando se esté
+                    mirando.
                   </p>
                 </div>
               </details>

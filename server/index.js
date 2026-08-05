@@ -396,11 +396,14 @@ app.post('/api/war/voice/move', requireAuth, requirePermission('war.voice'), asH
   if (!botEnabled()) {
     return res.status(503).json({ error: 'el bot de Discord no está configurado' });
   }
-  const mode = req.body?.mode;
+  const { mode, side } = req.body ?? {};
   if (!['general', 'sides', 'lanes', 'leaders'].includes(mode)) {
     return res.status(400).json({ error: 'mode must be general, sides, lanes or leaders' });
   }
-  res.json(await deployVoice(mode));
+  if (!['attack', 'defense'].includes(side)) {
+    return res.status(400).json({ error: 'side must be attack or defense' });
+  }
+  res.json(await deployVoice(mode, side));
 }));
 
 /* -------------------------------------------------------------- war horn */

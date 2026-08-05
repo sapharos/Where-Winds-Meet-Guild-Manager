@@ -273,8 +273,9 @@ const ESCRITURAS: [string, RegExp, Ruta][] = [
       store.usuarios.filter((u) => u.discordId && u.playerId).map((u) => u.playerId),
     );
     const nombres = new Map(store.players.map((p) => [p.id, p.name]));
-    const objetivo =
-      body?.mode === 'leaders' ? store.deployments.filter((d) => d.isLaneLeader) : store.deployments;
+    // Como el de verdad: sólo el bando que se está mirando.
+    const delBando = store.deployments.filter((d) => d.side === body?.side);
+    const objetivo = body?.mode === 'leaders' ? delBando.filter((d) => d.isLaneLeader) : delBando;
     let moved = 0;
     const skipped: { name: string; reason: string }[] = [];
     for (const d of objetivo) {
