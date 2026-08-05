@@ -59,7 +59,8 @@ import {
   approveRegistration,
   rejectRegistration,
 } from './discord.js';
-import { botEnabled, searchGuildMembers } from './discordBot.js';
+import { botEnabled, searchGuildMembers, listVoiceChannels } from './discordBot.js';
+import { VOICE_SLOTS, getVoiceChannels, setVoiceChannels, deployVoice } from './voice.js';
 import {
   initAuth,
   hashPassword,
@@ -367,6 +368,37 @@ app.get('/api/discord/members', requireAuth, requirePermission('users.manage'), 
   }
   const q = String(req.query.q ?? '').trim();
   res.json(q ? await searchGuildMembers(q) : []);
+}));
+
+app.get('/api/discord/voice-channels', requireAuth, requirePermission('users.manage'), asHandler(async (_req, res) => {
+  if (!botEnabled()) {
+    return res.status(503).json({ error: 'el bot de Discord no está configurado' });
+  }
+  res.json(await listVoiceChannels());
+}));
+
+/* ------------------------------------------------------------- war voice */
+
+// La lectura sólo pide sesión: la Sala de Guerra la necesita para saber si
+// enseña el botón, y saber a qué canal va cada línea no es ningún secreto
+// dentro del gremio.
+app.get('/api/war/voice-channels', requireAuth, asHandler(async (_req, res) => {
+  res.json({ bot: botEnabled(), slots: VOICE_SLOTS, channels: await getVoiceChannels() });
+}));
+
+app.put('/api/war/voice-channels', requireAuth, requirePermission('users.manage'), asHandler(async (req, res) => {
+  res.json({ channels: await setVoiceChannels(req.body?.channels ?? {}) });
+}));
+
+app.post('/api/war/voice/move', requireAuth, requirePermission('war.voice'), asHandler(async (req, res) => {
+  if (!botEnabled()) {
+    return res.status(503).json({ error: 'el bot de Discord no está configurado' });
+  }
+  const mode = req.body?.mode;
+  if (!['general', 'sides', 'lanes'].includes(mode)) {
+    return res.status(400).json({ error: 'mode must be general, sides or lanes' });
+  }
+  res.json(await deployVoice(mode));
 }));
 
 /**

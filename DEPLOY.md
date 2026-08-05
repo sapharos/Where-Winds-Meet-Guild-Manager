@@ -146,6 +146,23 @@ account — so the whole feature sits behind the *Gestionar usuarios* permission
 and the panel shows both the server nickname and the global username before
 anything is saved.
 
+### War voice channels
+
+With the bot set up, **Administración → Canales de voz de guerra** maps the
+guild's voice channels to the war board: one general channel, one per side, one
+per lane of each side. The Sala de Guerra then offers anyone with the *Mover a
+canales de voz* permission (officers and up by default) three one-click moves:
+gather everyone in the general channel, split by side, or spread each deployed
+member to their lane's channel.
+
+Two things Discord requires for this to work:
+
+- The bot's role needs the **Move Members** permission in those voice channels
+  (grant it channel-by-channel to keep it scoped).
+- A member can only be moved if they are already connected to some voice
+  channel in the server, and only if their Discord is linked to their account.
+  The result message names whoever could not be moved and why.
+
 ## What this does not do yet
 
 **Last write wins.** Each save replaces a whole collection in one transaction, so

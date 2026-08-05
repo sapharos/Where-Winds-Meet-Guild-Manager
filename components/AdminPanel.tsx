@@ -8,13 +8,30 @@ import { Filas } from './Esqueleto';
 import {
   AuthUser,
   DiscordMember,
+  DiscordVoiceChannel,
   ManagedUser,
   PERMISSION_LABELS,
   PermissionCatalog,
   Player,
   UserRole,
   ROLE_LABELS,
+  VoiceChannelMap,
+  WAR_LANES,
 } from '../types';
+
+/**
+ * Las ranuras de voz de la guerra, en el orden en que se leen: la reunión,
+ * los dos bandos, y las tres líneas de cada uno. Los ids calcan los del
+ * servidor (VOICE_SLOTS): cambiarlos aquí sin cambiarlos allí es guardar en
+ * ranuras que nadie leerá.
+ */
+const RANURAS_VOZ: { slot: string; label: string }[] = [
+  { slot: 'general', label: 'Reunión general' },
+  { slot: 'attack', label: 'Bando · Ataque' },
+  { slot: 'defense', label: 'Bando · Defensa' },
+  ...WAR_LANES.map((l) => ({ slot: `attack:${l.id}`, label: `Ataque · ${l.label}` })),
+  ...WAR_LANES.map((l) => ({ slot: `defense:${l.id}`, label: `Defensa · ${l.label}` })),
+];
 
 // Mirrors the server's LOCKED table so the boxes it will refuse to clear are
 // shown as fixed rather than silently springing back after a save.
@@ -70,6 +87,10 @@ const AdminPanel: React.FC<Props> = ({
   const [enlazando, setEnlazando] = useState<ManagedUser | null>(null);
   /** El jugador elegido para crearle cuenta desde Discord. */
   const [jugadorNuevo, setJugadorNuevo] = useState('');
+  /** Los canales de voz del servidor de Discord, o null mientras no se sabe. */
+  const [canalesVoz, setCanalesVoz] = useState<DiscordVoiceChannel[] | null>(null);
+  const [mapaVoz, setMapaVoz] = useState<VoiceChannelMap>({});
+  const [vozSucia, setVozSucia] = useState(false);
   /**
    * Qué rol se está mirando en el teléfono, donde la matriz va de uno en uno.
    *
@@ -96,7 +117,16 @@ const AdminPanel: React.FC<Props> = ({
       if (canManageUsers) {
         setUsers(await authService.listUsers());
         setRequests(await api<Registration[]>('/registrations').catch(() => []));
-        setBotDiscord(await authService.discordBotStatus().then((s) => s.bot).catch(() => false));
+        const bot = await authService.discordBotStatus().then((s) => s.bot).catch(() => false);
+        setBotDiscord(bot);
+        if (bot) {
+          setCanalesVoz(await api<DiscordVoiceChannel[]>('/discord/voice-channels').catch(() => []));
+          setMapaVoz(
+            await api<{ channels: VoiceChannelMap }>('/war/voice-channels')
+              .then((v) => v.channels)
+              .catch(() => ({})),
+          );
+        }
       }
     } catch (err) {
       report(err instanceof Error ? err.message : 'No se pudo cargar la configuración', false);
@@ -204,6 +234,20 @@ const AdminPanel: React.FC<Props> = ({
       );
     } catch (err) {
       report(err instanceof Error ? err.message : 'No se pudo asignar', false);
+    }
+  };
+
+  const guardarVoz = async () => {
+    try {
+      const { channels } = await api<{ channels: VoiceChannelMap }>('/war/voice-channels', {
+        method: 'PUT',
+        body: JSON.stringify({ channels: mapaVoz }),
+      });
+      setMapaVoz(channels);
+      setVozSucia(false);
+      report('Canales de voz guardados.');
+    } catch (err) {
+      report(err instanceof Error ? err.message : 'No se pudieron guardar los canales', false);
     }
   };
 
@@ -752,6 +796,66 @@ const AdminPanel: React.FC<Props> = ({
               </tbody>
             </table>
           </TablaAncha>
+        </section>
+      )}
+
+      {canManageUsers && botDiscord && (
+        <section className="bg-slate-900/60 border border-slate-800 rounded-xl p-6">
+          <div className="flex items-center justify-between mb-1 gap-4 flex-wrap">
+            <h2 className="cinzel text-2xl font-bold text-amber-500">Canales de voz de guerra</h2>
+            <button
+              onClick={guardarVoz}
+              disabled={!vozSucia}
+              className="bg-amber-600 hover:bg-amber-500 disabled:bg-slate-800 disabled:text-slate-600 disabled:cursor-not-allowed text-white text-sm font-bold py-2 px-4 rounded transition-all flex items-center gap-2"
+            >
+              <i className="fa-solid fa-floppy-disk"></i>
+              Guardar canales
+            </button>
+          </div>
+          <p className="text-xs text-slate-500 mb-5">
+            A qué canal lleva cada botón de la Sala de Guerra. Los canales se crean en Discord; aquí
+            solo se elige cuál es cuál. El bot necesita el permiso «Mover miembros» en todos ellos, y
+            solo puede mover a quien ya esté conectado a algún canal de voz del servidor.
+          </p>
+
+          {canalesVoz !== null && canalesVoz.length === 0 ? (
+            <p className="text-sm text-slate-400 bg-slate-950 border border-slate-800 rounded-lg p-3">
+              <i className="fa-solid fa-triangle-exclamation mr-2 text-amber-500"></i>
+              El bot no ve ningún canal de voz. Crea los canales en el servidor de Discord y
+              comprueba que el bot puede verlos.
+            </p>
+          ) : (
+            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {RANURAS_VOZ.map(({ slot, label }) => (
+                <label key={slot} className="block">
+                  <span className="block text-[11px] uppercase tracking-wider text-slate-500 mb-1">
+                    {label}
+                  </span>
+                  <select
+                    className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
+                    value={mapaVoz[slot] ?? ''}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setMapaVoz((prev) => {
+                        const next = { ...prev };
+                        if (value) next[slot] = value;
+                        else delete next[slot];
+                        return next;
+                      });
+                      setVozSucia(true);
+                    }}
+                  >
+                    <option value="">— sin canal —</option>
+                    {(canalesVoz ?? []).map((c) => (
+                      <option key={c.id} value={c.id}>
+                        🔊 {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ))}
+            </div>
+          )}
         </section>
       )}
     </div>

@@ -56,6 +56,35 @@ interface Store {
  * poder ensayar. El penúltimo no se parece a nadie, porque también hay que ver
  * qué pasa al elegir a quien no corresponde.
  */
+/** Los canales de voz inventados, con nombres como los pondría un gremio. */
+const CANALES_VOZ = [
+  { id: '200000000000000001', name: 'Guerra · General' },
+  { id: '200000000000000002', name: 'Guerra · Ataque' },
+  { id: '200000000000000003', name: 'Guerra · Defensa' },
+  { id: '200000000000000004', name: 'Ataque · Izquierda' },
+  { id: '200000000000000005', name: 'Ataque · Centro' },
+  { id: '200000000000000006', name: 'Ataque · Derecha' },
+  { id: '200000000000000007', name: 'Defensa · Izquierda' },
+  { id: '200000000000000008', name: 'Defensa · Centro' },
+  { id: '200000000000000009', name: 'Defensa · Derecha' },
+  { id: '200000000000000010', name: 'Taberna' },
+];
+
+// Preconfigurado, para que la Sala de Guerra enseñe el botón de voz sin pasar
+// antes por Administración. Quitar entradas aquí es cómo se prueba el estado
+// "canal sin configurar".
+let mapaVoz: Record<string, string> = {
+  general: '200000000000000001',
+  attack: '200000000000000002',
+  defense: '200000000000000003',
+  'attack:left': '200000000000000004',
+  'attack:center': '200000000000000005',
+  'attack:right': '200000000000000006',
+  'defense:left': '200000000000000007',
+  'defense:center': '200000000000000008',
+  'defense:right': '200000000000000009',
+};
+
 const MIEMBROS_DISCORD: DiscordMember[] = [
   { id: '100000000000000001', username: 'meilin_zz', globalName: 'Mei Lin', nick: 'Mei Lin' },
   { id: '100000000000000002', username: 'weichen88', globalName: 'Wei Chen', nick: 'Wei · Vanguardia' },
@@ -154,6 +183,8 @@ const GET: [RegExp, Ruta][] = [
   [/^\/registrations$/, () => []],
   [/^\/users$/, () => store.usuarios],
   [/^\/discord\/status$/, () => ({ bot: true })],
+  [/^\/discord\/voice-channels$/, () => CANALES_VOZ],
+  [/^\/war\/voice-channels$/, () => ({ bot: true, channels: mapaVoz })],
   [/^\/discord\/members$/, (_m, _req, _body, url) => {
     const q = (url.searchParams.get('q') ?? '').trim().toLowerCase();
     if (!q) return [];
@@ -174,6 +205,28 @@ const GET: [RegExp, Ruta][] = [
 ];
 
 const ESCRITURAS: [string, RegExp, Ruta][] = [
+  ['PUT', /^\/war\/voice-channels$/, (_m, _req, body) => {
+    mapaVoz = body?.channels ?? {};
+    return { channels: mapaVoz };
+  }],
+  // El reparto de mentira: mueve a los que tienen "Discord" (los vinculados en
+  // usuarios) y deja fuera al resto con su motivo, que es la parte de la
+  // respuesta que la interfaz tiene que saber pintar.
+  ['POST', /^\/war\/voice\/move$/, () => {
+    const conDiscord = new Set(
+      store.usuarios.filter((u) => u.discordId && u.playerId).map((u) => u.playerId),
+    );
+    const nombres = new Map(store.players.map((p) => [p.id, p.name]));
+    let moved = 0;
+    const skipped: { name: string; reason: string }[] = [];
+    for (const d of store.deployments) {
+      const name = nombres.get(d.playerId) ?? d.playerId;
+      if (!conDiscord.has(d.playerId)) skipped.push({ name, reason: 'sin Discord vinculado' });
+      else if (moved % 5 === 4) skipped.push({ name, reason: 'no está en voz' });
+      else moved++;
+    }
+    return { total: store.deployments.length, moved, skipped };
+  }],
   ['PATCH', /^\/users\/([^/]+)\/player$/, (m, _req, body) => {
     store.usuarios = store.usuarios.map((u) =>
       u.id === m[1] ? { ...u, playerId: body?.playerId ?? null } : u,

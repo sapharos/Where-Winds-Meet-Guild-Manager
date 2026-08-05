@@ -51,6 +51,8 @@ interface Props {
   builds: PlayerBuild[];
   weaponSets: WeaponSet[];
   canEdit: boolean;
+  /** Puede mandar a la gente a los canales de voz (permiso war.voice). */
+  canVoice: boolean;
 }
 
 /**
@@ -77,7 +79,7 @@ const wash = (build: PlayerBuild | undefined, sets: WeaponSet[]) => {
  * like, and the board says what it does, but nothing is stopped from differing.
  * A leader short of people needs to see the gap, not be blocked by it.
  */
-const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => {
+const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit, canVoice }) => {
   const [side, setSide] = useState<WarSide>('attack');
   const [deployments, setDeployments] = useState<Deployment[]>([]);
   const [strategies, setStrategies] = useState<WarStrategy[]>([]);
@@ -114,6 +116,10 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
   const [formacionesAbiertas, setFormacionesAbiertas] = useState(false);
   const [nombreNuevo, setNombreNuevo] = useState('');
   const [aviso, setAviso] = useState<string | null>(null);
+  // La voz: si hay canales configurados (decide si el botón existe) y si hay
+  // un reparto en marcha (los movimientos van de uno en uno y tardan).
+  const [vozLista, setVozLista] = useState(false);
+  const [moviendo, setMoviendo] = useState(false);
 
   // What the board holds right now, for handlers that fire faster than a render.
   const latest = useRef<Deployment[]>([]);
@@ -132,6 +138,12 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
       setLocked(board.locked);
       setWar(board.current);
       if (board.now) setOffset(Date.parse(board.now) - Date.now());
+    }
+    if (canVoice) {
+      const voz = await api<{ bot: boolean; channels: Record<string, string> }>(
+        '/war/voice-channels',
+      ).catch(() => null);
+      setVozLista(Boolean(voz?.bot && Object.keys(voz.channels).length));
     }
   };
 
@@ -448,6 +460,39 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
     }
   };
 
+  /**
+   * Manda a los desplegados a sus canales de voz, según el modo.
+   *
+   * El resultado se cuenta entero en el aviso: quién se movió y quién no con
+   * su porqué. El servidor no puede saber de antemano quién está conectado a
+   * voz (Discord no lo cuenta por REST), así que el recuento de después es
+   * toda la verdad disponible.
+   */
+  const moverVoz = async (mode: 'general' | 'sides' | 'lanes') => {
+    setMoviendo(true);
+    setError(null);
+    try {
+      const out = await api<{
+        total: number;
+        moved: number;
+        skipped: { name: string; reason: string }[];
+      }>('/war/voice/move', { method: 'POST', body: JSON.stringify({ mode }) });
+      setAviso(
+        out.total === 0
+          ? 'No hay nadie desplegado que mover.'
+          : out.skipped.length
+            ? `${out.moved} de ${out.total} movidos a voz. Quedaron ${out.skipped.length}: ${out.skipped
+                .map((s) => `${s.name} (${s.reason})`)
+                .join(', ')}.`
+            : `Los ${out.moved} desplegados están en su canal.`,
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo mover a nadie');
+    } finally {
+      setMoviendo(false);
+    }
+  };
+
   const borrarFormacion = async (lineup: SavedLineup) => {
     if (!window.confirm(`¿Borrar la formación guardada «${lineup.name}»?`)) return;
     setError(null);
@@ -536,6 +581,45 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit }) => 
               <i className="fa-solid fa-chess"></i>
               Estrategias
             </button>
+            {/* Sólo existe cuando puede cumplir: con permiso, bot y canales
+                configurados. Un botón de voz que no mueve a nadie es ruido. */}
+            {canVoice && vozLista && (
+              <details className="relative">
+                <summary
+                  className="list-none text-sm text-slate-400 hover:text-amber-500 border border-slate-800 hover:border-amber-700 rounded px-3 py-2 transition-all flex items-center gap-2 cursor-pointer"
+                  title="Mover a los desplegados entre los canales de voz"
+                >
+                  <i className={`fa-solid ${moviendo ? 'fa-circle-notch fa-spin' : 'fa-headset'}`}></i>
+                  Voz
+                </summary>
+                <div className="absolute right-0 mt-2 w-64 bg-slate-900 border border-slate-800 rounded-lg shadow-2xl p-2 z-50 space-y-1">
+                  {(
+                    [
+                      { mode: 'general', icon: 'fa-users', label: 'Reunir en el canal general' },
+                      { mode: 'sides', icon: 'fa-people-arrows', label: 'Separar por bando' },
+                      { mode: 'lanes', icon: 'fa-diagram-project', label: 'Repartir a las líneas' },
+                    ] as const
+                  ).map(({ mode, icon, label }) => (
+                    <button
+                      key={mode}
+                      disabled={moviendo}
+                      onClick={(e) => {
+                        e.currentTarget.closest('details')?.removeAttribute('open');
+                        void moverVoz(mode);
+                      }}
+                      className="w-full min-h-tap text-left text-sm text-slate-300 hover:text-amber-500 hover:bg-slate-950 disabled:text-slate-600 disabled:cursor-not-allowed rounded px-3 py-2 transition-all flex items-center gap-3"
+                    >
+                      <i className={`fa-solid ${icon} w-4 text-center`}></i>
+                      {label}
+                    </button>
+                  ))}
+                  <p className="text-[10px] text-slate-600 px-3 pt-1 leading-relaxed">
+                    Sólo mueve a quien ya está en un canal de voz y tiene su Discord vinculado; el
+                    resultado dice quién quedó fuera y por qué.
+                  </p>
+                </div>
+              </details>
+            )}
             {/* The whole war, not this board: filling one side is what leaves
                 the other short, and that has to be visible from either. */}
             <span

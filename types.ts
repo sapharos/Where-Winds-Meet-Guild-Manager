@@ -385,6 +385,7 @@ export const PERMISSION_LABELS: Record<string, string> = {
   'ranks.manage': 'Gestionar rangos',
   'war.view': 'Ver la War Room',
   'war.edit': 'Editar despliegues y unidades',
+  'war.voice': 'Mover a canales de voz',
   'data.export': 'Exportar datos',
   'data.import': 'Importar datos',
   'builds.manage': 'Editar builds de cualquiera',
@@ -415,6 +416,19 @@ export interface DiscordMember {
   globalName: string | null;
   nick: string | null;
 }
+
+/** Un canal de voz del servidor de Discord, para elegirlo en la configuración. */
+export interface DiscordVoiceChannel {
+  id: string;
+  name: string;
+}
+
+/**
+ * Qué canal de voz corresponde a cada ranura de la guerra: 'general', un
+ * bando ('attack'), o una línea de un bando ('attack:left'). Ranura sin
+ * entrada = sin canal asignado, y el reparto se salta a quien caiga en ella.
+ */
+export type VoiceChannelMap = Record<string, string>;
 
 export interface PermissionCatalog {
   roles: UserRole[];
