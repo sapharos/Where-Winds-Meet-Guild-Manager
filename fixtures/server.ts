@@ -240,6 +240,17 @@ const ESCRITURAS: [string, RegExp, Ruta][] = [
     );
     return { played: results.filter((r) => r.ok).length, results };
   }],
+  // El disparo manual del aviso configurado: como el de verdad, exige sonido
+  // elegido y recorre todos los canales configurados sin repetir.
+  ['POST', /^\/war\/horn\/warn$/, (_m, _req, body) => {
+    const event = body?.event as 'jungle' | 'boss';
+    if (!cuerno[event]) {
+      return { error: 'ese aviso no tiene sonido configurado (Administración → Cuerno automático)' };
+    }
+    const ids = [...new Set(Object.values(mapaVoz))];
+    const results = ids.map((channelId) => ({ channelId, ok: true }));
+    return { played: results.length, results };
+  }],
   // El reparto de mentira: mueve a los que tienen "Discord" (los vinculados en
   // usuarios) y deja fuera al resto con su motivo, que es la parte de la
   // respuesta que la interfaz tiene que saber pintar.

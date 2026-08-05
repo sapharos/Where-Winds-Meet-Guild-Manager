@@ -89,6 +89,31 @@ export async function sweepSound(soundId, channelIds) {
   return { played: results.filter((r) => r.ok).length, results };
 }
 
+/**
+ * El aviso de un evento, tal como sonaría solo: su sonido configurado, por
+ * todos los canales de guerra sin repetir. Lo comparten el planificador y el
+ * disparo manual del menú Voz -- un líder que ve venir algo que los relojes
+ * no saben (un asalto, una retirada) toca el mismo cuerno con la mano.
+ */
+export async function warnEvent(type) {
+  if (!['jungle', 'boss'].includes(type)) {
+    throw Object.assign(new Error('unknown event'), { status: 400 });
+  }
+  const horn = await getHorn();
+  if (!horn[type]) {
+    throw Object.assign(
+      new Error('ese aviso no tiene sonido configurado (Administración → Cuerno automático)'),
+      { status: 409 },
+    );
+  }
+  const channels = await getVoiceChannels();
+  const objetivo = [...new Set(Object.values(channels))];
+  if (!objetivo.length) {
+    throw Object.assign(new Error('no hay canales de voz configurados'), { status: 409 });
+  }
+  return sweepSound(horn[type], objetivo);
+}
+
 /* ------------------------------------------------------- el automático */
 
 /** Los eventos de una guerra, como instantes absolutos desde su comienzo. */
@@ -130,19 +155,12 @@ async function tick() {
   }
 
   for (const event of schedule(war.startedAt)) {
-    const soundId = horn[event.type];
-    if (!soundId || fired.has(event.key)) continue;
+    if (!horn[event.type] || fired.has(event.key)) continue;
     if (now < event.when - WARN_BEFORE || now >= event.when) continue;
     fired.add(event.key);
-
-    const channels = await getVoiceChannels();
-    // Todos los canales de guerra configurados, sin repetir: el aviso debe
-    // llegar estén repartidos por líneas o todavía juntos en el general.
-    const objetivo = [...new Set(Object.values(channels))];
-    if (!objetivo.length) return;
     try {
-      const out = await sweepSound(soundId, objetivo);
-      console.log(`[cuerno] ${event.key}: sonó en ${out.played}/${objetivo.length} canales`);
+      const out = await warnEvent(event.type);
+      console.log(`[cuerno] ${event.key}: sonó en ${out.played}/${out.results.length} canales`);
     } catch (err) {
       console.error(`[cuerno] ${event.key} falló:`, err.message);
     }

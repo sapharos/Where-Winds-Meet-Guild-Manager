@@ -129,6 +129,11 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit, canVo
   const [sonidoElegido, setSonidoElegido] = useState('');
   const [ranurasCuerno, setRanurasCuerno] = useState<Set<string>>(new Set());
   const [tocando, setTocando] = useState(false);
+  // Qué avisos tienen sonido configurado, para ofrecer su disparo manual.
+  const [cuernoConfig, setCuernoConfig] = useState<{ jungle: string | null; boss: string | null }>({
+    jungle: null,
+    boss: null,
+  });
 
   // What the board holds right now, for handlers that fire faster than a render.
   const latest = useRef<Deployment[]>([]);
@@ -153,6 +158,12 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit, canVo
         '/war/voice-channels',
       ).catch(() => null);
       setVozCanales(voz?.bot ? voz.channels : {});
+      setCuernoConfig(
+        await api<{ jungle: string | null; boss: string | null }>('/war/horn').catch(() => ({
+          jungle: null,
+          boss: null,
+        })),
+      );
     }
   };
 
@@ -518,6 +529,21 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit, canVo
     }
   };
 
+  /** El recuento de un barrido, con las ranuras por su nombre. */
+  const resumenBarrido = (out: {
+    played: number;
+    results: { channelId: string; ok: boolean; reason?: string }[];
+  }) => {
+    const nombreDe = (channelId: string) =>
+      VOICE_SLOT_LABELS.find((l) => vozCanales[l.slot] === channelId)?.label ?? 'un canal';
+    const fallos = out.results.filter((r) => !r.ok);
+    return fallos.length
+      ? `El sonido llegó a ${out.played} de ${out.results.length} canales. Falló en ${fallos
+          .map((f) => `${nombreDe(f.channelId)} (${f.reason ?? 'sin motivo'})`)
+          .join(', ')}.`
+      : `El sonido recorrió los ${out.played} canales.`;
+  };
+
   /** El barrido: entra a cada canal elegido, suena, y cuenta el resultado. */
   const tocarCuerno = async () => {
     setTocando(true);
@@ -530,19 +556,29 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit, canVo
         method: 'POST',
         body: JSON.stringify({ soundId: sonidoElegido, slots: [...ranurasCuerno] }),
       });
-      const nombreDe = (channelId: string) =>
-        VOICE_SLOT_LABELS.find((l) => vozCanales[l.slot] === channelId)?.label ?? 'un canal';
-      const fallos = out.results.filter((r) => !r.ok);
-      setAviso(
-        fallos.length
-          ? `El sonido llegó a ${out.played} de ${out.results.length} canales. Falló en ${fallos
-              .map((f) => `${nombreDe(f.channelId)} (${f.reason ?? 'sin motivo'})`)
-              .join(', ')}.`
-          : `El sonido recorrió los ${out.played} canales.`,
-      );
+      setAviso(resumenBarrido(out));
       setCuernoAbierto(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo tocar el cuerno');
+    } finally {
+      setTocando(false);
+    }
+  };
+
+  /** El aviso ya configurado de un evento, disparado a mano con un clic. */
+  const avisarAhora = async (event: 'jungle' | 'boss') => {
+    setTocando(true);
+    setError(null);
+    try {
+      const out = await api<{
+        played: number;
+        results: { channelId: string; ok: boolean; reason?: string }[];
+      }>('/war/horn/warn', { method: 'POST', body: JSON.stringify({ event }) });
+      setAviso(
+        `Aviso de ${event === 'jungle' ? 'jungla' : 'boss'} lanzado. ${resumenBarrido(out)}`,
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo lanzar el aviso');
     } finally {
       setTocando(false);
     }
@@ -694,6 +730,30 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit, canVo
                     <i className="fa-solid fa-bullhorn w-4 text-center"></i>
                     Tocar un sonido…
                   </button>
+                  {/* Los avisos con sonido elegido, a un clic: el mismo cuerno
+                      que dispararía el reloj, cuando lo que pasa en el campo
+                      no espera al calendario. */}
+                  {(
+                    [
+                      { event: 'jungle', icon: 'fa-leaf', label: 'Avisar jungla ahora' },
+                      { event: 'boss', icon: 'fa-dragon', label: 'Avisar boss ahora' },
+                    ] as const
+                  )
+                    .filter(({ event }) => cuernoConfig[event])
+                    .map(({ event, icon, label }) => (
+                      <button
+                        key={event}
+                        disabled={moviendo || tocando}
+                        onClick={(e) => {
+                          e.currentTarget.closest('details')?.removeAttribute('open');
+                          void avisarAhora(event);
+                        }}
+                        className="w-full min-h-tap text-left text-sm text-slate-300 hover:text-amber-500 hover:bg-slate-950 disabled:text-slate-600 disabled:cursor-not-allowed rounded px-3 py-2 transition-all flex items-center gap-3"
+                      >
+                        <i className={`fa-solid ${icon} w-4 text-center`}></i>
+                        {label}
+                      </button>
+                    ))}
                   <p className="text-[10px] text-slate-600 px-3 pt-1 leading-relaxed">
                     Sólo mueve a quien ya está en un canal de voz y tiene su Discord vinculado; el
                     resultado dice quién quedó fuera y por qué.

@@ -62,7 +62,7 @@ import {
 } from './discord.js';
 import { botEnabled, searchGuildMembers, listVoiceChannels, listSoundboardSounds } from './discordBot.js';
 import { VOICE_SLOTS, getVoiceChannels, setVoiceChannels, deployVoice } from './voice.js';
-import { getHorn, setHorn, sweepSound, startHornScheduler } from './horn.js';
+import { getHorn, setHorn, sweepSound, warnEvent, startHornScheduler } from './horn.js';
 import {
   initAuth,
   hashPassword,
@@ -421,6 +421,15 @@ app.get('/api/war/horn', requireAuth, asHandler(async (_req, res) => {
 
 app.put('/api/war/horn', requireAuth, requirePermission('users.manage'), asHandler(async (req, res) => {
   res.json(await setHorn(req.body ?? {}));
+}));
+
+// El mismo aviso que dispararía el reloj, pero a mano: el sonido ya elegido
+// del evento, por todos los canales configurados, con un clic.
+app.post('/api/war/horn/warn', requireAuth, requirePermission('war.voice'), asHandler(async (req, res) => {
+  if (!botEnabled()) {
+    return res.status(503).json({ error: 'el bot de Discord no está configurado' });
+  }
+  res.json(await warnEvent(req.body?.event));
 }));
 
 app.post('/api/war/horn/play', requireAuth, requirePermission('war.voice'), asHandler(async (req, res) => {
