@@ -49,8 +49,37 @@ FIELDS = {
     "Profession Mastery": ("profession_mastery", "int"),
 }
 
+# El panel puede venir en español: una sesión real llegó mezclada tras cambiar
+# el idioma del juego a mitad de barrido, y sus fotogramas eran ilegibles para
+# un lector que sólo sabía inglés. Cada etiqueta española apunta a su inglesa y
+# el resto del programa sigue hablando una sola lengua. Las marcadas (inferida)
+# no se han visto en un fotograma real todavía: si el juego las escribe
+# distinto, el emparejado difuso probablemente las coja igual, y si no, se
+# corrigen aquí al primer barrido que las enseñe.
+TRANSLATIONS = {
+    "Región": "Region",
+    "Idioma": "Language",
+    "Días Unido": "Days Joined",
+    "Puntos de Actividad Semanal": "Week Activity Point",
+    "Fichas del tesoro obtenidas esta semana": "Treasure Tokens earned this week",
+    "Ficha del Tesoro Obtenida": "Treasure Token Obtained",
+    "Despejes Semanales": "Weekly Clears",
+    "Despejes de la Semana Pasada": "Last Week's Clears",
+    "Piso Más Alto": "Highest Floor",
+    "Participaciones en Liga": "League Participations",
+    "Participaciones en Partida Clasificatoria": "Ranked Match Participations",  # (inferida)
+    "Participaciones en Duelo": "Duel Participations",  # (inferida)
+    "Maestría Marcial": "Martial Mastery",  # (inferida)
+    "Maestría de Exploración": "Exploration Mastery",  # (inferida)
+    "Maestría de Profesión": "Profession Mastery",  # (inferida)
+}
+
 # Headings that introduce a section and carry no value of their own.
-SECTIONS = {"Personal Info", "Guild Hero's Realm", "Skyward Bond", "Guild War", "Mastery"}
+SECTIONS = {
+    "Personal Info", "Guild Hero's Realm", "Skyward Bond", "Guild War", "Mastery",
+    "Información personal", "Reino del Héroe de la Hermandad", "Vínculo Celestial",
+    "Guerra de Hermandad", "Maestría",
+}
 
 # Labels hug the left edge; values are right-aligned. A value is recognised by
 # where it ends, not where it starts: "Espanol(Latino)" begins at 0.60 of the
@@ -163,8 +192,19 @@ def read_header(readings: list[Reading], width: int, height: int) -> dict:
     return header
 
 
-def pair_fields(readings: list[Reading], width: int, height: int) -> list[tuple[str, str, float]]:
-    """Match left-column labels to the right-column value beside them."""
+def pair_fields(
+    readings: list[Reading],
+    width: int,
+    height: int,
+    misses: list | None = None,
+) -> list[tuple[str, str, float]]:
+    """Match left-column labels to the right-column value beside them.
+
+    `misses` recoge las etiquetas conocidas que quedaron sin valor al lado,
+    con su geometría, para que quien llama pueda darles la segunda mirada de
+    rescue_value. Es opcional porque al identificador en vivo de capture.py
+    le vale la firma de siempre.
+    """
     # The sticky header is not part of the list: its name and sect sit in the
     # label column and its rank badge in the value column, where they compete
     # with real fields for the pairing.
@@ -188,7 +228,7 @@ def pair_fields(readings: list[Reading], width: int, height: int) -> list[tuple[
             if i + span > len(labels):
                 break
             joined = " ".join(l.text for l in labels[i : i + span])
-            for known in FIELDS:
+            for known in (*FIELDS, *TRANSLATIONS):
                 ratio = similarity(joined, known)
                 if ratio > best[0] + 1e-9:
                     best = (ratio, span, known)
@@ -197,21 +237,57 @@ def pair_fields(readings: list[Reading], width: int, height: int) -> list[tuple[
         if known is None or ratio < MIN_LABEL_RATIO:
             i += 1
             continue
+        # De vuelta al inglés canónico: quien nos llama indexa FIELDS con esto.
+        known = TRANSLATIONS.get(known, known)
 
         # The value sits level with the label's first line, not its middle.
         anchor = labels[i].y_mid
         candidates = [
             (abs(v.y_mid - anchor), j) for j, v in enumerate(values) if j not in used_values
         ]
+        paired = False
         if candidates:
             distance, j = min(candidates)
             if distance < (labels[i].y1 - labels[i].y0) * 1.5:
                 used_values.add(j)
                 found.append((known, values[j].text, values[j].confidence))
+                paired = True
+        if not paired and misses is not None:
+            misses.append((known, labels[i]))
 
         i += span
 
     return found
+
+
+def rescue_value(engine, image: Image.Image, label: Reading):
+    """Una segunda mirada, sólo a la franja donde faltó el valor.
+
+    El reconocedor pierde de vez en cuando un dígito suelto -- un «4» solo
+    contra la textura del papel -- y como la captura omite los fotogramas
+    repetidos, volver a esa posición de scroll no lo arregla nunca: el mismo
+    fotograma con el mismo fallo es el único testigo. Recortar la franja
+    derecha de esa línea y mirarla al doble de aumento rescata lo que la
+    pasada general no vio. Sólo números: los dos campos de texto son palabras
+    largas que la pasada general no pierde.
+    """
+    pad = label.y1 - label.y0
+    box = (
+        int(image.width * 0.45),
+        max(0, int(label.y0 - pad * 0.5)),
+        image.width,
+        min(image.height, int(label.y1 + pad * 1.5)),
+    )
+    crop = image.crop(box)
+    big = crop.resize((crop.width * OCR_SCALE * 2, crop.height * OCR_SCALE * 2), Image.LANCZOS)
+    raw, _ = engine(np.array(big))
+    best = None
+    for item in raw or []:
+        text = str(item[1]).strip().replace(",", "")
+        confidence = float(item[2])
+        if re.fullmatch(r"\d+", text) and (best is None or confidence > best[1]):
+            best = (text, confidence)
+    return best
 
 
 # The social popup, opened by clicking a member's portrait. It lands inside the
@@ -581,9 +657,21 @@ def main() -> int:
                 if key in header:
                     member.record(key, str(header[key]), 1.0)
 
-            for known, raw, confidence in pair_fields(readings, image.width, image.height):
+            misses: list = []
+            for known, raw, confidence in pair_fields(readings, image.width, image.height, misses):
                 key, _ = FIELDS[known]
                 member.record(key, raw, confidence)
+
+            # Las etiquetas que se quedaron sin valor: se mira su franja de
+            # cerca antes de darlas por no capturadas. El voto de después se
+            # encarga de que un rescate dudoso no gane a una lectura limpia.
+            for known, label in misses:
+                key, kind = FIELDS[known]
+                if kind != "int":
+                    continue
+                rescued = rescue_value(engine, image, label)
+                if rescued:
+                    member.record(key, rescued[0], rescued[1] * 0.9)
 
         read_panels += len(frames)
 
