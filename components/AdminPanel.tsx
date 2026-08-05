@@ -190,6 +190,23 @@ const AdminPanel: React.FC<Props> = ({
     }
   };
 
+  const asignarJugador = async (user: ManagedUser, playerId: string) => {
+    try {
+      await api(`/users/${user.id}/player`, {
+        method: 'PATCH',
+        body: JSON.stringify({ playerId: playerId || null }),
+      });
+      setUsers(await authService.listUsers());
+      report(
+        playerId
+          ? `${user.username} asignado a ${players.find((p) => p.id === playerId)?.name ?? 'ese miembro'}.`
+          : `${user.username} ya no está asignado a ningún miembro.`,
+      );
+    } catch (err) {
+      report(err instanceof Error ? err.message : 'No se pudo asignar', false);
+    }
+  };
+
   const vincularDiscord = async (user: ManagedUser, member: DiscordMember) => {
     try {
       await authService.linkDiscord(user.id, member);
@@ -603,13 +620,14 @@ const AdminPanel: React.FC<Props> = ({
             </div>
           )}
 
-          <TablaAncha aviso="Desliza para ver rol, Discord, estado y acciones">
-            <table className="w-full text-sm min-w-[680px]">
+          <TablaAncha aviso="Desliza para ver miembro, rol, Discord, estado y acciones">
+            <table className="w-full text-sm min-w-[820px]">
               <thead>
                 <tr className="text-left text-slate-400">
                   <th className="p-2 border-b border-slate-800 font-semibold sticky left-0 bg-slate-900">
                     Usuario
                   </th>
+                  <th className="p-2 border-b border-slate-800 font-semibold">Miembro</th>
                   <th className="p-2 border-b border-slate-800 font-semibold">Rol</th>
                   <th className="p-2 border-b border-slate-800 font-semibold">Discord</th>
                   <th className="p-2 border-b border-slate-800 font-semibold">Estado</th>
@@ -626,6 +644,28 @@ const AdminPanel: React.FC<Props> = ({
                           tú
                         </span>
                       )}
+                    </td>
+                    <td className="p-2 border-b border-slate-800/60">
+                      {/* A quién del roster pertenece la cuenta. Editable aquí
+                          mismo: el endpoint existía desde el principio y la
+                          asignación es lo que deja a un miembro editar sus
+                          propias builds, así que verla sin poder corregirla
+                          era quedarse a medias. */}
+                      <select
+                        className="max-w-[160px] bg-slate-950 border border-slate-800 rounded p-1 text-xs outline-none focus:ring-1 focus:ring-amber-500"
+                        value={user.playerId ?? ''}
+                        onChange={(e) => asignarJugador(user, e.target.value)}
+                      >
+                        <option value="">— nadie —</option>
+                        {players
+                          .filter((p) => p.id === user.playerId || !users.some((u) => u.playerId === p.id))
+                          .sort((a, b) => a.name.localeCompare(b.name))
+                          .map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.name}
+                            </option>
+                          ))}
+                      </select>
                     </td>
                     <td className="p-2 border-b border-slate-800/60">
                       <select

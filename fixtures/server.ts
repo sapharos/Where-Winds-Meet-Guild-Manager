@@ -174,6 +174,12 @@ const GET: [RegExp, Ruta][] = [
 ];
 
 const ESCRITURAS: [string, RegExp, Ruta][] = [
+  ['PATCH', /^\/users\/([^/]+)\/player$/, (m, _req, body) => {
+    store.usuarios = store.usuarios.map((u) =>
+      u.id === m[1] ? { ...u, playerId: body?.playerId ?? null } : u,
+    );
+    return { ok: true };
+  }],
   ['PATCH', /^\/users\/([^/]+)\/discord$/, (m, _req, body) => {
     store.usuarios = store.usuarios.map((u) =>
       u.id === m[1]
