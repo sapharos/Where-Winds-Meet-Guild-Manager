@@ -135,14 +135,34 @@ export async function matchEntries(entries) {
 export async function commitScan({ scannedAt, entries }) {
   const client = await pool.connect();
   const created = [];
+  const reactivated = [];
   let stored = 0;
 
   try {
     await client.query('BEGIN');
     const when = scannedAt ? new Date(scannedAt) : new Date();
 
+    // Quien estaba de baja y aparece en el barrido del gremio es que volvió:
+    // el juego no lista a quien no es miembro. Se reactiva aquí, dentro de la
+    // misma transacción, y se cuenta en la respuesta para que el resumen lo
+    // diga en vez de dejar que se descubra por el roster.
+    const dormidos = await client.query(
+      `SELECT id, name FROM players WHERE guild_id = $1 AND is_active = false`,
+      [GUILD_ID],
+    );
+    const deBaja = new Map(dormidos.rows.map((p) => [p.id, p.name]));
+
     for (const entry of entries) {
       let playerId = entry.playerId;
+
+      if (playerId && deBaja.has(playerId)) {
+        await client.query(
+          `UPDATE players SET is_active = true WHERE guild_id = $1 AND id = $2`,
+          [GUILD_ID, playerId],
+        );
+        reactivated.push({ id: playerId, name: deBaja.get(playerId) });
+        deBaja.delete(playerId);
+      }
 
       if (!playerId && entry.createAs) {
         playerId = randomUUID();
@@ -209,7 +229,7 @@ export async function commitScan({ scannedAt, entries }) {
     }
 
     await client.query('COMMIT');
-    return { stored, created, scannedAt: when.toISOString() };
+    return { stored, created, reactivated, scannedAt: when.toISOString() };
   } catch (err) {
     await client.query('ROLLBACK');
     // A unique violation here means two members were given one account number,

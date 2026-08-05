@@ -27,6 +27,11 @@ const ScanImport: React.FC<Props> = ({ players, onImported }) => {
   // sweep misses it, since every later sweep matches on it.
   const [uids, setUids] = useState<Record<string, string>>({});
   const [open, setOpen] = useState<string | null>(null);
+  /** A quién de los que no aparecieron se decidió dar de baja al guardar. */
+  const [bajas, setBajas] = useState<Set<string>>(new Set());
+
+  const jugadorDe = (id: string | null | undefined) =>
+    id ? players.find((p) => p.id === id) : undefined;
 
   const uidFor = (entry: ScanPreviewEntry): string =>
     uids[entry.nameAsRead] ?? entry.uid ?? '';
@@ -67,6 +72,7 @@ const ScanImport: React.FC<Props> = ({ players, onImported }) => {
       setDecisions(initial);
       setEdits({});
       setUids({});
+      setBajas(new Set());
       setOpen(null);
       setScannedAt(document.scannedAt ?? null);
       setMessage(null);
@@ -105,19 +111,41 @@ const ScanImport: React.FC<Props> = ({ players, onImported }) => {
         return;
       }
 
-      const result = await api<{ stored: number; created: { name: string }[] }>('/scans/commit', {
+      const result = await api<{
+        stored: number;
+        created: { name: string }[];
+        reactivated: { name: string }[];
+      }>('/scans/commit', {
         method: 'POST',
         body: JSON.stringify({ scannedAt, entries }),
       });
 
+      // Las bajas van después de guardar y una a una: si una falla, el escaneo
+      // ya está a salvo y el mensaje dice hasta dónde llegó.
+      const paraBaja = ausentes.filter((p) => bajas.has(p.id));
+      const dadosDeBaja: string[] = [];
+      for (const p of paraBaja) {
+        await api(`/players/${p.id}/flags`, {
+          method: 'PATCH',
+          body: JSON.stringify({ isActive: false }),
+        });
+        dadosDeBaja.push(p.name);
+      }
+
       report(
         `Guardado: ${result.stored} miembros` +
-          (result.created.length ? `, ${result.created.length} nuevos en el roster.` : '.'),
+          (result.created.length ? `, ${result.created.length} nuevos en el roster` : '') +
+          (result.reactivated.length
+            ? `. Vuelven al alta: ${result.reactivated.map((r) => r.name).join(', ')}`
+            : '') +
+          (dadosDeBaja.length ? `. Dados de baja: ${dadosDeBaja.join(', ')}` : '') +
+          '.',
       );
       setPreview(null);
       setDecisions({});
       setEdits({});
       setUids({});
+      setBajas(new Set());
       onImported();
     } catch (err) {
       report(err instanceof Error ? err.message : 'No se pudo guardar', false);
@@ -127,6 +155,20 @@ const ScanImport: React.FC<Props> = ({ players, onImported }) => {
   };
 
   const pending = preview?.filter((e) => !e.playerId).length ?? 0;
+
+  // Del roster activo, quién no viene en el escaneo ni fue elegido en ninguna
+  // fila. Sólo informativo: guardar nunca exige decidir sobre ellos, porque un
+  // ausente puede ser una página que no se capturó, no una salida del gremio.
+  const enlazados = new Set(
+    Object.values(decisions)
+      .filter((d): d is Extract<Decision, { kind: 'link' }> => d.kind === 'link')
+      .map((d) => d.playerId),
+  );
+  const ausentes = preview
+    ? players
+        .filter((p) => p.isActive !== false && !enlazados.has(p.id))
+        .sort((a, b) => a.name.localeCompare(b.name))
+    : [];
 
   // Two members cannot share an account number; the database refuses it, so it
   // is worth saying before the save rather than after.
@@ -323,11 +365,19 @@ const ScanImport: React.FC<Props> = ({ players, onImported }) => {
                               return (
                                 <option key={p.id} value={p.id}>
                                   {p.name}
+                                  {p.isActive === false ? ' — de baja' : ''}
                                   {hint ? `  (${Math.round(hint.score * 100)}% parecido)` : ''}
                                 </option>
                               );
                             })}
                         </select>
+                        {decision?.kind === 'link' &&
+                          jugadorDe(decision.playerId)?.isActive === false && (
+                            <div className="text-[10px] text-emerald-400 mt-0.5">
+                              <i className="fa-solid fa-rotate-left mr-1"></i>
+                              estaba de baja: aparecer en el escaneo lo devuelve al alta
+                            </div>
+                          )}
                         {decision?.kind === 'create' && (
                           <input
                             type="text"
@@ -398,6 +448,46 @@ const ScanImport: React.FC<Props> = ({ players, onImported }) => {
               </tbody>
             </table>
           </TablaAncha>
+
+          {ausentes.length > 0 && (
+            <div className="mt-6 pt-4 border-t border-slate-800">
+              <p className="text-sm text-slate-300 mb-1">
+                <i className="fa-solid fa-user-slash mr-2 text-amber-500"></i>
+                Del roster pero no aparecieron ({ausentes.length})
+              </p>
+              <p className="text-xs text-slate-500 mb-3">
+                Puede que dejaran el gremio, o que el escaneo no los alcanzara. Marca a quien haya
+                que dar de baja al guardar; a los demás no les pasa nada, y siempre puedes cazarlos
+                después con un escaneo suelto de esa persona. La baja no borra a nadie: su historial
+                queda y volver a aparecer en un escaneo los devuelve al alta.
+              </p>
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-x-3">
+                {ausentes.map((p) => (
+                  <label
+                    key={p.id}
+                    className="min-h-tap flex items-center gap-2.5 text-sm cursor-pointer"
+                  >
+                    <input
+                      type="checkbox"
+                      className="w-4 h-4 accent-amber-600"
+                      checked={bajas.has(p.id)}
+                      onChange={() =>
+                        setBajas((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(p.id)) next.delete(p.id);
+                          else next.add(p.id);
+                          return next;
+                        })
+                      }
+                    />
+                    <span className={bajas.has(p.id) ? 'text-red-300 line-through' : 'text-slate-300'}>
+                      {p.name}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
         </section>
       )}
     </div>

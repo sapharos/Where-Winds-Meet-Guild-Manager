@@ -546,6 +546,9 @@ const App: React.FC = () => {
             </p>
           )
         ) : activeTab === 'admin' ? (
+          // quiet: el escaneo lo acaba de guardar quien está mirando; el
+          // spinner de página desmontaría el panel y con él su resumen de
+          // reactivados y bajas, que es lo único que queda por leer.
           <AdminPanel
             currentUser={session.user}
             canManageUsers={can('users.manage')}
@@ -553,7 +556,7 @@ const App: React.FC = () => {
             canManageBuilds={can('builds.manage')}
             canScan={can('roster.edit')}
             players={players}
-            onScanImported={() => void loadAllData()}
+            onScanImported={() => void loadAllData({ quiet: true })}
             onWeaponSetsChanged={reloadWeaponSets}
           />
         ) : activeTab === 'roster' ? (

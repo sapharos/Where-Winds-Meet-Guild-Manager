@@ -286,6 +286,47 @@ const ESCRITURAS: [string, RegExp, Ruta][] = [
     }
     return { total: objetivo.length, moved, skipped };
   }],
+  // El escaneo, lo justo para ensayar la pantalla de revisión: empareja por
+  // nombre exacto contra el roster y confirma reactivando a quien estaba de
+  // baja, como hace el servidor de verdad.
+  ['POST', /^\/scans\/preview$/, (_m, _req, body) => {
+    const entries = ((body?.entries ?? []) as { nameAsRead?: string; fields?: unknown; uid?: string }[]).map(
+      (e) => {
+        const p = store.players.find(
+          (pl) => pl.name.toLowerCase() === String(e.nameAsRead ?? '').toLowerCase(),
+        );
+        return {
+          nameAsRead: e.nameAsRead ?? '',
+          fields: e.fields ?? {},
+          uid: e.uid ?? null,
+          match: p ? 'exact' : 'none',
+          playerId: p?.id ?? null,
+          playerName: p?.name ?? null,
+          renamed: false,
+          suggestions: [],
+        };
+      },
+    );
+    return { entries };
+  }],
+  ['POST', /^\/scans\/commit$/, (_m, _req, body) => {
+    const reactivated: { id: string; name: string }[] = [];
+    for (const e of (body?.entries ?? []) as { playerId?: string }[]) {
+      const p = e.playerId ? store.players.find((pl) => pl.id === e.playerId) : undefined;
+      if (p && p.isActive === false) {
+        reactivated.push({ id: p.id, name: p.name });
+        store.players = store.players.map((pl) =>
+          pl.id === p.id ? { ...pl, isActive: true } : pl,
+        );
+      }
+    }
+    return {
+      stored: (body?.entries ?? []).length,
+      created: [],
+      reactivated,
+      scannedAt: new Date().toISOString(),
+    };
+  }],
   ['PATCH', /^\/users\/([^/]+)\/player$/, (m, _req, body) => {
     store.usuarios = store.usuarios.map((u) =>
       u.id === m[1] ? { ...u, playerId: body?.playerId ?? null } : u,
