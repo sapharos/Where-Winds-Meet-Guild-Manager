@@ -266,6 +266,7 @@ export const session = {
   user: { id: 'u-1', username: 'jinwei', role: 'leader' as const, playerId: 'p-3' },
   permissions: [
     'roster.view', 'roster.edit', 'ranks.manage', 'war.view', 'war.edit', 'war.voice',
-    'data.export', 'data.import', 'builds.manage', 'users.manage', 'permissions.manage',
+    'events.manage', 'data.export', 'data.import', 'builds.manage', 'users.manage',
+    'permissions.manage',
   ],
 };

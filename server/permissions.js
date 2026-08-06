@@ -9,6 +9,7 @@ export const PERMISSIONS = [
   'war.view',
   'war.edit',
   'war.voice',
+  'events.manage',
   'data.export',
   'data.import',
   'builds.manage',
@@ -21,8 +22,16 @@ export const PERMISSIONS = [
 export const DEFAULT_PERMISSIONS = {
   admin: [...PERMISSIONS],
   leader: [...PERMISSIONS],
-  subleader: ['roster.view', 'roster.edit', 'war.view', 'war.edit', 'war.voice', 'data.export'],
-  officer: ['roster.view', 'war.view', 'war.edit', 'war.voice', 'data.export'],
+  subleader: [
+    'roster.view',
+    'roster.edit',
+    'war.view',
+    'war.edit',
+    'war.voice',
+    'events.manage',
+    'data.export',
+  ],
+  officer: ['roster.view', 'war.view', 'war.edit', 'war.voice', 'events.manage', 'data.export'],
   member: ['roster.view', 'war.view'],
 };
 

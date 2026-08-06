@@ -165,8 +165,156 @@ const espera = () => new Promise((done) => setTimeout(done, LATENCIA));
 // rutas (la búsqueda de Discord) que necesitan leer la query string.
 type Ruta = (m: RegExpMatchArray, req: Request, body: any, url: URL) => unknown;
 
+/**
+ * La agenda inventada.
+ *
+ * Vive en memoria y con las mismas reglas que el servidor de verdad -- la
+ * respuesta es del miembro y machaca la anterior -- porque lo que hay que poder
+ * ensayar aquí es justo eso: contestar, cambiar de idea, y ver el recuento
+ * moverse. Tres eventos: una guerra con encuesta abierta, otra sin abrir y una
+ * quedada, que son los tres estados que se ven distintos en pantalla.
+ */
+interface RespuestaFalsa {
+  playerId: string;
+  name: string;
+  role: string;
+  answer: string;
+  rounds: number | null;
+  note: string | null;
+  answeredBy: string | null;
+  source: string;
+  updatedAt: string;
+}
+
+const enDias = (dias: number, hora = 19, minuto = 30) => {
+  const d = new Date();
+  d.setDate(d.getDate() + dias);
+  d.setHours(hora, minuto, 0, 0);
+  return d.toISOString();
+};
+
+const eventos: Record<string, unknown>[] = [
+  {
+    id: 'ev-sabado',
+    kind: 'war',
+    title: 'Guerra del sábado',
+    startsAt: enDias(2),
+    minutes: 150,
+    rounds: 5,
+    notes: 'Nos conectamos a las 7:15 para repartir líneas.',
+    opensAt: enDias(-3),
+    closesAt: enDias(2, 12, 0),
+    cancelledAt: null,
+    createdBy: 'u-1',
+  },
+  {
+    id: 'ev-domingo',
+    kind: 'war',
+    title: 'Guerra del domingo',
+    startsAt: enDias(3),
+    minutes: 150,
+    rounds: 5,
+    notes: null,
+    opensAt: enDias(-3),
+    closesAt: enDias(2, 12, 0),
+    cancelledAt: null,
+    createdBy: 'u-1',
+  },
+  {
+    id: 'ev-pve',
+    kind: 'pve',
+    title: 'Reino del Héroe',
+    startsAt: enDias(4, 21, 0),
+    minutes: 90,
+    rounds: null,
+    notes: null,
+    opensAt: null,
+    closesAt: null,
+    cancelledAt: null,
+    createdBy: 'u-1',
+  },
+];
+
+const respuestas: Record<string, RespuestaFalsa[]> = {
+  'ev-sabado': [],
+  'ev-domingo': [],
+  'ev-pve': [],
+};
+
+// Unos cuantos ya contestados, para que el recuento no salga en cero y se vea
+// cómo queda una lista con gente dentro.
+{
+  const inicial: [string, string, number | null][] = [
+    ['An Ning', 'yes', 5],
+    ['Bai Hu', 'yes', 3],
+    ['Bao Zhu', 'yes', 5],
+    ['Cang Ming', 'maybe', null],
+    ['Chen Xi', 'no', null],
+    ['Edve', 'yes', 2],
+  ];
+  for (const [nombre, answer, rounds] of inicial) {
+    const p = fake.players.find((x) => x.name === nombre);
+    if (!p) continue;
+    respuestas['ev-sabado'].push({
+      playerId: p.id,
+      name: p.name,
+      role: p.role,
+      answer,
+      rounds,
+      note: null,
+      answeredBy: null,
+      source: 'web',
+      updatedAt: new Date().toISOString(),
+    });
+  }
+}
+
+const cuenta = (id: string, answer: string) =>
+  (respuestas[id] ?? []).filter((r) => r.answer === answer).length;
+
+const conRecuento = (e: Record<string, unknown>) => ({
+  ...e,
+  yes: cuenta(e.id as string, 'yes'),
+  maybe: cuenta(e.id as string, 'maybe'),
+  no: cuenta(e.id as string, 'no'),
+});
+
+const conRespuestas = (id: string) => {
+  const e = eventos.find((x) => x.id === id);
+  return e ? { ...e, responses: respuestas[id] ?? [] } : null;
+};
+
+const anotar = (id: string, playerId: string, body: Record<string, unknown>, porOtro: string | null) => {
+  const p = fake.players.find((x) => x.id === playerId);
+  if (!p) return conRespuestas(id);
+  const lista = (respuestas[id] ??= []);
+  const evento = eventos.find((x) => x.id === id);
+  const cuentaPartidas = evento?.kind === 'war';
+  const fila: RespuestaFalsa = {
+    playerId,
+    name: p.name,
+    role: p.role,
+    answer: String(body?.answer ?? 'yes'),
+    rounds:
+      body?.answer === 'yes' && cuentaPartidas
+        ? Number(body?.rounds ?? evento?.rounds ?? 1)
+        : null,
+    note: null,
+    answeredBy: porOtro,
+    source: porOtro ? 'web' : 'web',
+    updatedAt: new Date().toISOString(),
+  };
+  const at = lista.findIndex((r) => r.playerId === playerId);
+  if (at >= 0) lista[at] = fila;
+  else lista.push(fila);
+  lista.sort((a, b) => a.name.localeCompare(b.name));
+  return conRespuestas(id);
+};
+
 const GET: [RegExp, Ruta][] = [
   [/^\/auth\/me$/, () => fake.session],
+  [/^\/events$/, () => eventos.map(conRecuento)],
+  [/^\/events\/([^/]+)$/, (m) => conRespuestas(m[1])],
   [/^\/auth\/config$/, () => ({ discord: false })],
   [/^\/state$/, () => ({ players: store.players, sessions: [], ranks: store.ranks })],
   [/^\/builds$/, () => store.builds],
@@ -221,6 +369,31 @@ const GET: [RegExp, Ruta][] = [
 ];
 
 const ESCRITURAS: [string, RegExp, Ruta][] = [
+  ['PUT', /^\/events\/([^/]+)\/response$/, (m, _req, body) =>
+    anotar(m[1], fake.session.user.playerId ?? '', body ?? {}, null)],
+  ['PUT', /^\/events\/([^/]+)\/responses\/([^/]+)$/, (m, _req, body) =>
+    anotar(m[1], m[2], body ?? {}, fake.session.user.id)],
+  ['POST', /^\/events\/([^/]+)\/cancel$/, (m, _req, body) => {
+    const e = eventos.find((x) => x.id === m[1]);
+    if (e) e.cancelledAt = body?.cancelled === false ? null : new Date().toISOString();
+    return conRespuestas(m[1]);
+  }],
+  ['POST', /^\/events$/, (_m, _req, body) => {
+    const id = `ev-${Date.now()}`;
+    eventos.push({ ...body, id, cancelledAt: null, createdBy: fake.session.user.id });
+    respuestas[id] = [];
+    return conRespuestas(id);
+  }],
+  ['PUT', /^\/events\/([^/]+)$/, (m, _req, body) => {
+    const at = eventos.findIndex((x) => x.id === m[1]);
+    if (at >= 0) eventos[at] = { ...eventos[at], ...body, id: m[1] };
+    return conRespuestas(m[1]);
+  }],
+  ['DELETE', /^\/events\/([^/]+)$/, (m) => {
+    const at = eventos.findIndex((x) => x.id === m[1]);
+    if (at >= 0) eventos.splice(at, 1);
+    return { ok: true };
+  }],
   ['PUT', /^\/war\/voice-channels$/, (_m, _req, body) => {
     mapaVoz = body?.channels ?? {};
     return { channels: mapaVoz };

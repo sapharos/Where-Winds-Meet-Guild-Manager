@@ -63,6 +63,14 @@ import {
 import { botEnabled, searchGuildMembers, listVoiceChannels, listSoundboardSounds } from './discordBot.js';
 import { commandsEnabled, verifyInteraction, handleInteraction, registerCommands } from './discordCommands.js';
 import { VOICE_SLOTS, getVoiceChannels, setVoiceChannels, deployVoice } from './voice.js';
+import {
+  listEvents,
+  getEvent,
+  saveEvent,
+  cancelEvent,
+  deleteEvent,
+  respond,
+} from './events.js';
 import { getHorn, setHorn, sweepSound, warnEvent, startHornScheduler } from './horn.js';
 import {
   initAuth,
@@ -366,6 +374,58 @@ app.delete('/api/users/:id', requireAuth, requirePermission('users.manage'), asH
   await pool.query(`DELETE FROM users WHERE id = $1 AND guild_id = $2`, [id, GUILD_ID]);
   res.json({ ok: true });
 }));
+
+/* ----------------------------------------------------------------- agenda */
+
+// Ver lo que hay programado no pide permiso: es de lo que va el gremio, y una
+// agenda que no se puede leer no convoca a nadie.
+app.get('/api/events', requireAuth, asHandler(async (req, res) => {
+  res.json(await listEvents({ past: req.query.past === 'true' }));
+}));
+
+app.get('/api/events/:id', requireAuth, asHandler(async (req, res) => {
+  res.json(await getEvent(req.params.id));
+}));
+
+app.post('/api/events', requireAuth, requirePermission('events.manage'), asHandler(async (req, res) => {
+  res.json(await saveEvent(req.body, req.user.id));
+}));
+
+app.put('/api/events/:id', requireAuth, requirePermission('events.manage'), asHandler(async (req, res) => {
+  res.json(await saveEvent({ ...req.body, id: req.params.id }, req.user.id));
+}));
+
+app.post('/api/events/:id/cancel', requireAuth, requirePermission('events.manage'), asHandler(async (req, res) => {
+  res.json(await cancelEvent(req.params.id, req.body?.cancelled !== false));
+}));
+
+app.delete('/api/events/:id', requireAuth, requirePermission('events.manage'), asHandler(async (req, res) => {
+  await deleteEvent(req.params.id);
+  res.json({ ok: true });
+}));
+
+// La propia respuesta. No pide permiso, pide tener ficha: se contesta por uno
+// mismo, y quien no está en el roster no tiene por qué aparecer en una lista de
+// asistencia.
+app.put('/api/events/:id/response', requireAuth, asHandler(async (req, res) => {
+  if (!req.user.playerId) {
+    return res.status(403).json({ error: 'tu cuenta no está unida a una ficha del roster' });
+  }
+  res.json(await respond(req.params.id, req.user.playerId, req.body));
+}));
+
+// Y la de otro, que es cosa de quien organiza: hay miembros que no entran ni a
+// la web ni a Discord y alguien tiene que poder anotar lo que dijeron por voz.
+app.put(
+  '/api/events/:id/responses/:playerId',
+  requireAuth,
+  requirePermission('events.manage'),
+  asHandler(async (req, res) => {
+    res.json(
+      await respond(req.params.id, req.params.playerId, req.body, { porOtro: req.user.id }),
+    );
+  }),
+);
 
 /* ------------------------------------------------------------- discord bot */
 

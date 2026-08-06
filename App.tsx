@@ -5,6 +5,7 @@ import { storageService } from './services/storageService';
 import { authService, api, ApiError, Session } from './services/authService';
 import { DEFAULT_GROUPS } from './constants';
 import MemberManager from './components/MemberManager';
+import Agenda from './components/Agenda';
 import WarBoard from './components/WarBoard';
 import LoginScreen from './components/LoginScreen';
 import DiscordClaim from './components/DiscordClaim';
@@ -19,7 +20,9 @@ import { Bloque, Tarjetas } from './components/Esqueleto';
 const App: React.FC = () => {
   const [session, setSession] = useState<Session | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
-  const [activeTab, setActiveTab] = useState<'me' | 'roster' | 'war-room' | 'admin'>('roster');
+  const [activeTab, setActiveTab] = useState<'me' | 'roster' | 'agenda' | 'war-room' | 'admin'>(
+    'roster',
+  );
   const [haciaAtras, setHaciaAtras] = useState(false);
   const [historyFor, setHistoryFor] = useState<Player | null>(null);
   const [buildsFor, setBuildsFor] = useState<Player | null>(null);
@@ -291,6 +294,7 @@ const App: React.FC = () => {
   const tabs = [
     { id: 'roster' as const, label: 'Roster', corto: 'Roster', icon: 'fa-users', show: true },
     { id: 'me' as const, label: 'Mi perfil', corto: 'Perfil', icon: 'fa-user', show: Boolean(myPlayer) },
+    { id: 'agenda' as const, label: 'Agenda', corto: 'Agenda', icon: 'fa-calendar-day', show: true },
     { id: 'war-room' as const, label: 'Sala de Guerra', corto: 'Guerra', icon: 'fa-chess-knight', show: true },
     { id: 'admin' as const, label: 'Administración', corto: 'Admin', icon: 'fa-user-shield', show: canSeeAdmin },
   ].filter((t) => t.show);
@@ -544,6 +548,12 @@ const App: React.FC = () => {
             players={players}
             onScanImported={() => void loadAllData({ quiet: true })}
             onWeaponSetsChanged={reloadWeaponSets}
+          />
+        ) : activeTab === 'agenda' ? (
+          <Agenda
+            players={players}
+            myPlayerId={session.user.playerId}
+            canManage={can('events.manage')}
           />
         ) : activeTab === 'roster' ? (
           <MemberManager

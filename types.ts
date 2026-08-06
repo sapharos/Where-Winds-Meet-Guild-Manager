@@ -461,6 +461,72 @@ export const VOICE_SLOT_LABELS: { slot: string; label: string }[] = [
   ...WAR_LANES.map((l) => ({ slot: `defense:${l.id}`, label: `Defensa · ${l.label}` })),
 ];
 
+/* ------------------------------------------------------------------ agenda */
+
+export type EventKind = 'war' | 'practice' | 'pve' | 'casual';
+
+export const EVENT_KINDS: EventKind[] = ['war', 'practice', 'pve', 'casual'];
+
+export const EVENT_KIND_LABELS: Record<EventKind, string> = {
+  war: 'Guerra de gremio',
+  practice: 'Guerra de práctica',
+  pve: 'Evento PvE',
+  casual: 'Actividad del gremio',
+};
+
+// Cada tipo con su icono, del mismo juego que ya usa la aplicación.
+export const EVENT_KIND_ICONS: Record<EventKind, string> = {
+  war: 'fa-chess-knight',
+  practice: 'fa-dumbbell',
+  pve: 'fa-dragon',
+  casual: 'fa-mug-hot',
+};
+
+/** Sólo la guerra de gremio pregunta a cuántas partidas se llega. */
+export const cuentaPartidas = (kind: EventKind) => kind === 'war';
+
+export type EventAnswer = 'yes' | 'no' | 'maybe';
+
+export const EVENT_ANSWER_LABELS: Record<EventAnswer, string> = {
+  yes: 'Voy',
+  maybe: 'Tal vez',
+  no: 'No puedo',
+};
+
+export interface EventResponse {
+  playerId: string;
+  name: string;
+  role: Role;
+  answer: EventAnswer;
+  rounds: number | null;
+  note: string | null;
+  /** El id del usuario que la escribió, cuando no fue el propio miembro. */
+  answeredBy: string | null;
+  source: string;
+  updatedAt: string;
+}
+
+export interface GuildEvent {
+  id: string;
+  kind: EventKind;
+  title: string;
+  startsAt: string;
+  minutes: number;
+  /** Cuántas partidas caben. Sólo en las guerras. */
+  rounds: number | null;
+  notes: string | null;
+  opensAt: string | null;
+  closesAt: string | null;
+  cancelledAt: string | null;
+  createdBy: string | null;
+  /** Sólo al listar: el recuento de cada respuesta. */
+  yes?: number;
+  maybe?: number;
+  no?: number;
+  /** Sólo al pedir uno concreto. */
+  responses?: EventResponse[];
+}
+
 /** Un sonido del panel de sonidos del servidor de Discord. */
 export interface DiscordSoundboardSound {
   id: string;

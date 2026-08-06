@@ -524,3 +524,73 @@ CREATE TABLE IF NOT EXISTS gear_stat_labels (
 -- above, and a nullable column there is a slot a piece could quietly fall
 -- through: a NULL never conflicts, so the same helm would insert twice.
 ALTER TABLE gear_pieces ALTER COLUMN set_id SET NOT NULL;
+
+-- ---------------------------------------------------------------------------
+-- La agenda: qué hay programado y quién va
+--
+-- Un evento es una ocasión concreta con fecha; la respuesta es de un miembro,
+-- no de un mensaje de Discord. Eso último es la decisión que sostiene todo lo
+-- demás: la web y el bot escriben en la misma fila, así que quien contesta en
+-- uno lo ve contestado en el otro, y nadie tiene que preguntarse cuál de los
+-- dos manda.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS guild_events (
+  id           TEXT NOT NULL,
+  guild_id     TEXT NOT NULL REFERENCES guilds(id) ON DELETE CASCADE,
+  -- 'war' | 'practice' | 'pve' | 'casual'. El tipo decide qué se pregunta:
+  -- sólo la guerra de gremio pide además a cuántas partidas se llega.
+  kind         TEXT NOT NULL,
+  title        TEXT NOT NULL,
+  -- Instante absoluto. La hora local -- 7:30 pm en Colombia -- se compone al
+  -- pintarla, en el huso de quien mira: el gremio no está todo en el mismo.
+  starts_at    TIMESTAMPTZ NOT NULL,
+  minutes      INTEGER NOT NULL DEFAULT 60,
+  -- Cuántas partidas caben esa noche. Sólo en las guerras; en lo demás, NULL.
+  rounds       INTEGER,
+  notes        TEXT,
+  -- Cuándo se puede contestar. Fuera de esa ventana la encuesta se lee pero no
+  -- se toca, que es lo que hace que una lista cerrada siga siendo la que se
+  -- usó para armar la formación.
+  opens_at     TIMESTAMPTZ,
+  closes_at    TIMESTAMPTZ,
+  cancelled_at TIMESTAMPTZ,
+  created_by   TEXT,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (guild_id, id)
+);
+
+CREATE INDEX IF NOT EXISTS guild_events_when_idx ON guild_events (guild_id, starts_at DESC);
+
+CREATE TABLE IF NOT EXISTS event_responses (
+  guild_id    TEXT NOT NULL REFERENCES guilds(id) ON DELETE CASCADE,
+  event_id    TEXT NOT NULL,
+  player_id   TEXT NOT NULL,
+  -- 'yes' | 'no' | 'maybe'. «Tal vez» existe porque la incertidumbre es el
+  -- estado real de mucha gente el lunes, y obligar a mentir con un sí o un no
+  -- convierte la encuesta en algo que hay que volver a preguntar por voz.
+  answer      TEXT NOT NULL,
+  -- A cuántas partidas llega, cuando el evento las cuenta y la respuesta es sí.
+  rounds      INTEGER,
+  note        TEXT,
+  -- Quién la escribió, cuando no fue el propio miembro: un oficial puede
+  -- contestar por quien no entra ni a la web ni a Discord, y esa diferencia
+  -- tiene que quedar visible en vez de pasar por una confirmación suya.
+  answered_by TEXT,
+  source      TEXT NOT NULL DEFAULT 'web',
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (guild_id, event_id, player_id)
+);
+
+-- Un permiso nuevo no existe en la matriz de un gremio que ya la tenía
+-- decidida, así que al desplegar esto nadie podría programar nada hasta ir a
+-- marcarlo a mano. Se siembra una vez, a los roles que ya llevan la guerra, y
+-- el marcador impide que vuelva a aparecer si alguien decide quitarlo.
+INSERT INTO role_permissions (guild_id, role, permission)
+SELECT DISTINCT guild_id, role, 'events.manage' FROM role_permissions
+ WHERE permission = 'war.edit'
+   AND NOT EXISTS (SELECT 1 FROM app_settings WHERE key = 'seeded:events.manage')
+ON CONFLICT DO NOTHING;
+
+INSERT INTO app_settings (key, value) VALUES ('seeded:events.manage', 'true')
+  ON CONFLICT (key) DO NOTHING;
