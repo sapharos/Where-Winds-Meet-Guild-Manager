@@ -49,6 +49,19 @@ const SPKI_ED25519 = Buffer.from('302a300506032b6570032100', 'hex');
 // desde COMMANDS reventaría el import entero.
 const WAR_SIDES = { attack: 'Ataque', defense: 'Defensa' };
 
+/**
+ * El color de cada frente.
+ *
+ * No son dos colores elegidos aquí: son `--d-700` y `--i-700` de tokens.css,
+ * los mismos peldaños con los que la tarjeta del roster pinta las insignias de
+ * ATAQUE y DEFENSA. Que un bando se vea igual en la web y en Discord no es
+ * decoración; es lo que hace que sean el mismo bando.
+ *
+ * Van en el tema claro de la rampa y no en el oscuro porque un embed tiene un
+ * color y no dos: Discord no sabe con qué tema lo está leyendo cada uno.
+ */
+const COLOR_BANDO = { attack: 0x74251a, defense: 0x2a3a72 };
+
 /** Tipos de interacción y de respuesta que se usan aquí. */
 const PING = 1;
 const APPLICATION_COMMAND = 2;
@@ -545,9 +558,9 @@ export function tableroDeGuerra({
   // Seis tarjetas seguidas se leían como una sola columna: la última de ataque
   // y la primera de defensa se tocaban, y el corte entre los dos frentes --
   // que es la división más importante que hay aquí -- no se veía. El rótulo es
-  // una tarjeta sin cuerpo, en el latón de la grapa y no en el color de
-  // ninguna línea, para que se lea como lo que es: el encabezado de un bloque
-  // y no una línea más.
+  // una tarjeta sin cuerpo, en el color de su bando y no en el de ninguna
+  // línea, para que se lea como lo que es: el encabezado de un bloque y no una
+  // línea más.
   //
   // Y por eso las tarjetas de línea ya no repiten el bando en su título: lo
   // acaba de decir el rótulo de encima, dos veces sería ruido.
@@ -556,7 +569,7 @@ export function tableroDeGuerra({
       title: `${side === 'attack' ? '⚔' : '🛡'}  ${WAR_SIDES[side].toUpperCase()}  ·  ${cuantos(
         side,
       )}/${WAR_CAPACITY}${locked[side] ? '  🔒 cerrado' : ''}`,
-      color: LATON,
+      color: COLOR_BANDO[side],
     },
     ...lineas.map((l) => {
       const gente = despliegues.filter((d) => d.lane === l.id && d.side === side);
