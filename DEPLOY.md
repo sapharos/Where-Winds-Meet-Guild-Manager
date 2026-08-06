@@ -146,6 +146,34 @@ account — so the whole feature sits behind the *Gestionar usuarios* permission
 and the panel shows both the server nickname and the global username before
 anything is saved.
 
+### Slash commands
+
+`/perfil` answers with the member's own numbers from the last guild scan — the
+same figures **Mi perfil** shows on the web, as a Discord embed: weekly activity
+with its change, their primary build, and every stat the scan carried. It is
+private by default (only the person who typed it sees the reply); `publico: Sí`
+posts it in the channel instead.
+
+Discord delivers commands as ordinary HTTPS requests to this app, so there is no
+extra process to run — but it has to be able to prove they are really from
+Discord:
+
+1. In the application's **General Information** page, copy the **Public Key**
+   into `DISCORD_PUBLIC_KEY`.
+2. On that same page, set **Interactions Endpoint URL** to
+   `<PUBLIC_URL>/api/discord/interactions` and save. Discord immediately sends a
+   signed ping and refuses to save the URL unless it gets the right answer, so a
+   successful save is the proof that this end works.
+3. Redeploy. The commands register themselves against the guild's server at
+   startup — the API log says which ones — and appear in Discord straight away.
+
+The bot must have been invited with the `applications.commands` scope (the invite
+link above already includes it). If it was invited without it, registration fails
+with 403 and the log says so; reinviting with the same link fixes it.
+
+Only members whose Discord is linked to an account get an answer; anyone else is
+told, privately, to link theirs first.
+
 ### War voice channels
 
 With the bot set up, **Administración → Canales de voz de guerra** maps the

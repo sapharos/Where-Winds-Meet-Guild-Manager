@@ -61,6 +61,7 @@ import {
   rejectRegistration,
 } from './discord.js';
 import { botEnabled, searchGuildMembers, listVoiceChannels, listSoundboardSounds } from './discordBot.js';
+import { commandsEnabled, verifyInteraction, handleInteraction, registerCommands } from './discordCommands.js';
 import { VOICE_SLOTS, getVoiceChannels, setVoiceChannels, deployVoice } from './voice.js';
 import { getHorn, setHorn, sweepSound, warnEvent, startHornScheduler } from './horn.js';
 import {
@@ -77,7 +78,19 @@ import {
 } from './auth.js';
 
 const app = express();
-app.use(express.json({ limit: '5mb' }));
+app.use(
+  express.json({
+    limit: '5mb',
+    // Discord firma los bytes exactos que manda, así que la ruta de comandos
+    // necesita el cuerpo antes de que nadie lo interprete: volver a serializar
+    // el objeto ya parseado cambia el orden de las claves y el espaciado, y
+    // con ello la firma deja de cuadrar. Se guarda sólo para esa ruta; el
+    // resto de la API no tiene por qué arrastrar una copia de cada cuerpo.
+    verify: (req, _res, buf) => {
+      if (req.url.startsWith('/api/discord/interactions')) req.rawBody = buf;
+    },
+  }),
+);
 app.use(cookieParser());
 
 const PORT = Number(process.env.PORT) || 3001;
@@ -355,6 +368,24 @@ app.delete('/api/users/:id', requireAuth, requirePermission('users.manage'), asH
 }));
 
 /* ------------------------------------------------------------- discord bot */
+
+/**
+ * Los comandos de barra entran por aquí.
+ *
+ * Sin sesión y sin cookie: quien llama es Discord, no un navegador, y lo que
+ * hace de autenticación es la firma Ed25519 del cuerpo. Es la única ruta de la
+ * API abierta al mundo, y por eso lo primero que hace es rechazar lo que no
+ * venga firmado -- con 401, que es además lo que Discord espera ver cuando
+ * comprueba la URL al guardarla en el portal.
+ */
+app.post('/api/discord/interactions', asHandler(async (req, res) => {
+  if (!commandsEnabled()) return res.status(503).json({ error: 'los comandos no están configurados' });
+  if (!verifyInteraction(req)) return res.status(401).send('invalid request signature');
+
+  const respuesta = await handleInteraction(req.body);
+  if (!respuesta) return res.status(400).json({ error: 'unsupported interaction' });
+  res.json(respuesta);
+}));
 
 // El ID de Discord es un snowflake: sólo dígitos. Validarlo aquí evita que un
 // nombre pegado por error en el campo equivocado acabe guardado como llave.
@@ -943,6 +974,9 @@ migrate()
   .then(() => {
     // El cuerno automático de jungla y boss. Sin bot configurado no hace nada.
     startHornScheduler();
+    // Los comandos de barra, al día en cada despliegue. No bloquea el arranque:
+    // que Discord no conteste no puede dejar la API sin levantar.
+    void registerCommands();
     app.listen(PORT, () => console.log(`API listening on ${PORT}`));
   })
   .catch((err) => {
