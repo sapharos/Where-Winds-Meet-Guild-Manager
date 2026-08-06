@@ -64,6 +64,21 @@ function paraCampo(iso?: string | null) {
 
 const ORDEN: EventAnswer[] = ['yes', 'maybe', 'no'];
 
+/** Los días de la semana empezando en lunes, que es como se lee un calendario. */
+const CABECERA = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
+
+/** El lunes de la semana en la que cae un día. */
+function lunesDe(fecha: Date) {
+  const d = new Date(fecha);
+  d.setHours(0, 0, 0, 0);
+  // getDay da 0 el domingo; se quiere que el domingo cierre la semana.
+  d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+  return d;
+}
+
+const mismoDia = (a: Date, b: Date) =>
+  a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+
 const TONO: Record<EventAnswer, string> = {
   yes: 'bg-emerald-700 text-white',
   maybe: 'bg-staple text-white',
@@ -86,18 +101,35 @@ interface Props {
 const Agenda: React.FC<Props> = ({ players, myPlayerId, canManage }) => {
   const [events, setEvents] = useState<GuildEvent[] | null>(null);
   const [past, setPast] = useState(false);
+  /** Lista de lo que viene, o el mes entero. */
+  const [vista, setVista] = useState<'lista' | 'mes'>('lista');
+  const [mes, setMes] = useState(() => {
+    const d = new Date();
+    return new Date(d.getFullYear(), d.getMonth(), 1);
+  });
+  const [diaElegido, setDiaElegido] = useState<Date | null>(null);
   const [abierto, setAbierto] = useState<GuildEvent | null>(null);
   const [editando, setEditando] = useState<Partial<GuildEvent> | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const cargar = useCallback(async () => {
     try {
-      setEvents(await api<GuildEvent[]>(`/events${past ? '?past=true' : ''}`));
+      // El calendario pide su mes -- y un poco más, porque la cuadrícula enseña
+      // los días de los meses vecinos que completan la primera y la última
+      // semana, y un evento en esos días también se ve.
+      let ruta = `/events${past ? '?past=true' : ''}`;
+      if (vista === 'mes') {
+        const desde = lunesDe(new Date(mes.getFullYear(), mes.getMonth(), 1));
+        const hasta = new Date(desde);
+        hasta.setDate(desde.getDate() + 42);
+        ruta = `/events?from=${desde.toISOString()}&to=${hasta.toISOString()}`;
+      }
+      setEvents(await api<GuildEvent[]>(ruta));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo cargar la agenda');
       setEvents([]);
     }
-  }, [past]);
+  }, [past, vista, mes]);
 
   useEffect(() => {
     void cargar();
@@ -147,6 +179,19 @@ const Agenda: React.FC<Props> = ({ players, myPlayerId, canManage }) => {
   const miRespuesta = (event: GuildEvent) =>
     event.responses?.find((r) => r.playerId === myPlayerId);
 
+  /** Abrir un evento pide su detalle: la lista no trae las respuestas. */
+  const abrir = async (id: string) => {
+    try {
+      setAbierto(await api<GuildEvent>(`/events/${id}`));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo abrir el evento');
+    }
+  };
+
+  const delDiaElegido = diaElegido
+    ? (events ?? []).filter((e) => mismoDia(new Date(e.startsAt), diaElegido))
+    : [];
+
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -156,16 +201,36 @@ const Agenda: React.FC<Props> = ({ players, myPlayerId, canManage }) => {
             Lo que viene y quién ha dicho que va. Las horas están en la tuya ({miHuso()}).
           </p>
         </div>
-        <div className="flex gap-2">
-          <button
-            onClick={() => setPast(!past)}
-            className={`min-h-tap px-4 rounded-md border transition-colors duration-micro ${
-              past ? 'border-amber-700 text-amber-500' : 'border-slate-700 text-slate-300'
-            }`}
-          >
-            <i className="fa-solid fa-clock-rotate-left mr-2"></i>
-            {past ? 'Ocultar lo pasado' : 'Ver lo pasado'}
-          </button>
+        <div className="flex gap-2 flex-wrap">
+          {/* Dos formas de mirar lo mismo: la lista contesta «qué viene» y el
+              mes contesta «cómo queda la semana del 20». */}
+          <div className="flex rounded-md border border-slate-700 overflow-hidden">
+            {(['lista', 'mes'] as const).map((v) => (
+              <button
+                key={v}
+                onClick={() => setVista(v)}
+                aria-pressed={vista === v}
+                className={`min-h-tap px-4 transition-colors duration-micro ${
+                  vista === v ? 'bg-amber-700 text-white' : 'text-slate-300'
+                }`}
+              >
+                <i className={`fa-solid ${v === 'lista' ? 'fa-list' : 'fa-calendar-days'} mr-2`}></i>
+                {v === 'lista' ? 'Lista' : 'Mes'}
+              </button>
+            ))}
+          </div>
+
+          {vista === 'lista' && (
+            <button
+              onClick={() => setPast(!past)}
+              className={`min-h-tap px-4 rounded-md border transition-colors duration-micro ${
+                past ? 'border-amber-700 text-amber-500' : 'border-slate-700 text-slate-300'
+              }`}
+            >
+              <i className="fa-solid fa-clock-rotate-left mr-2"></i>
+              {past ? 'Ocultar lo pasado' : 'Ver lo pasado'}
+            </button>
+          )}
           {canManage && (
             <button
               onClick={() =>
@@ -186,7 +251,68 @@ const Agenda: React.FC<Props> = ({ players, myPlayerId, canManage }) => {
         </p>
       )}
 
-      {events === null ? (
+      {vista === 'mes' ? (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <button
+              onClick={() => setMes(new Date(mes.getFullYear(), mes.getMonth() - 1, 1))}
+              aria-label="Mes anterior"
+              className="min-h-tap min-w-tap rounded-md border border-slate-700 text-slate-300"
+            >
+              <i className="fa-solid fa-chevron-left"></i>
+            </button>
+            <div className="text-center min-w-0">
+              {/* `first-letter` y no `capitalize`: en español el mes va en
+                  minúscula y el segundo pone mayúscula a cada palabra, así que
+                  salía «Agosto De 2026». */}
+              <p className="cinzel text-xl font-bold text-slate-100 first-letter:uppercase truncate">
+                {mes.toLocaleDateString('es', { month: 'long', year: 'numeric' })}
+              </p>
+              <button
+                onClick={() => {
+                  const d = new Date();
+                  setMes(new Date(d.getFullYear(), d.getMonth(), 1));
+                  setDiaElegido(d);
+                }}
+                className="text-meta text-amber-500 tap-suelto"
+              >
+                Ir a hoy
+              </button>
+            </div>
+            <button
+              onClick={() => setMes(new Date(mes.getFullYear(), mes.getMonth() + 1, 1))}
+              aria-label="Mes siguiente"
+              className="min-h-tap min-w-tap rounded-md border border-slate-700 text-slate-300"
+            >
+              <i className="fa-solid fa-chevron-right"></i>
+            </button>
+          </div>
+
+          <Calendario
+            mes={mes}
+            events={events ?? []}
+            elegido={diaElegido}
+            onElegir={(d) => setDiaElegido(d)}
+          />
+
+          {diaElegido && (
+            <div>
+              <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-2">
+                {diaElegido.toLocaleDateString('es', { weekday: 'long', day: 'numeric', month: 'long' })}
+              </p>
+              {delDiaElegido.length === 0 ? (
+                <p className="text-meta text-slate-600">Nada ese día.</p>
+              ) : (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                  {delDiaElegido.map((event) => (
+                    <TarjetaEvento key={event.id} event={event} onAbrir={() => abrir(event.id)} />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      ) : events === null ? (
         <p className="text-sm text-slate-500">Cargando…</p>
       ) : events.length === 0 ? (
         <div className="text-center py-12 px-4">
@@ -199,51 +325,7 @@ const Agenda: React.FC<Props> = ({ players, myPlayerId, canManage }) => {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
           {events.map((event, at) => (
             <div key={event.id} className="entra" style={{ '--paso': Math.min(at, 6) } as React.CSSProperties}>
-              <button
-                onClick={async () => setAbierto(await api<GuildEvent>(`/events/${event.id}`))}
-                className={`w-full text-left h-full p-3 rounded-lg border bg-slate-900 transition-colors duration-micro hover:border-slate-700 ${
-                  event.cancelledAt ? 'border-slate-800 opacity-60' : 'border-slate-800'
-                }`}
-              >
-                <div className="flex items-start gap-3">
-                  <div className="w-8 h-8 rounded flex items-center justify-center shrink-0 bg-slate-800 text-slate-300">
-                    <i className={`fa-solid ${EVENT_KIND_ICONS[event.kind]}`}></i>
-                  </div>
-                  <div className="min-w-0 grow">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <h3
-                        className={`font-bold text-slate-100 truncate ${
-                          event.cancelledAt ? 'line-through' : ''
-                        }`}
-                      >
-                        {event.title}
-                      </h3>
-                      {event.cancelledAt && (
-                        <span className="text-[11px] leading-none px-1.5 py-[3px] rounded border border-red-700 text-red-400 uppercase font-bold tracking-tighter shrink-0">
-                          cancelado
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-meta text-slate-400 truncate">
-                      {EVENT_KIND_LABELS[event.kind]} · {fechaLarga(event.startsAt)}
-                      {cuentaPartidas(event.kind) && event.rounds
-                        ? ` · ${event.rounds} partidas`
-                        : ''}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2 mt-2 pl-11">
-                  {ORDEN.map((answer) => (
-                    <span
-                      key={answer}
-                      className={`text-[11px] leading-none px-1.5 py-[3px] rounded border uppercase font-bold tracking-tighter ${TONO_APAGADO[answer]}`}
-                    >
-                      {EVENT_ANSWER_LABELS[answer]} {event[answer] ?? 0}
-                    </span>
-                  ))}
-                </div>
-              </button>
+              <TarjetaEvento event={event} onAbrir={() => abrir(event.id)} />
             </div>
           ))}
         </div>
@@ -294,6 +376,172 @@ const Agenda: React.FC<Props> = ({ players, myPlayerId, canManage }) => {
           onCerrar={() => setEditando(null)}
         />
       )}
+    </div>
+  );
+};
+
+/**
+ * Un evento en una tarjeta. La usan la lista y el día elegido del calendario,
+ * y por eso vive suelta: las dos vistas tienen que decir lo mismo del mismo
+ * evento, y dos copias del mismo bloque acaban diciendo cosas distintas.
+ */
+const TarjetaEvento: React.FC<{ event: GuildEvent; onAbrir: () => void }> = ({ event, onAbrir }) => (
+  <button
+    onClick={onAbrir}
+    className={`w-full text-left h-full p-3 rounded-lg border bg-slate-900 transition-colors duration-micro hover:border-slate-700 ${
+      event.cancelledAt ? 'border-slate-800 opacity-60' : 'border-slate-800'
+    }`}
+  >
+    <div className="flex items-start gap-3">
+      <div className="w-8 h-8 rounded flex items-center justify-center shrink-0 bg-slate-800 text-slate-300">
+        <i className={`fa-solid ${EVENT_KIND_ICONS[event.kind]}`}></i>
+      </div>
+      <div className="min-w-0 grow">
+        <div className="flex items-center gap-2 min-w-0">
+          <h3 className={`font-bold text-slate-100 truncate ${event.cancelledAt ? 'line-through' : ''}`}>
+            {event.title}
+          </h3>
+          {event.cancelledAt && (
+            <span className="text-[11px] leading-none px-1.5 py-[3px] rounded border border-red-700 text-red-400 uppercase font-bold tracking-tighter shrink-0">
+              cancelado
+            </span>
+          )}
+        </div>
+        <p className="text-meta text-slate-400 truncate">
+          {EVENT_KIND_LABELS[event.kind]} · {fechaLarga(event.startsAt)}
+          {cuentaPartidas(event.kind) && event.rounds ? ` · ${event.rounds} partidas` : ''}
+        </p>
+      </div>
+    </div>
+
+    <div className="flex items-center gap-2 mt-2 pl-11">
+      {ORDEN.map((answer) => (
+        <span
+          key={answer}
+          className={`text-[11px] leading-none px-1.5 py-[3px] rounded border uppercase font-bold tracking-tighter ${TONO_APAGADO[answer]}`}
+        >
+          {EVENT_ANSWER_LABELS[answer]} {event[answer] ?? 0}
+        </span>
+      ))}
+    </div>
+  </button>
+);
+
+/**
+ * El mes, en una cuadrícula.
+ *
+ * Una celda enseña lo que cabe: en un teléfono, un punto por evento -- siete
+ * columnas en 375 px no dan para un título -- y a partir de `sm`, el nombre. Y
+ * el día se elige, en vez de abrirse el evento al tocar el punto: un punto de
+ * ocho píxeles no es un objetivo, y la fila de abajo tiene sitio para decir de
+ * qué evento se trata antes de meterse en él.
+ */
+const Calendario: React.FC<{
+  mes: Date;
+  events: GuildEvent[];
+  elegido: Date | null;
+  onElegir: (dia: Date) => void;
+}> = ({ mes, events, elegido, onElegir }) => {
+  const primero = new Date(mes.getFullYear(), mes.getMonth(), 1);
+  const desde = lunesDe(primero);
+  const hoy = new Date();
+
+  // Seis semanas siempre: con cinco, un mes que empieza en domingo se sale, y
+  // con un número variable la cuadrícula cambia de alto al pasar de mes.
+  const dias = Array.from({ length: 42 }, (_, i) => {
+    const d = new Date(desde);
+    d.setDate(desde.getDate() + i);
+    return d;
+  });
+
+  const delDia = (d: Date) => events.filter((e) => mismoDia(new Date(e.startsAt), d));
+
+  return (
+    <div className="rounded-xl border border-slate-800 bg-slate-900 overflow-hidden">
+      <div className="grid grid-cols-7 border-b border-slate-800">
+        {CABECERA.map((d, i) => (
+          <div
+            key={d}
+            className={`text-center text-[11px] uppercase tracking-wider py-2 ${
+              i >= 5 ? 'text-amber-600' : 'text-slate-500'
+            }`}
+          >
+            {d}
+          </div>
+        ))}
+      </div>
+
+      {/* El alto va en las filas y no en cada celda: una celda es un `button`,
+          y el suelo de 44 px que la base le pone a todo botón gana por
+          especificidad a una clase de utilidad -- `min-h-[64px]` se escribía y
+          no hacía nada. Puesto aquí, además, dice lo que se quiere decir: que
+          todas las semanas midan lo mismo. */}
+      <div className="grid grid-cols-7 auto-rows-[64px] sm:auto-rows-[100px]">
+        {dias.map((d) => {
+          const suyos = delDia(d);
+          const deEsteMes = d.getMonth() === mes.getMonth();
+          const esHoy = mismoDia(d, hoy);
+          const esElegido = elegido && mismoDia(d, elegido);
+
+          return (
+            <button
+              key={d.toISOString()}
+              onClick={() => onElegir(d)}
+              aria-current={esHoy ? 'date' : undefined}
+              className={`overflow-hidden p-1.5 text-left border-b border-r border-slate-800 transition-colors duration-micro ${
+                deEsteMes ? '' : 'opacity-35'
+              } ${esElegido ? 'bg-slate-800' : 'hover:bg-slate-800/50'}`}
+            >
+              <span
+                className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-[11px] tabular-nums ${
+                  esHoy ? 'bg-amber-600 text-white font-bold' : 'text-slate-400'
+                }`}
+              >
+                {d.getDate()}
+              </span>
+
+              {/* En pantalla pequeña, un punto por evento. */}
+              <span className="sm:hidden flex flex-wrap gap-1 mt-1">
+                {suyos.map((e) => (
+                  <span
+                    key={e.id}
+                    aria-hidden
+                    className={`w-1.5 h-1.5 rounded-full ${
+                      e.cancelledAt ? 'bg-slate-600' : 'bg-amber-500'
+                    }`}
+                  />
+                ))}
+              </span>
+
+              {/* Y a partir de sm, su nombre. */}
+              <span className="hidden sm:block mt-1 space-y-0.5">
+                {suyos.slice(0, 3).map((e) => (
+                  <span
+                    key={e.id}
+                    className={`block text-[11px] leading-tight truncate rounded px-1 py-0.5 ${
+                      e.cancelledAt
+                        ? 'text-slate-500 line-through bg-slate-950'
+                        : 'text-slate-200 bg-slate-800'
+                    }`}
+                  >
+                    {e.title}
+                  </span>
+                ))}
+                {suyos.length > 3 && (
+                  <span className="block text-[10px] text-slate-500">+{suyos.length - 3} más</span>
+                )}
+              </span>
+
+              {/* Lo que el punto no dice, para quien no ve el color. */}
+              {suyos.length > 0 && (
+                <span className="sr-only">
+                  {suyos.length === 1 ? '1 evento' : `${suyos.length} eventos`}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 };

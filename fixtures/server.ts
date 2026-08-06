@@ -332,7 +332,13 @@ const anotar = (id: string, playerId: string, body: Record<string, unknown>, por
 
 const GET: [RegExp, Ruta][] = [
   [/^\/auth\/me$/, () => fake.session],
-  [/^\/events$/, () => eventos.map(conRecuento)],
+  [/^\/events$/, (_m, _req, _body, url) => {
+    const desde = url?.searchParams.get('from');
+    const hasta = url?.searchParams.get('to');
+    const dentro = (e: Record<string, unknown>) =>
+      !desde || !hasta || (String(e.startsAt) >= desde && String(e.startsAt) < hasta);
+    return eventos.filter(dentro).map(conRecuento);
+  }],
   [/^\/events\/config\/channel$/, () => ({
     bot: true,
     channel: canalAgenda,

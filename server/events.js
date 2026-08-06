@@ -125,7 +125,10 @@ export async function setDiscordMessage(id, channelId, messageId) {
  * mirar lo que hay por delante. Lo ya celebrado no se borra: es el registro de
  * quién dijo que iba, y sirve para saber con quién se cuenta de verdad.
  */
-export async function listEvents({ past = false } = {}) {
+export async function listEvents({ past = false, from = null, to = null } = {}) {
+  // Con un tramo pedido manda el tramo: la vista de mes necesita justo ese mes,
+  // pasado incluido, y no toda la historia del gremio para quedarse con ocho.
+  const tramo = Boolean(from && to);
   const { rows } = await pool.query(
     `SELECT ${CAMPOS},
             (SELECT count(*)::int FROM event_responses r
@@ -136,9 +139,11 @@ export async function listEvents({ past = false } = {}) {
               WHERE r.guild_id = e.guild_id AND r.event_id = e.id AND r.answer = 'no') AS "no"
        FROM guild_events e
       WHERE e.guild_id = $1
-        AND ($2 OR e.starts_at + make_interval(mins => e.minutes) >= now())
+        AND ($3::timestamptz IS NULL OR (e.starts_at >= $3 AND e.starts_at < $4))
+        AND ($3::timestamptz IS NOT NULL OR $2
+             OR e.starts_at + make_interval(mins => e.minutes) >= now())
       ORDER BY e.starts_at`,
-    [GUILD_ID, past],
+    [GUILD_ID, past, tramo ? fecha(from) : null, tramo ? fecha(to) : null],
   );
   return rows;
 }

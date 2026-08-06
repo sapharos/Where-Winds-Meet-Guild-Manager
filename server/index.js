@@ -393,7 +393,13 @@ app.delete('/api/users/:id', requireAuth, requirePermission('users.manage'), asH
 // Ver lo que hay programado no pide permiso: es de lo que va el gremio, y una
 // agenda que no se puede leer no convoca a nadie.
 app.get('/api/events', requireAuth, asHandler(async (req, res) => {
-  res.json(await listEvents({ past: req.query.past === 'true' }));
+  res.json(
+    await listEvents({
+      past: req.query.past === 'true',
+      from: req.query.from ?? null,
+      to: req.query.to ?? null,
+    }),
+  );
 }));
 
 /*
