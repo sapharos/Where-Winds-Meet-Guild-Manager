@@ -38,7 +38,7 @@ import {
   getAgendaChannel,
   setDiscordMessage,
 } from './events.js';
-import { botEnabled, postMessage, editMessage } from './discordBot.js';
+import { botEnabled, postMessage, editMessage, deleteMessage } from './discordBot.js';
 import {
   asegurarEventos,
   pendientesDePublicar,
@@ -750,8 +750,21 @@ export function eventoMensaje(evento) {
 const cuerpoDe = (evento) => ({ ...eventoMensaje(evento), allowed_mentions: { parse: [] } });
 
 /**
- * Publica la encuesta de un evento, o rehace la publicación si el mensaje ya no
- * está. Devuelve dónde quedó, o null si no había dónde publicarla.
+ * Publica la encuesta de un evento, o la vuelve a publicar.
+ *
+ * Volver a publicar no toca ni una respuesta: los votos nunca estuvieron en
+ * Discord, están en la base de datos contra el miembro, y el mensaje es sólo
+ * cómo se ven. Por eso se puede rehacer tantas veces como haga falta -- alguien
+ * borró el mensaje, se cambió el canal, el canal desapareció -- y el recuento
+ * sale igual que estaba.
+ *
+ * Se publica primero y se retira el anterior después, en ese orden y no al
+ * revés: si Discord rechaza el mensaje nuevo, el viejo sigue en pie. Y se
+ * retira porque si no, un cambio de canal deja dos encuestas del mismo evento,
+ * y la de antes no se va a actualizar nunca más.
+ *
+ * Devuelve null si no hay dónde publicar; lanza si Discord rechaza el envío,
+ * que es lo que hay que contarle a quien pulsó el botón.
  */
 export async function publicarEvento(id) {
   if (!botEnabled()) return null;
@@ -761,6 +774,12 @@ export async function publicarEvento(id) {
   const evento = await getEvent(id);
   const mensaje = await postMessage(canal, cuerpoDe(evento));
   await setDiscordMessage(id, mensaje.channelId, mensaje.id);
+
+  if (evento.discordChannelId && evento.discordMessageId) {
+    // Sin esperar y sin que importe si se pudo: el mensaje nuevo ya está, y
+    // dejar el viejo es peor que no poder borrarlo.
+    void deleteMessage(evento.discordChannelId, evento.discordMessageId);
+  }
   return mensaje;
 }
 

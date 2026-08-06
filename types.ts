@@ -524,6 +524,8 @@ export interface GuildEvent {
   discordMessageId?: string | null;
   /** El enlace a ese mensaje, si el servidor sabe componerlo. */
   discordUrl?: string | null;
+  /** Publicada, pero en un canal que ya no es el de la agenda. */
+  discordStale?: boolean;
   /** Sólo al listar: el recuento de cada respuesta. */
   yes?: number;
   maybe?: number;

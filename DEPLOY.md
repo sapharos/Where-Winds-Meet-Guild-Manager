@@ -220,6 +220,15 @@ fixing a typo does not summon the guild twice. Whether an event has gone out
 shows on its card — *publicada*, or *sin publicar* for whoever can publish it —
 and opening it links straight to the message.
 
+**Republishing never costs a vote.** Answers live in the database against the
+member, never in Discord, so *Volver a publicar* can be pressed as often as
+needed — someone deleted the message, the channel was deleted, the channel was
+changed — and the tally comes back exactly as it was. It posts the new message
+first and retires the old one after, so a rejection from Discord leaves the
+existing poll standing. An event still published in a channel that is no longer
+the agenda's says so, since its message would otherwise sit somewhere nobody
+reads and never update again.
+
 A guild war is answered with a dropdown — *Voy a todas (5)*, *a 4*, … , *Tal
 vez*, *No puedo* — because the useful answer is not "I'm coming" but "I'm coming
 to three". Everything else gets three buttons. A closed or cancelled poll keeps

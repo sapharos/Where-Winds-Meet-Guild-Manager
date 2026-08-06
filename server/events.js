@@ -96,15 +96,21 @@ const CAMPOS = `id, kind, title, starts_at AS "startsAt", minutes, rounds, notes
  * Discord, que vive en el entorno del servidor. Sin él -- bot sin configurar --
  * queda null y la interfaz enseña que está publicada sin ofrecer un enlace roto.
  */
-const conEnlace = (fila) => {
+const conEnlace = (fila, canalActual = null) => {
   if (!fila) return fila;
   const servidor = process.env.DISCORD_GUILD_ID;
+  const publicada = Boolean(fila.discordChannelId && fila.discordMessageId);
   return {
     ...fila,
     discordUrl:
-      servidor && fila.discordChannelId && fila.discordMessageId
+      servidor && publicada
         ? `https://discord.com/channels/${servidor}/${fila.discordChannelId}/${fila.discordMessageId}`
         : null,
+    // Publicada, pero en un canal que ya no es el de la agenda. La encuesta
+    // sigue funcionando -- los botones saben de qué evento son -- pero está
+    // donde ya nadie mira, y quien organiza tiene que poder enterarse sin
+    // comparar ids a mano.
+    discordStale: publicada && Boolean(canalActual) && fila.discordChannelId !== canalActual,
   };
 };
 
@@ -164,7 +170,8 @@ export async function listEvents({ past = false, from = null, to = null } = {}) 
       ORDER BY e.starts_at`,
     [GUILD_ID, past, tramo ? fecha(from) : null, tramo ? fecha(to) : null],
   );
-  return rows.map(conEnlace);
+  const canal = await getAgendaChannel();
+  return rows.map((r) => conEnlace(r, canal));
 }
 
 /** Un evento con todo lo que se ha contestado, con nombres. */
@@ -184,7 +191,7 @@ export async function getEvent(id) {
       ORDER BY p.name`,
     [GUILD_ID, id],
   );
-  return { ...conEnlace(rows[0]), responses: respuestas.rows };
+  return { ...conEnlace(rows[0], await getAgendaChannel()), responses: respuestas.rows };
 }
 
 /**
@@ -213,7 +220,7 @@ export async function nextWar() {
        FROM event_responses WHERE guild_id = $1 AND event_id = $2`,
     [GUILD_ID, rows[0].id],
   );
-  return { ...conEnlace(rows[0]), responses: respuestas.rows };
+  return { ...conEnlace(rows[0], await getAgendaChannel()), responses: respuestas.rows };
 }
 
 export async function saveEvent(body, createdBy) {

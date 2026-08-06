@@ -643,6 +643,16 @@ const DetalleEvento: React.FC<{
         )}
       </p>
 
+      {/* Publicada donde ya nadie mira. No se rompe nada -- los botones de ese
+          mensaje siguen sabiendo de qué evento son -- pero conviene rehacerla. */}
+      {event.discordStale && (
+        <p className="text-meta text-amber-500 border border-amber-800 bg-amber-950/30 rounded-md px-3 py-2">
+          <i className="fa-solid fa-triangle-exclamation mr-1.5"></i>
+          Está publicada en un canal que ya no es el de la agenda. Vuelve a publicarla para llevarla
+          al canal actual.
+        </p>
+      )}
+
       {myPlayerId && !event.cancelledAt && (
         <div>
           <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-2">Tu respuesta</p>
@@ -756,7 +766,16 @@ const DetalleEvento: React.FC<{
           <button
             onClick={onPublicar}
             disabled={Boolean(event.cancelledAt)}
-            className="min-h-tap px-4 rounded-md border border-indigo-700 text-indigo-300 transition-colors duration-micro disabled:opacity-40"
+            title={
+              event.discordMessageId
+                ? 'Manda un mensaje nuevo al canal actual y retira el anterior. Las respuestas no se tocan.'
+                : undefined
+            }
+            className={`min-h-tap px-4 rounded-md border transition-colors duration-micro disabled:opacity-40 ${
+              event.discordStale
+                ? 'border-amber-600 text-amber-400'
+                : 'border-indigo-700 text-indigo-300'
+            }`}
           >
             <i className="fa-brands fa-discord mr-2"></i>
             {event.discordMessageId ? 'Volver a publicar' : 'Publicar en Discord'}

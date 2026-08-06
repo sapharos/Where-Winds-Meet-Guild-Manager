@@ -137,6 +137,26 @@ export async function editMessage(channelId, messageId, payload) {
 }
 
 /**
+ * Retira un mensaje ya publicado.
+ *
+ * Tolera que no esté: al volver a publicar una encuesta hay que quitar la
+ * anterior, y que alguien la hubiera borrado antes a mano es el caso normal, no
+ * un fallo. Sirve para que no queden dos encuestas del mismo evento, una de
+ * ellas muerta.
+ */
+export async function deleteMessage(channelId, messageId) {
+  try {
+    await botFetch(`/channels/${channelId}/messages/${messageId}`, { method: 'DELETE' });
+    return { deleted: true };
+  } catch (err) {
+    // 10008 mensaje desconocido, 10003 canal desconocido, 50013 sin permiso
+    // para borrar en ese canal: en los tres, no hay nada que hacer y tampoco
+    // nada que romper.
+    return { deleted: false, reason: err.message };
+  }
+}
+
+/**
  * Los sonidos del panel del servidor, para elegir el cuerno de guerra.
  * El panel lo administra el gremio desde Discord; aquí sólo se lee.
  */

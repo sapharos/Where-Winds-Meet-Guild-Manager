@@ -475,7 +475,16 @@ app.post('/api/events/:id/publish', requireAuth, requirePermission('events.manag
   if (!(await getAgendaChannel())) {
     return res.status(409).json({ error: 'falta elegir el canal de la agenda en Administración' });
   }
-  const mensaje = await publicarEvento(req.params.id);
+  let mensaje;
+  try {
+    mensaje = await publicarEvento(req.params.id);
+  } catch (err) {
+    // El canal elegido puede haber desaparecido, o el bot haber perdido el
+    // permiso de escribir en él. Decirlo con el canal delante ahorra buscarlo.
+    return res.status(502).json({
+      error: `Discord no aceptó el mensaje: ${err.message}. Comprueba el canal en Administración → Agenda.`,
+    });
+  }
   if (!mensaje) return res.status(503).json({ error: 'el bot de Discord no está configurado' });
   res.json(await getEvent(req.params.id));
 }));
