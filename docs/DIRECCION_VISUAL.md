@@ -116,6 +116,30 @@ del color de usuario en tema claro y la suba en oscuro. La lógica de qué color
 cosa **no se toca**: solo cómo se pinta contra el fondo. Es el trabajo más delicado de la Fase 3 y lo
 quiero señalado antes de empezarlo.
 
+#### Cómo acabó resolviéndose: no se mezcla
+
+`onSurface()` no llegó a escribirse, y me alegro. Arreglaba el contraste del lavado sin tocar el otro
+defecto, que es el grave: en las fichas de miembro **el tinte era el único sitio donde estaba el
+dato**. Quien no distingue los colores no tenía las armas escritas en ninguna parte, y una función de
+mezcla más lista no le habría dado ni una letra más.
+
+La regla que quedó, y que ya cumplen el roster, la Sala de Guerra, el perfil y el editor de builds:
+
+1. **La superficie es del tema.** `bg-slate-900` o `bg-slate-950`, opaca. Nunca el color del usuario
+   compuesto con opacidad — ni al 40%, ni al 15%, ni al 6%.
+2. **El color del usuario va sólido y pequeño**: una barra de 4 px en el canto de la ficha, o un chip
+   de 10 px dentro de ella. Sólido no necesita saber contra qué fondo cae.
+3. **El nombre va escrito al lado.** El arma, la unidad, el conjunto. El color es el atajo para quien
+   lo ve; el texto es el dato para todos.
+
+Lo comparten `buildColour()` y `ArmasDeBuild` en `components/PlayerCard.tsx`. La ventaja fea de esto
+frente a `onSurface()` es que no hay nada que calibrar: el chip no se mide contra la superficie
+porque no se mezcla con ella, así que ningún color que alguien invente mañana puede romperlo.
+
+Queda fuera lo que **no** es color de usuario: `WAR_LANES[].colour` está fijo en `types.ts` y todavía
+pinta el título de cada línea en texto de color sobre el fondo de la página — en claro, la Línea
+Amarilla (`#eab308`) no llega a AA. Es de la misma familia pero es otro arreglo, y no lo he tocado.
+
 ---
 
 ## 3. Tipografía

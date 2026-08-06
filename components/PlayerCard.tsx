@@ -16,27 +16,88 @@ export const ROLE_NAMES: Record<Role, string> = {
 const UNSET = '#475569';
 
 /**
- * The colours of a build's first two weapons, from the sets they belong to.
+ * The colour of a build's main weapon, from the set it belongs to.
  *
  * Also reports when a build names weapons that no set contains any more, which
  * happens after the catalogue is renamed: the build keeps working but loses its
  * colours, and silently showing grey would look like nobody had a build.
+ *
+ * Devolvía dos colores, para pintar una rampa de la primera arma a la segunda.
+ * Ya no hay rampas: el color de arma vive en una barra sólida y en los chips de
+ * `ArmasDeBuild`, así que sólo se pide el de la principal.
  */
-export function buildColours(
+export function buildColour(
   build: PlayerBuild | undefined,
   sets: WeaponSet[],
-): { from: string; to: string; orphaned: boolean } {
+): { from: string; orphaned: boolean } {
   const colourOf = (weapon?: string) =>
     weapon ? sets.find((s) => s.weapons.includes(weapon))?.color : undefined;
 
   const first = colourOf(build?.weapons[0]);
-  const second = colourOf(build?.weapons[1]);
   return {
     from: first ?? UNSET,
-    to: second ?? first ?? UNSET,
-    orphaned: Boolean(build?.weapons.length) && !first && !second,
+    orphaned: Boolean(build?.weapons.length) && !first && !colourOf(build?.weapons[1]),
   };
 }
+
+/**
+ * Las armas de una build: el color en un chip sólido y el nombre escrito al lado.
+ *
+ * Es la respuesta al color-como-dato de DIRECCION_VISUAL.md §2. `WeaponSet.color`
+ * lo elige el usuario y vive en la base de datos, así que no hay forma de
+ * garantizar su contraste: compuesto con opacidad -- `${color}66`, `${color}40`,
+ * `${color}26` -- deja el texto sin fondo estable en oscuro y desaparece del
+ * todo en claro. Aquí el color va sólido y pequeño, sobre la superficie del
+ * tema, y **nunca es el único portador del dato**: quien no lo distingue lee el
+ * nombre del arma igual.
+ *
+ * Vive aquí, con `buildColour`, porque la usan las tres fichas que dibujan una
+ * build en pequeño -- el roster, la línea y el banquillo -- y tienen que decir
+ * lo mismo de la misma forma.
+ */
+export const ArmasDeBuild: React.FC<{
+  build?: PlayerBuild;
+  weaponSets: WeaponSet[];
+  /** Cuántas enseñar. Sin límite, todas. */
+  limite?: number;
+  /** Qué decir cuando no hay ninguna. */
+  vacio?: string;
+  className?: string;
+}> = ({ build, weaponSets, limite, vacio = 'Sin build', className = '' }) => {
+  const { orphaned } = buildColour(build, weaponSets);
+  const armas = build?.weapons ?? [];
+  const mostradas = limite === undefined ? armas : armas.slice(0, limite);
+
+  return (
+    <div className={`flex items-center gap-3 min-w-0 ${className}`}>
+      {orphaned ? (
+        <span
+          className="text-meta text-amber-500 truncate"
+          title={`Estas armas ya no existen en ningún conjunto: ${armas.join(', ')}`}
+        >
+          <i className="fa-solid fa-triangle-exclamation mr-1"></i>
+          armas sin conjunto
+        </span>
+      ) : mostradas.length > 0 ? (
+        mostradas.map((arma) => (
+          <span key={arma} className="inline-flex items-center gap-1.5 min-w-0 text-meta text-slate-300">
+            <span
+              aria-hidden
+              className="w-2.5 h-2.5 rounded-sm shrink-0"
+              style={{
+                backgroundColor:
+                  weaponSets.find((s) => s.weapons.includes(arma))?.color ?? UNSET,
+              }}
+            />
+            <span className="truncate">{arma}</span>
+          </span>
+        ))
+      ) : (
+        <span className="text-meta text-slate-500">{vacio}</span>
+      )}
+    </div>
+  );
+};
 
 interface PlayerCardProps {
   player: Player;
@@ -66,9 +127,7 @@ const PlayerCard: React.FC<PlayerCardProps> = ({
   ranks = [],
 }) => {
   const rank = ranks.find((r) => r.id === player.rankId);
-  const { from, orphaned } = buildColours(build, weaponSets);
-  const colorDeArma = (arma: string) =>
-    weaponSets.find((s) => s.weapons.includes(arma))?.color ?? UNSET;
+  const { from } = buildColour(build, weaponSets);
   const gone = player.isActive === false;
   const [menu, setMenu] = useState(false);
 
@@ -263,28 +322,7 @@ const PlayerCard: React.FC<PlayerCardProps> = ({
         {/* Las armas, con su color en un chip sólido y su nombre escrito al
             lado: quien no distingue los colores lee el arma igual. */}
         <div className="flex items-center gap-3 min-h-[20px]" title={build?.name}>
-          {orphaned ? (
-            <span
-              className="text-meta text-amber-500 truncate"
-              title={`Estas armas ya no existen en ningún conjunto: ${build?.weapons.join(', ')}`}
-            >
-              <i className="fa-solid fa-triangle-exclamation mr-1"></i>
-              armas sin conjunto
-            </span>
-          ) : build && build.weapons.length > 0 ? (
-            build.weapons.slice(0, 2).map((arma) => (
-              <span key={arma} className="inline-flex items-center gap-1.5 min-w-0 text-meta text-slate-300">
-                <span
-                  aria-hidden
-                  className="w-2.5 h-2.5 rounded-sm shrink-0"
-                  style={{ backgroundColor: colorDeArma(arma) }}
-                />
-                <span className="truncate">{arma}</span>
-              </span>
-            ))
-          ) : (
-            <span className="text-meta text-slate-500">Sin build</span>
-          )}
+          <ArmasDeBuild build={build} weaponSets={weaponSets} limite={2} />
 
           {gone ? (
             // py de 3 y no 4: el borde ya pone sus 2px, y con 4 la etiqueta

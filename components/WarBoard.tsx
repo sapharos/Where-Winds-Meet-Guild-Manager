@@ -21,7 +21,7 @@ import {
   WeaponSet,
 } from '../types';
 import { ROLE_ICONS } from '../constants';
-import { ROLE_NAMES, buildColours } from './PlayerCard';
+import { ROLE_NAMES, ArmasDeBuild, buildColour } from './PlayerCard';
 import StrategyPlanner from './StrategyPlanner';
 import WarTimers from './WarTimers';
 import WarHistory from './WarHistory';
@@ -58,20 +58,22 @@ interface Props {
 }
 
 /**
- * The colours of a build, as a left-to-right wash behind a card.
+ * La ficha de una persona en el tablero: superficie del tema, y ya está.
  *
- * Painted over an opaque base rather than left translucent: a lane has its own
- * colour, and a see-through card sitting on it came out tinted by the lane
- * instead of by the build, which is the one thing the wash is there to say.
+ * Era un lavado de los colores de sus armas -- `${from}40` a `${to}40` sobre
+ * `--n-900` -- y tenía dos problemas. El de fondo: el color lo elige el usuario
+ * y compuesto al 25% no garantiza contraste con el texto de encima en ningún
+ * tema, y en claro no se ve nada (DIRECCION_VISUAL.md §2). Y el de forma: era el
+ * único sitio donde la ficha decía con qué armas juega esa persona, así que
+ * quien no distingue los colores no tenía el dato en ninguna parte.
+ *
+ * Ahora es la misma pauta que el roster: fondo sólido, el color del arma
+ * principal en la barra de la izquierda, y las armas escritas con su chip en la
+ * tercera fila. La ficha va sobre una línea que tiene su propio tinte, y una
+ * superficie opaca es además lo único que la deja verse igual en las tres.
  */
-const wash = (build: PlayerBuild | undefined, sets: WeaponSet[]) => {
-  const { from, to } = buildColours(build, sets);
-  // Each colour holds its own end before the blend, as on the roster card: a
-  // plain ramp reaches the second weapon only at the last column of pixels.
-  return {
-    background: `linear-gradient(90deg, ${from}40 0%, ${from}40 22%, ${to}40 78%, ${to}40 100%), rgb(var(--n-900))`,
-  };
-};
+const FICHA =
+  'relative overflow-hidden bg-slate-900 border border-slate-800 rounded p-2 pl-3 transition-opacity';
 
 /**
  * Where the line-up is arranged: two sides, three lanes, ten to a lane.
@@ -1110,18 +1112,25 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit, canVo
                   const held = unitsOf.get(p.id) ?? [];
                   const first = strategy?.units.find((u) => held.includes(u.id));
                   const build = buildOf(p);
-                  const mine = owned.get(p.id) ?? [];
                   const { className: gripClass, ...gripProps } = grip(p.id);
                   return (
                     <div
                       key={p.id}
                       {...gripProps}
-                      className={`border border-slate-800 rounded p-2 transition-opacity ${gripClass ?? ''}`}
-                      style={{
-                        ...wash(build, weaponSets),
-                        ...(first ? { borderColor: `${first.color}66` } : null),
-                      }}
+                      className={`${FICHA} ${gripClass ?? ''}`}
+                      // El color de la unidad, ya sólido y no al 40%: es un
+                      // borde de 1 px, y el chip de abajo la nombra igualmente.
+                      style={first ? { borderColor: first.color } : undefined}
                     >
+                      {/* La barra del arma principal. Recortada por la ficha:
+                          mide 4 px y el radio es de 6, así que suelta asomaría
+                          por fuera de la esquina redondeada. */}
+                      <span
+                        aria-hidden
+                        className="absolute left-0 top-0 bottom-0 w-1"
+                        style={{ backgroundColor: buildColour(build, weaponSets).from }}
+                      />
+
                       <div className="flex items-center justify-between gap-2">
                         <div className="min-w-0">
                           <p className="text-sm text-slate-100 truncate">
@@ -1133,7 +1142,10 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit, canVo
                             )}
                             {p.name}
                           </p>
-                          <p className="text-[10px] text-slate-500 flex items-center gap-1.5">
+                          {/* text-meta y no 10px: el nombre de la build es dato
+                              único, y el escalón micro está reservado a
+                              etiquetas redundantes (DIRECCION_VISUAL.md §3). */}
+                          <p className="text-meta text-slate-500 flex items-center gap-1.5">
                             {rolesOf(p).map((r) => (
                               <span key={r} className={ROLE_TEXT[r]} title={ROLE_NAMES[r]}>
                                 {ROLE_ICONS[r]}
@@ -1163,23 +1175,56 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit, canVo
                           tarjeta eran un desplegable de 11 px y unos chips de
                           17 px de alto, dentro de una lista de diez. */}
 
+                      {/* Con qué juega, escrito. Era lo que decía el lavado de
+                          color del fondo, y sólo el color. */}
+                      <ArmasDeBuild
+                        build={build}
+                        weaponSets={weaponSets}
+                        limite={2}
+                        vacio="Sin build"
+                        className="mt-1 min-h-[18px]"
+                      />
+
                       {/* Las unidades que lleva, ya sólo como lectura: pulsarlas
                           era un objetivo de 17 px de alto. Se cambian desde el
-                          menú, donde caben con su nombre entero. */}
-                      {strategy && strategy.units.length > 0 && held.length > 0 && (
-                        <div className="mt-1.5 flex flex-wrap gap-1">
-                          {strategy.units
-                            .filter((u) => held.includes(u.id))
-                            .map((u) => (
-                              <span
-                                key={u.id}
-                                className="text-[11px] px-1.5 py-0.5 rounded border flex items-center gap-1 max-w-full"
-                                style={{ borderColor: u.color, color: u.color, backgroundColor: `${u.color}1f` }}
-                              >
-                                <i className={`fa-solid ${u.icon} text-[10px]`}></i>
-                                <span className="truncate">{u.name}</span>
-                              </span>
-                            ))}
+                          menú, donde caben con su nombre entero.
+
+                          La fila se dibuja para todos cuando hay unidades en
+                          juego, no sólo para quien lleva alguna: así las fichas
+                          de una línea miden lo mismo, y "sin unidad" es
+                          exactamente lo que cuenta la cabecera de arriba. */}
+                      {strategy && strategy.units.length > 0 && (
+                        <div className="mt-1.5 flex flex-wrap gap-1 min-h-[20px]">
+                          {held.length > 0 ? (
+                            strategy.units
+                              .filter((u) => held.includes(u.id))
+                              .map((u) => (
+                                <span
+                                  key={u.id}
+                                  // Chip neutro con el icono en color, y no
+                                  // texto del color del usuario sobre un tinte
+                                  // suyo al 12%: eso no tenía contraste
+                                  // garantizado, y el icono ya distingue la
+                                  // unidad tanto como el color.
+                                  //
+                                  // h-5 y no py-0.5: el relleno lo dejaba en 23
+                                  // px y "Sin unidad" mide 20, así que la ficha
+                                  // de quien llevaba unidad salía tres píxeles
+                                  // más alta que la de al lado.
+                                  className="h-5 text-[11px] leading-none px-1.5 rounded border border-slate-800 bg-slate-950 text-slate-300 flex items-center gap-1 max-w-full"
+                                >
+                                  <i
+                                    className={`fa-solid ${u.icon} text-[10px] shrink-0`}
+                                    style={{ color: u.color }}
+                                  ></i>
+                                  <span className="truncate">{u.name}</span>
+                                </span>
+                              ))
+                          ) : (
+                            <span className="text-[11px] text-slate-600 italic leading-5">
+                              Sin unidad
+                            </span>
+                          )}
                         </div>
                       )}
                     </div>
@@ -1245,17 +1290,21 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit, canVo
           <div className="space-y-1.5 max-h-[520px] overflow-y-auto custom-scrollbar pr-1">
             {bench.map((p) => {
               const busy = elsewhere.get(p.id);
+              const build = buildOf(p);
               // Somebody already fighting the other half cannot be dragged in.
               const { className: gripClass, ...gripProps } = busy ? {} : grip(p.id);
               return (
               <div
                 key={p.id}
                 {...gripProps}
-                className={`border border-slate-800 rounded p-2 transition-opacity ${
-                  busy ? 'opacity-45' : (gripClass ?? '')
-                }`}
-                style={wash(buildOf(p), weaponSets)}
+                className={`${FICHA} ${busy ? 'opacity-45' : (gripClass ?? '')}`}
               >
+                <span
+                  aria-hidden
+                  className="absolute left-0 top-0 bottom-0 w-1"
+                  style={{ backgroundColor: buildColour(build, weaponSets).from }}
+                />
+
                 <div className="flex items-center gap-1.5 min-w-0">
                   {p.isStarter && (
                     <i className="fa-solid fa-star text-amber-400 text-[10px] shrink-0" title="Titular"></i>
@@ -1270,25 +1319,36 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit, canVo
                   )}
                   <p className="text-sm text-slate-100 truncate">{p.name}</p>
                 </div>
-                <p className="text-[10px] text-slate-500 mb-1.5 flex items-center gap-1.5">
+                <p className="text-meta text-slate-500 flex items-center gap-1.5">
                   {rolesOf(p).map((r) => (
                     <span key={r} className={ROLE_TEXT[r]} title={ROLE_NAMES[r]}>
                       {ROLE_ICONS[r]}
                     </span>
                   ))}
-                  <span className="truncate">{buildOf(p)?.name ?? ROLE_NAMES[p.role]}</span>
+                  <span className="truncate">{build?.name ?? ROLE_NAMES[p.role]}</span>
                 </p>
-                {busy ? (
-                  <p className="text-[10px] text-slate-500 italic">
-                    Ya desplegado en {WAR_SIDE_LABELS[busy]}
-                  </p>
-                ) : (
-                  canEdit && (
-                    // Medían 55x17 px. El nombre de la línea se queda -- es lo
-                    // que dice a dónde va -- pero el botón pasa a 44 de alto,
-                    // que es lo que hace que se acierte.
-                    <div className="flex gap-1">
-                      {WAR_LANES.map((lane) => (
+
+                <ArmasDeBuild
+                  build={build}
+                  weaponSets={weaponSets}
+                  limite={2}
+                  className="mt-1 min-h-[18px]"
+                />
+
+                {/* El pie, de un solo alto: la nota de "ya desplegado" medía un
+                    renglón y los botones 44, así que el banquillo salía con
+                    dientes según quién estuviera libre. */}
+                {(busy || canEdit) && (
+                  <div className={`mt-1.5 flex items-center gap-1 ${canEdit ? 'min-h-tap' : ''}`}>
+                    {busy ? (
+                      <p className="text-meta text-slate-500 italic">
+                        Ya desplegado en {WAR_SIDE_LABELS[busy]}
+                      </p>
+                    ) : (
+                      // Medían 55x17 px. El nombre de la línea se queda -- es lo
+                      // que dice a dónde va -- pero el botón pasa a 44 de alto,
+                      // que es lo que hace que se acierte.
+                      WAR_LANES.map((lane) => (
                         <button
                           key={lane.id}
                           onClick={() => move(p.id, lane.id)}
@@ -1303,9 +1363,9 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit, canVo
                         >
                           {lane.label.replace('Línea ', '')}
                         </button>
-                      ))}
-                    </div>
-                  )
+                      ))
+                    )}
+                  </div>
                 )}
               </div>
               );

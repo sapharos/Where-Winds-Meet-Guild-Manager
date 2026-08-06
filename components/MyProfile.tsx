@@ -10,7 +10,7 @@ import {
   WarSide,
   WeaponSet,
 } from '../types';
-import { ROLE_NAMES, buildColours } from './PlayerCard';
+import { ROLE_NAMES, ArmasDeBuild, buildColour } from './PlayerCard';
 import Grapa from './Grapa';
 import { SetBadge } from './BuildEditor';
 import MyWars from './MyWars';
@@ -51,14 +51,21 @@ const MyProfile: React.FC<Props> = ({ player, weaponSets, onEditBuilds }) => {
   const latest = scans[scans.length - 1];
   const previous = scans[scans.length - 2];
   const primary = builds.find((b) => b.isPrimary) ?? builds[0];
-  const { from, to } = buildColours(primary, weaponSets);
+  const { from } = buildColour(primary, weaponSets);
 
   return (
     <div className="space-y-5">
-      <section
-        className="relative border rounded-xl p-6 overflow-hidden"
-        style={{ background: `linear-gradient(90deg, ${from}40 0%, ${to}40 100%)`, borderColor: `${from}80` }}
-      >
+      {/* Superficie del tema y una barra sólida, no una rampa de los colores de
+          sus armas al 25%: el color lo elige el usuario, así que sobre él no se
+          puede prometer contraste al nombre ni a la cifra de actividad, que es
+          justamente lo que un miembro viene a leer. Las armas pasan a estar
+          escritas debajo del nombre, que antes no lo estaban en ningún sitio. */}
+      <section className="relative border border-slate-800 bg-slate-900 rounded-xl p-6 overflow-hidden">
+        <span
+          aria-hidden
+          className="absolute left-0 top-0 bottom-0 w-1.5"
+          style={{ backgroundColor: from }}
+        />
         {/*
           Identidad arriba, cifra abajo, con una regla entre medias.
 
@@ -75,6 +82,13 @@ const MyProfile: React.FC<Props> = ({ player, weaponSets, onEditBuilds }) => {
             <p className="text-sm text-slate-300 mt-1">
               {player.sect} · Nivel {player.level}
             </p>
+            {primary && (
+              <ArmasDeBuild
+                build={primary}
+                weaponSets={weaponSets}
+                className="mt-2 flex-wrap gap-y-1"
+              />
+            )}
             <div className="flex items-center gap-2 mt-3 flex-wrap">
               {player.isStarter && (
                 // La grapa y no una estrella: es la marca de titular del
@@ -103,7 +117,7 @@ const MyProfile: React.FC<Props> = ({ player, weaponSets, onEditBuilds }) => {
           </div>
 
           {latest && (
-            <div className="border-t border-slate-100/10 pt-4">
+            <div className="border-t border-slate-800 pt-4">
               <p className="text-[11px] uppercase tracking-wider text-slate-400">
                 Actividad semanal
               </p>
@@ -154,15 +168,17 @@ const MyProfile: React.FC<Props> = ({ player, weaponSets, onEditBuilds }) => {
         ) : (
           <div className="grid sm:grid-cols-2 gap-3">
             {builds.map((build) => {
-              const colours = buildColours(build, weaponSets);
+              const { from } = buildColour(build, weaponSets);
               return (
                 <div
                   key={build.id}
-                  className="rounded-lg border border-slate-800 p-3"
-                  style={{
-                    background: `linear-gradient(90deg, ${colours.from}26 0%, ${colours.to}26 100%)`,
-                  }}
+                  className="relative overflow-hidden rounded-lg border border-slate-800 bg-slate-950 p-3 pl-4"
                 >
+                  <span
+                    aria-hidden
+                    className="absolute left-0 top-0 bottom-0 w-1"
+                    style={{ backgroundColor: from }}
+                  />
                   <div className="flex items-center gap-2 mb-2">
                     <h3 className="font-bold text-slate-100">{build.name}</h3>
                     {build.isPrimary && (
@@ -183,21 +199,29 @@ const MyProfile: React.FC<Props> = ({ player, weaponSets, onEditBuilds }) => {
                     ))}
                   </div>
 
+                  {/* Chip neutro con la marca del conjunto en color, y no el
+                      nombre del arma escrito del color del usuario sobre un
+                      tinte suyo: eso es texto sin contraste garantizado en
+                      ninguno de los dos temas. */}
                   <div className="flex gap-1.5 flex-wrap">
                     {build.weapons.map((weapon) => {
                       const set = weaponSets.find((s) => s.weapons.includes(weapon));
                       return (
                         <span
                           key={weapon}
-                          className="text-[10px] px-1.5 py-0.5 rounded border flex items-center gap-1"
-                          style={
+                          title={set ? set.name : 'Ya no está en ningún conjunto'}
+                          className={`text-[11px] px-1.5 py-0.5 rounded border flex items-center gap-1.5 ${
                             set
-                              ? { borderColor: set.color, color: set.color, backgroundColor: `${set.color}1a` }
-                              : { borderColor: '#475569', color: '#94a3b8' }
-                          }
+                              ? 'border-slate-800 bg-slate-900 text-slate-300'
+                              : 'border-slate-700 text-slate-500'
+                          }`}
                         >
-                          {set && <SetBadge set={set} size={12} />}
-                          {weapon}
+                          {set ? (
+                            <SetBadge set={set} size={12} />
+                          ) : (
+                            <i className="fa-solid fa-triangle-exclamation text-[9px]"></i>
+                          )}
+                          <span className={set ? '' : 'line-through'}>{weapon}</span>
                         </span>
                       );
                     })}

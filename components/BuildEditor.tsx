@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../services/authService';
 import { Player, PlayerBuild, Role, WeaponSet } from '../types';
-import { ROLE_NAMES, buildColours } from './PlayerCard';
+import { ROLE_NAMES, buildColour } from './PlayerCard';
 import Sheet from './Sheet';
 
 const ROLE_STYLE: Record<Role, string> = {
@@ -122,17 +122,16 @@ const BuildEditor: React.FC<Props> = ({ player, canEdit, onClose, onSaved }) => 
 
           {builds?.map((build) => {
             const expanded = open.has(build.id);
-            const colours = buildColours(build, sets);
+            const { from } = buildColour(build, sets);
 
             return (
+            // Plegada llevaba una rampa de los colores de sus armas al 15%;
+            // ahora la superficie es la misma esté plegada o abierta y el color
+            // va sólido en la barra. Plegar no es cambiar de material, y un
+            // tinte del color del usuario no se ve en tema claro.
             <div
               key={build.id}
-              className="bg-slate-950 border border-slate-800 rounded-lg p-4 space-y-3"
-              style={
-                expanded
-                  ? undefined
-                  : { background: `linear-gradient(90deg, ${colours.from}26 0%, ${colours.to}26 100%)` }
-              }
+              className="relative overflow-hidden bg-slate-950 border border-slate-800 rounded-lg p-4 pl-5 space-y-3"
             >
               <div className="flex items-center gap-3 flex-wrap">
                 {expanded ? (
@@ -202,15 +201,18 @@ const BuildEditor: React.FC<Props> = ({ player, canEdit, onClose, onSaved }) => 
                   {build.weapons.map((weapon) => {
                     const set = sets.find((s) => s.weapons.includes(weapon));
                     return (
+                      // Chip neutro con la marca del conjunto en color: el
+                      // nombre del arma escrito del color del usuario, sobre un
+                      // tinte del mismo color, no tiene contraste garantizado
+                      // en ninguno de los dos temas (DIRECCION_VISUAL.md §2).
                       <span
                         key={weapon}
                         title={set ? set.name : 'Ya no está en ningún conjunto'}
-                        className="text-[11px] px-2 py-0.5 rounded border flex items-center gap-1.5"
-                        style={
+                        className={`text-[11px] px-2 py-0.5 rounded border flex items-center gap-1.5 ${
                           set
-                            ? { borderColor: set.color, color: set.color, backgroundColor: `${set.color}1a` }
-                            : { borderColor: '#92400e', color: '#f59e0b' }
-                        }
+                            ? 'border-slate-800 bg-slate-900 text-slate-300'
+                            : 'border-staple text-staple'
+                        }`}
                       >
                         {set ? (
                           <SetBadge set={set} size={13} />
@@ -329,6 +331,18 @@ const BuildEditor: React.FC<Props> = ({ player, canEdit, onClose, onSaved }) => 
               />
               </>
               )}
+
+              {/* La barra del arma principal. La tarjeta separa a sus hijos con
+                  `space-y-3`, que reparte margen superior a todos menos al
+                  primero: puesta la primera empujaría 12 px al resto, y puesta
+                  la última se los lleva ella -- y con `top`/`bottom` fijados el
+                  margen sí la mueve. De ahí el cero en línea, que es lo único
+                  que gana al selector de la utilidad. */}
+              <span
+                aria-hidden
+                className="absolute left-0 top-0 bottom-0 w-1"
+                style={{ backgroundColor: from, marginTop: 0 }}
+              />
             </div>
             );
           })}
