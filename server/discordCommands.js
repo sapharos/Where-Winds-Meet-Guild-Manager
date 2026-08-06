@@ -32,7 +32,7 @@ import { permissionsFor } from './auth.js';
 import { LANE_INFO, LANE_CAPACITY, WAR_CAPACITY, SIDES, getBoard, listStrategies } from './war.js';
 import {
   getEvent,
-  listEvents,
+  myEvents,
   respond,
   cuentaPartidas,
   getAgendaChannel,
@@ -937,35 +937,34 @@ async function comandoAgenda(interaction) {
     );
   }
 
-  const eventos = await listEvents();
+  // Una consulta y no una por evento: diez eventos eran veintiuna idas y
+  // vueltas a la base de datos para leer diez respuestas propias, y esto tiene
+  // tres segundos antes de que Discord dé el comando por perdido.
+  const eventos = quien.playerId ? await myEvents(quien.playerId, { conCancelados: true }) : [];
   if (!eventos.length) return aviso('No hay nada programado por delante.');
-
-  const conMiRespuesta = await Promise.all(
-    eventos.slice(0, 10).map(async (e) => {
-      const detalle = await getEvent(e.id);
-      const mia = detalle.responses.find((r) => r.playerId === quien.playerId);
-      return { ...e, mia };
-    }),
-  );
 
   const embed = {
     author: { name: process.env.GUILD_NAME || 'Zona Zero' },
     title: '🗓  Lo que viene',
     color: LATON,
-    fields: conMiRespuesta.map((e) => {
+    fields: eventos.slice(0, 10).map((e) => {
       const tipo = EVENTO_TIPOS[e.kind] ?? EVENTO_TIPOS.casual;
-      const tuya = e.mia
-        ? `**${RESPUESTAS.find((r) => r.answer === e.mia.answer)?.label ?? e.mia.answer}**${
-            e.mia.rounds ? ` (${e.mia.rounds})` : ''
+      const tuya = e.mine
+        ? `**${RESPUESTAS.find((r) => r.answer === e.mine.answer)?.label ?? e.mine.answer}**${
+            e.mine.rounds ? ` (${e.mine.rounds})` : ''
           }`
         : '*sin contestar*';
+      // El enlace a la encuesta, cuando está publicada: es lo que convierte
+      // esta lista en un sitio desde el que se puede contestar, y no sólo
+      // enterarse. El mensaje del lunes no se encuentra el viernes.
+      const donde = e.discordUrl ? `  ·  [ir a la encuesta](${e.discordUrl})` : '';
       return {
         name: `${tipo.emoji}  ${literal(e.title)}${e.cancelledAt ? '  ·  CANCELADO' : ''}`,
-        value: `${marca(e.startsAt, 'F')}\n✅ ${e.yes} · ❔ ${e.maybe} · ✖ ${e.no}  —  tú: ${tuya}`,
+        value: `${marca(e.startsAt, 'F')}\n✅ ${e.yes} · ❔ ${e.maybe} · ✖ ${e.no}  —  tú: ${tuya}${donde}`,
         inline: false,
       };
     }),
-    footer: { text: 'Para contestar, busca la encuesta en el canal o entra en la web.' },
+    footer: { text: 'Contesta en la encuesta del canal o en la web; es la misma lista.' },
   };
 
   return { type: MESSAGE, data: { embeds: [embed], flags: EPHEMERAL } };

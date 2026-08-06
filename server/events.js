@@ -210,17 +210,26 @@ export async function getEvent(id) {
  * decir. Y los cancelados a los que dijo que sí, porque quien organizó su
  * sábado alrededor de una guerra es justo a quien hay que avisar.
  */
-export async function myEvents(playerId) {
+export async function myEvents(playerId, { conCancelados = false } = {}) {
   const { rows } = await pool.query(
-    `SELECT ${CAMPOS}, r.answer AS "myAnswer", r.rounds AS "myRounds"
+    `SELECT ${CAMPOS}, r.answer AS "myAnswer", r.rounds AS "myRounds",
+            (SELECT count(*)::int FROM event_responses x
+              WHERE x.guild_id = e.guild_id AND x.event_id = e.id AND x.answer = 'yes') AS "yes",
+            (SELECT count(*)::int FROM event_responses x
+              WHERE x.guild_id = e.guild_id AND x.event_id = e.id AND x.answer = 'maybe') AS "maybe",
+            (SELECT count(*)::int FROM event_responses x
+              WHERE x.guild_id = e.guild_id AND x.event_id = e.id AND x.answer = 'no') AS "no"
        FROM guild_events e
        LEFT JOIN event_responses r
          ON r.guild_id = e.guild_id AND r.event_id = e.id AND r.player_id = $2
       WHERE e.guild_id = $1
         AND e.starts_at + make_interval(mins => e.minutes) >= now()
-        AND (e.cancelled_at IS NULL OR r.answer = 'yes')
+        -- Un cancelado se cae salvo que uno se hubiera comprometido, que es a
+        -- quien hay que avisar. La agenda del bot los quiere todos: allí la
+        -- pregunta es «qué hay», no «a qué me apunté».
+        AND ($3 OR e.cancelled_at IS NULL OR r.answer = 'yes')
       ORDER BY e.starts_at`,
-    [GUILD_ID, playerId],
+    [GUILD_ID, playerId, conCancelados],
   );
 
   const canal = await getAgendaChannel();

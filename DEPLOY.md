@@ -234,9 +234,9 @@ vez*, *No puedo* — because the useful answer is not "I'm coming" but "I'm comi
 to three". Everything else gets three buttons. A closed or cancelled poll keeps
 its message and loses its controls.
 
-`/agenda` lists what is coming with your own answer against each, privately —
-the poll message gets buried in a busy channel, and Monday's is not findable on
-Friday.
+`/agenda` lists what is coming with your own answer against each, privately, and
+links each published event straight to its poll — the message gets buried in a
+busy channel, and Monday's is not findable on Friday.
 
 Answering needs a linked Discord and a roster entry, and the poll's window is
 enforced wherever the answer comes from.
