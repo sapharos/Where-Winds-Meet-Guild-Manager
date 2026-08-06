@@ -668,7 +668,7 @@ const AdminPanel: React.FC<Props> = ({
               type="text"
               required
               placeholder="Usuario"
-              className="bg-slate-950 border border-slate-800 rounded p-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
+              className="w-full min-w-0 bg-slate-950 border border-slate-800 rounded p-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
               value={newUsername}
               onChange={(e) => setNewUsername(e.target.value)}
             />
@@ -678,12 +678,12 @@ const AdminPanel: React.FC<Props> = ({
               minLength={8}
               placeholder="Contraseña (mín. 8)"
               autoComplete="new-password"
-              className="bg-slate-950 border border-slate-800 rounded p-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
+              className="w-full min-w-0 bg-slate-950 border border-slate-800 rounded p-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
             />
             <select
-              className="bg-slate-950 border border-slate-800 rounded p-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
+              className="w-full min-w-0 bg-slate-950 border border-slate-800 rounded p-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
               value={newRole}
               onChange={(e) => setNewRole(e.target.value as UserRole)}
             >
@@ -715,7 +715,7 @@ const AdminPanel: React.FC<Props> = ({
               </p>
               <div className="grid md:grid-cols-2 gap-3">
                 <select
-                  className="bg-slate-950 border border-slate-800 rounded p-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
+                  className="w-full min-w-0 bg-slate-950 border border-slate-800 rounded p-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
                   value={jugadorNuevo}
                   onChange={(e) => setJugadorNuevo(e.target.value)}
                 >
