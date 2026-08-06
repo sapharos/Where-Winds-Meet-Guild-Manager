@@ -133,6 +133,8 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit, canVo
   // Who is being dragged, and which lane is under the cursor. The lane is kept
   // so the target can light up: a drop with no feedback beforehand is a guess.
   const [dragging, setDragging] = useState<string | null>(null);
+  /** En qué hueco de qué línea caería lo que se está arrastrando. */
+  const [insercion, setInsercion] = useState<{ lane: WarLane; index: number } | null>(null);
   const [over, setOver] = useState<WarLane | null>(null);
   // The same id, written the instant the drag begins. The state above exists to
   // redraw the board; this exists to be correct. A drag can raise dragstart and
@@ -347,6 +349,55 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit, canVo
   };
 
   /**
+   * Reordenar dentro de una línea.
+   *
+   * El orden de una línea es la formación: quién entra primero y quién cubre.
+   * Se guardaba desde siempre en `position`, pero sólo lo escribía el reparto
+   * poniendo a cada uno al final, así que la única manera de cambiarlo era
+   * sacar a alguien y volver a meterlo -- y eso lo dejaba otra vez el último.
+   *
+   * Como `move`: se pinta antes de pedirlo y se deshace si el servidor dice que
+   * no. Y se manda la línea entera, que es lo que quien arrastra ya tiene
+   * delante; deducirla de un solo movimiento sería reconstruirla dos veces.
+   */
+  const reordenar = async (lane: WarLane, playerId: string, hasta: number) => {
+    const before = latest.current;
+    const enLinea = before.filter((d) => d.side === side && d.lane === lane);
+    const desde = enLinea.findIndex((d) => d.playerId === playerId);
+    if (desde < 0) return;
+
+    const orden = enLinea.map((d) => d.playerId);
+    orden.splice(desde, 1);
+    // El índice viene contado sobre la lista con el arrastrado dentro, así que
+    // al haberlo sacado todo lo que estaba debajo sube un puesto.
+    orden.splice(hasta > desde ? hasta - 1 : hasta, 0, playerId);
+    if (orden.join() === enLinea.map((d) => d.playerId).join()) return;
+
+    // Se reconstruye respetando el sitio del resto del tablero: las otras
+    // líneas y el otro bando no se tocan.
+    const reordenada = orden.map((id) => enLinea.find((d) => d.playerId === id) as Deployment);
+    const after = [
+      ...before.filter((d) => !(d.side === side && d.lane === lane)),
+      ...reordenada,
+    ];
+
+    setError(null);
+    latest.current = after;
+    setDeployments(after);
+
+    try {
+      await api(`/war/deployments/${side}/${lane}/order`, {
+        method: 'PUT',
+        body: JSON.stringify({ order: orden }),
+      });
+    } catch (err) {
+      latest.current = before;
+      setDeployments(before);
+      setError(err instanceof Error ? err.message : 'No se pudo reordenar');
+    }
+  };
+
+  /**
    * Whether this lane will take the person currently being dragged.
    *
    * Refused when the lane is already full, unless they are being dragged within
@@ -388,6 +439,7 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit, canVo
             dragged.current = null;
             setDragging(null);
             setOver(null);
+            setInsercion(null);
           },
           className: dragging === playerId ? 'opacity-40' : 'cursor-grab',
         }
@@ -1105,6 +1157,9 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit, canVo
                 // Ignore crossings between the lane's own children.
                 if (!event.currentTarget.contains(event.relatedTarget as Node)) {
                   setOver((current) => (current === lane.id ? null : current));
+                  // Y la marca del hueco, que si no se queda dibujada en una
+                  // línea de la que el puntero ya salió.
+                  setInsercion((current) => (current?.lane === lane.id ? null : current));
                 }
               }}
               onDrop={(event) => {
@@ -1160,16 +1215,76 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit, canVo
               </div>
 
               <div className="space-y-1.5 min-h-[60px]">
-                {members.map((p) => {
+                {members.map((p, at) => {
                   const held = unitsOf.get(p.id) ?? [];
                   const first = strategy?.units.find((u) => held.includes(u.id));
                   const build = buildOf(p);
                   const { className: gripClass, ...gripProps } = grip(p.id);
+                  /**
+                   * Dónde caería el que se arrastra si se soltara aquí.
+                   *
+                   * Por la mitad de la ficha: en la de arriba va delante, en la
+                   * de abajo detrás. Sin eso no habría forma de dejar a alguien
+                   * el último, porque el último sitio no tiene ficha debajo que
+                   * apuntar.
+                   */
+                  const dondeCae = (event: React.DragEvent) => {
+                    const caja = event.currentTarget.getBoundingClientRect();
+                    return event.clientY < caja.top + caja.height / 2 ? at : at + 1;
+                  };
+                  /**
+                   * Si lo que se arrastra ya está en esta línea, esto es
+                   * reordenar; si viene de fuera, es la línea quien lo recibe.
+                   *
+                   * Se mira el ref y no el estado: `dragging` se escribe con
+                   * `setState` y no está listo hasta el siguiente pintado, así
+                   * que el primer `dragover` -- el que decide si la marca
+                   * aparece o no -- llegaría con el valor de antes.
+                   */
+                  const reordenando = () =>
+                    Boolean(dragged.current) && members.some((m) => m.id === dragged.current);
                   return (
                     <div
                       key={p.id}
                       {...gripProps}
-                      className={`${FICHA} ${gripClass ?? ''}`}
+                      onDragOver={
+                        arranging
+                          ? (event) => {
+                              if (!reordenando()) return; // que lo coja la línea
+                              // Se para aquí para que la línea no se quede con
+                              // el soltar y lo trate como «mover a esta línea»,
+                              // que es lo que hacía perder el sitio.
+                              event.preventDefault();
+                              event.stopPropagation();
+                              setInsercion({ lane: lane.id, index: dondeCae(event) });
+                            }
+                          : undefined
+                      }
+                      onDrop={
+                        arranging
+                          ? (event) => {
+                              if (!reordenando()) return;
+                              event.preventDefault();
+                              event.stopPropagation();
+                              const quien = dragged.current;
+                              const hasta = dondeCae(event);
+                              dragged.current = null;
+                              setDragging(null);
+                              setOver(null);
+                              setInsercion(null);
+                              if (quien) void reordenar(lane.id, quien, hasta);
+                            }
+                          : undefined
+                      }
+                      className={`${FICHA} ${gripClass ?? ''} ${
+                        insercion?.lane === lane.id && insercion.index === at
+                          ? 'shadow-[0_-3px_0_0_rgb(var(--a-400))]'
+                          : insercion?.lane === lane.id &&
+                              insercion.index === at + 1 &&
+                              at === members.length - 1
+                            ? 'shadow-[0_3px_0_0_rgb(var(--a-400))]'
+                            : ''
+                      }`}
                       // El color de la unidad, ya sólido y no al 40%: es un
                       // borde de 1 px, y el chip de abajo la nombra igualmente.
                       style={first ? { borderColor: first.color } : undefined}

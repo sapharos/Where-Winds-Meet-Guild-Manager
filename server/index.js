@@ -24,6 +24,7 @@ import { listWeaponSets, saveWeaponSets, seedWeaponSets } from './weapons.js';
 import {
   getDeployments,
   place,
+  reorder,
   setUnits,
   setBuild,
   setLaneLeader,
@@ -889,6 +890,12 @@ app.get('/api/war/deployments', requireAuth, asHandler(async (_req, res) => {
 // different lanes at once do not overwrite each other.
 app.put('/api/war/deployments/:side/:playerId', requireAuth, requirePermission('war.edit'), asHandler(async (req, res) => {
   res.json(await place(req.params.side, req.body?.lane ?? null, req.params.playerId));
+}));
+
+// El orden dentro de una línea. Tres segmentos y el último literal, así que no
+// se cruza con `:side/:playerId` ni con `:side/:playerId/units`.
+app.put('/api/war/deployments/:side/:lane/order', requireAuth, requirePermission('war.edit'), asHandler(async (req, res) => {
+  res.json(await reorder(req.params.side, req.params.lane, req.body?.order ?? []));
 }));
 
 app.delete('/api/war/deployments/:side', requireAuth, requirePermission('war.edit'), asHandler(async (req, res) => {

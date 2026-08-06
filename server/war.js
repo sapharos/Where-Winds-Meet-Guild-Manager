@@ -84,6 +84,61 @@ export async function setLaneLeader(side, playerId, leader) {
 }
 
 /**
+ * Reordena una línea.
+ *
+ * El orden ya se guardaba -- `position` existe desde el principio y es por
+ * donde se leen los despliegues -- pero sólo lo escribía el reparto, poniendo a
+ * cada uno al final. Esto lo hace escribible, que es lo que convierte una lista
+ * en una formación: quién entra primero y quién cubre.
+ *
+ * Se manda el orden entero de la línea y no «este va al puesto tres» a
+ * propósito: mover a alguien cambia el puesto de todos los que estaban debajo,
+ * y calcular eso en el servidor a partir de un solo movimiento es reconstruir
+ * la lista que quien arrastra ya tiene delante.
+ *
+ * Lo que llega se filtra contra lo que hay: ids repetidos, de otra línea o de
+ * nadie se caen, y a quien esté en la línea y no venga en la lista se le
+ * respeta el sitio al final. Así una pantalla desactualizada reordena lo que
+ * conoce sin tirar a nadie del tablero.
+ */
+export async function reorder(side, lane, order) {
+  if (!valid(side, lane)) throw Object.assign(new Error('unknown lane'), { status: 400 });
+  await assertOpen(side);
+
+  const { rows } = await pool.query(
+    `SELECT player_id AS "playerId" FROM war_deployments
+      WHERE guild_id = $1 AND side = $2 AND lane = $3 ORDER BY position`,
+    [GUILD_ID, side, lane],
+  );
+  const enLinea = new Set(rows.map((r) => r.playerId));
+
+  const pedidos = [];
+  for (const id of Array.isArray(order) ? order : []) {
+    if (enLinea.has(id) && !pedidos.includes(id)) pedidos.push(id);
+  }
+  const final = [...pedidos, ...rows.map((r) => r.playerId).filter((id) => !pedidos.includes(id))];
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    for (const [at, playerId] of final.entries()) {
+      await client.query(
+        `UPDATE war_deployments SET position = $4
+          WHERE guild_id = $1 AND side = $2 AND lane = $3 AND player_id = $5`,
+        [GUILD_ID, side, lane, at, playerId],
+      );
+    }
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+  return { order: final };
+}
+
+/**
  * Put a member in a lane, or take them off the board when lane is null.
  *
  * One statement per member rather than saving the whole board: two officers

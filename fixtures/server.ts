@@ -413,6 +413,21 @@ const ESCRITURAS: [string, RegExp, Ruta][] = [
     anotar(m[1], fake.session.user.playerId ?? '', body ?? {}, null)],
   ['PUT', /^\/events\/([^/]+)\/responses\/([^/]+)$/, (m, _req, body) =>
     anotar(m[1], m[2], body ?? {}, fake.session.user.id)],
+  // Reordenar una línea. Se aplica de verdad sobre el almacén, para que el
+  // banco distinga «se ve movido» de «quedó movido»: la pantalla lo pinta antes
+  // de pedirlo, así que sin esto pareceria funcionar aunque no guardara nada.
+  ['PUT', /^\/war\/deployments\/([^/]+)\/([^/]+)\/order$/, (m, _req, body) => {
+    const [, side, lane] = m;
+    const orden: string[] = Array.isArray(body?.order) ? body.order : [];
+    const suyos = store.deployments.filter((d) => d.side === side && d.lane === lane);
+    const resto = store.deployments.filter((d) => !(d.side === side && d.lane === lane));
+    const puestos = orden
+      .map((id) => suyos.find((d) => d.playerId === id))
+      .filter(Boolean) as typeof suyos;
+    const faltan = suyos.filter((d) => !orden.includes(d.playerId));
+    store.deployments = [...resto, ...puestos, ...faltan];
+    return { order: [...puestos, ...faltan].map((d) => d.playerId) };
+  }],
   // Bloquear y desbloquear un bando. Sin esto el banquillo no se podía ensayar:
   // el gremio inventado llega con los dos frentes cerrados, que es como se ve
   // una guerra ya en curso, y el banquillo sólo existe mientras se arma.
