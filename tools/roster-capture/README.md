@@ -72,6 +72,12 @@ cada etiqueta con su valor y escribe `roster.json` en la misma carpeta. La tabla
 final indica que campos falta por capturar de cada miembro, si te saltaste
 alguna posicion de scroll.
 
+Va rapido porque no vuelve a reconocer nada: la captura ya leyo cada fotograma
+para poder avisarte por consola, y deja lo leido en `.ocr-cache-v2.json` dentro
+de la carpeta de la sesion. Parsear es entonces emparejar y votar. Si borras ese
+archivo, o capturaste con `--no-identify`, `parse.py` reconoce por su cuenta como
+siempre -- solo tarda mas.
+
 Los nombres con acentos vuelven sin ellos (Subaru por Subâru): el alfabeto del
 reconocedor no los tiene. No se corrige aqui a proposito, porque la lectura es
 identica siempre y eso es lo unico que necesita el emparejado contra un roster
@@ -103,7 +109,10 @@ Si aparecen datos de alguien cuyo panel social todavia no se ha leido, se marca
 antes de seguir, que en ese momento cuesta un clic. Al terminar se listan los
 que quedaron sin UID.
 
-Con `--no-identify` se desactiva, y el arranque es inmediato.
+Con `--no-identify` se desactiva, y el arranque es inmediato -- a cambio, luego
+`parse.py` tiene que reconocerlo todo desde cero.
+
+Nada de esto sale de tu equipo: el reconocimiento corre en local.
 
 ## Motes de secta
 

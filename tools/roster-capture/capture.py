@@ -74,9 +74,15 @@ class Identifier:
     usually while the next click is still happening. The point is to catch a
     member whose account number failed to read now, when going back is one
     click, instead of at the end of a sweep of seventy-six.
+
+    Lo que lee se guarda en el mismo archivo de cache que parse.py consulta,
+    con el nombre del fotograma por clave. Antes se tiraba: la captura
+    reconocia los setenta y seis paneles para poder avisar por consola, y al
+    terminar parse.py volvia a reconocer exactamente los mismos pixeles desde
+    cero. Escribirlo cuesta nada y convierte el parseo en casi instantaneo.
     """
 
-    def __init__(self, announce):
+    def __init__(self, announce, cache_path: Path):
         self.announce = announce
         self.queue: queue.Queue = queue.Queue()
         self.uids: dict[str, str] = {}
@@ -85,7 +91,24 @@ class Identifier:
         self.parse = None
         self.wanted: set = set()
         self.ready = threading.Event()
+        self.cache_path = cache_path
+        self.cache: dict = {}
+        self.dirty = 0
+        # Lo encolado mas lo que se este reconociendo ahora mismo.
+        self.pending = 0
+        self.lock = threading.Lock()
         threading.Thread(target=self._run, daemon=True).start()
+
+    def save_cache(self) -> None:
+        """Vuelca lo leido. Un fallo aqui no puede costar la captura: los PNG
+        estan en disco y parse.py sabe reconocerlos por su cuenta."""
+        if not self.cache:
+            return
+        try:
+            self.cache_path.write_text(json.dumps(self.cache), encoding="utf-8")
+            self.dirty = 0
+        except Exception:
+            pass
 
     def missing(self, name: str) -> list:
         return sorted(self.wanted - self.fields.get(name, set()))
@@ -104,12 +127,22 @@ class Identifier:
             return f"   {BOLD}sube al principio{RESET}"
         return ""
 
-    def submit(self, kind: str, image: Image.Image) -> None:
-        self.queue.put((kind, image))
+    def submit(self, kind: str, image: Image.Image, filename: str) -> None:
+        with self.lock:
+            self.pending += 1
+        self.queue.put((kind, image, filename))
 
     def drain(self, timeout: float = 20.0) -> None:
+        """Espera a que no quede nada por leer, ni en la cola ni en la mano.
+
+        Miraba solo la cola, y el fotograma que se esta reconociendo ya salio
+        de ella: al terminar la captura se perdia el aviso del ultimo miembro
+        -- justo el que uno acaba de mirar -- y ahora tambien su lectura."""
         deadline = time.monotonic() + timeout
-        while not self.queue.empty() and time.monotonic() < deadline:
+        while time.monotonic() < deadline:
+            with self.lock:
+                if self.pending == 0:
+                    return
             time.sleep(0.2)
 
     def _run(self) -> None:
@@ -126,13 +159,16 @@ class Identifier:
         self.parse = parse
         self.wanted = {key for key, _ in parse.FIELDS.values()} | {"level", "sect"}
         self.ready.set()
-        scratch: dict = {}
 
         while True:
-            kind, image = self.queue.get()
+            kind, image, filename = self.queue.get()
             try:
-                readings = parse.run_ocr(engine, image, scratch, f"live-{id(image)}")
-                scratch.clear()
+                readings = parse.run_ocr(engine, image, self.cache, filename)
+                # Cada pocos fotogramas, por si la sesion acaba de mala manera:
+                # un corte de luz no deberia costar el reconocimiento entero.
+                self.dirty += 1
+                if self.dirty >= 10:
+                    self.save_cache()
                 if kind == "list":
                     self._report_popup(parse.read_popup(readings, image.width, image.height))
                 else:
@@ -144,6 +180,9 @@ class Identifier:
                     )
             except Exception as err:  # noqa: BLE001
                 self.announce(f"{GREY}       (no se pudo leer: {err}){RESET}")
+            finally:
+                with self.lock:
+                    self.pending -= 1
 
     def _report_popup(self, found) -> None:
         # A list frame without a popup is just a scroll; saying so every time
@@ -328,7 +367,7 @@ def main() -> int:
                 except Exception:
                     pass
 
-        identifier = None if args.no_identify else Identifier(announce)
+        identifier = None if args.no_identify else Identifier(announce, out_dir / ".ocr-cache-v2.json")
 
         sys.stdout.write(status())
         sys.stdout.flush()
@@ -387,7 +426,7 @@ def main() -> int:
                         beep=True,
                     )
                     if identifier is not None:
-                        identifier.submit(region.name, image.copy())
+                        identifier.submit(region.name, image.copy(), filename)
 
                 if live:
                     sys.stdout.write("\r" + status())
@@ -400,6 +439,7 @@ def main() -> int:
                 sys.stdout.write("\r\033[K  terminando de leer los ultimos fotogramas...\n")
                 sys.stdout.flush()
                 identifier.drain()
+                identifier.save_cache()
             total = sum(counts.values())
             print(("\r\033[K" if live else "") + f"\n{total} fotogramas en {out_dir.resolve()}")
             print(f"  lista: {counts['list']}")
