@@ -69,6 +69,7 @@ import {
   registerCommands,
   publicarEvento,
   refrescarEvento,
+  retirarEvento,
   startAgendaScheduler,
 } from './discordCommands.js';
 import { listSeries, saveSeries, deleteSeries, seedSeries, asegurarEventos } from './agenda.js';
@@ -499,7 +500,12 @@ app.post('/api/events/:id/publish', requireAuth, requirePermission('events.manag
 }));
 
 app.delete('/api/events/:id', requireAuth, requirePermission('events.manage'), asHandler(async (req, res) => {
+  // Se lee antes de borrar: después ya no hay de dónde sacar dónde quedó
+  // publicada su encuesta, y dejarla en el canal es dejar botones que
+  // contestan «no existe ese evento».
+  const evento = await getEvent(req.params.id).catch(() => null);
   await deleteEvent(req.params.id);
+  if (evento) void retirarEvento(evento);
   res.json({ ok: true });
 }));
 

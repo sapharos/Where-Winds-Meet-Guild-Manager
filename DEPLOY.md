@@ -220,6 +220,11 @@ fixing a typo does not summon the guild twice. Whether an event has gone out
 shows on its card — *publicada*, or *sin publicar* for whoever can publish it —
 and opening it links straight to the message.
 
+Deleting an event takes its answers and its poll message with it, so a trial run
+— create something, publish it, vote on it from both sides, delete it — leaves
+nothing behind. Cancelling is the opposite and deliberate: the event and its
+answers stay, struck through, because people arranged an evening around it.
+
 **Republishing never costs a vote.** Answers live in the database against the
 member, never in Discord, so *Volver a publicar* can be pressed as often as
 needed — someone deleted the message, the channel was deleted, the channel was

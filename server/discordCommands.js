@@ -784,6 +784,21 @@ export async function publicarEvento(id) {
 }
 
 /**
+ * Retira la encuesta de un evento que deja de existir.
+ *
+ * Borrar el evento y dejar su mensaje en el canal deja una encuesta huérfana:
+ * sigue teniendo botones, y quien los pulse recibe «no existe ese evento». Se
+ * llama antes de borrar, porque después ya no hay de dónde sacar dónde estaba.
+ *
+ * No lanza ni espera veredicto: el evento se va igual, y un mensaje que no se
+ * pudo quitar es un resto, no un fallo del borrado.
+ */
+export async function retirarEvento(evento) {
+  if (!botEnabled() || !evento?.discordChannelId || !evento?.discordMessageId) return;
+  await deleteMessage(evento.discordChannelId, evento.discordMessageId).catch(() => null);
+}
+
+/**
  * Pone al día el mensaje ya publicado.
  *
  * Se llama después de cada respuesta venga de donde venga, y por eso no lanza:
