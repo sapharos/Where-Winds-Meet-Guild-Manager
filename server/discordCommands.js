@@ -350,7 +350,9 @@ export function perfilEmbed({ player, scans, builds, weaponSets, avatarUrl, guil
  */
 const GRUPOS = [
   { role: 'Tank', label: 'Tanques' },
-  { role: 'Healer', label: 'Sanadores' },
+  // «Healers» y no «Sanadores»: es como los llama el gremio. La web sigue
+  // diciendo Sanador, que es su idioma; esto es el idioma de Discord.
+  { role: 'Healer', label: 'Healers' },
   { role: 'DPS', label: 'DPS' },
 ];
 
@@ -363,6 +365,21 @@ const GRUPOS = [
  */
 const literal = (texto) => String(texto).replace(/([*_`~|\\])/g, '\\$1');
 
+/**
+ * Cómo se nombra a un desplegado: su nombre del juego y su Discord.
+ *
+ * El Discord va como mención de verdad -- `<@id>` -- y no como el texto del
+ * usuario que hay guardado, por dos razones: Discord la pinta con el nombre
+ * que esa persona tenga hoy, así que no envejece, y se puede pulsar para
+ * escribirle. No avisa a nadie: una mención dentro de un embed nunca notifica,
+ * y además la respuesta prohíbe menciones.
+ *
+ * A quien no tiene Discord vinculado se le pone sólo el nombre, y esa ausencia
+ * es información: son los que no van a leer nada de lo que se escriba aquí.
+ */
+const nombra = (d) =>
+  `${d.isLaneLeader ? '👑 ' : ''}${literal(d.name)}${d.discordId ? ` <@${d.discordId}>` : ''}`;
+
 /** Los desplegados de una línea y un bando, agrupados por lo que hacen. */
 function porRoles(gente) {
   if (!gente.length) return '*nadie asignado*';
@@ -372,9 +389,7 @@ function porRoles(gente) {
     // La línea del rol se escribe aunque esté vacía: que a la Amarilla no le
     // quede ningún tanque es justo lo que hay que ver de un vistazo, y un
     // renglón que falta no se ve.
-    const nombres = suyos.length
-      ? suyos.map((d) => `${d.isLaneLeader ? '👑 ' : ''}${literal(d.name)}`).join(' · ')
-      : '—';
+    const nombres = suyos.length ? suyos.map(nombra).join(' · ') : '—';
     return `**${label}** ${nombres}`;
   }).join('\n');
 }
@@ -384,8 +399,10 @@ function porRoles(gente) {
  *
  * Una por línea y no una por bando porque el color es ahora el nombre -- la
  * barra lateral amarilla, roja o azul dice de cuál se habla antes de leer
- * nada. Dentro, los dos bandos como dos columnas: la pregunta que se hace
- * mirando esto es «¿quién tengo aquí, y quién enfrente?».
+ * nada. Dentro, un bando debajo del otro y no en dos columnas: desde que cada
+ * persona trae su nombre y su Discord, una entrada ocupa el doble, y en media
+ * tarjeta diez de ellas se parten en cinco renglones. A lo ancho caben cuatro
+ * por línea y la lista se lee de un tirón.
  *
  * Función pura y exportada, como `perfilEmbed`, para poder mirarla sin un
  * Discord delante.
@@ -414,7 +431,7 @@ export function tableroDeGuerra({ despliegues, guerra, locked = {} }) {
       return {
         name: `${WAR_SIDES[side]} · ${gente.length}/${LANE_CAPACITY}`,
         value: porRoles(gente),
-        inline: true,
+        inline: false,
       };
     }),
   }));
@@ -603,7 +620,16 @@ async function comandoGuerra(interaction) {
       .query(
         // Un miembro dado de baja que siga en el tablero se enseña igual: es
         // un hueco que hay que ver, no una fila que esconder.
-        `SELECT d.side, d.lane, d.is_lane_leader AS "isLaneLeader", p.name, p.role
+        //
+        // El Discord llega por subconsulta y no por JOIN a propósito: nada
+        // impide que dos cuentas apunten a la misma ficha -- no hay índice
+        // único que lo prohíba -- y un JOIN pondría a esa persona dos veces en
+        // su línea. Una subconsulta escalar devuelve uno o ninguno, nunca dos.
+        `SELECT d.side, d.lane, d.is_lane_leader AS "isLaneLeader", p.name, p.role,
+                (SELECT u.discord_id FROM users u
+                  WHERE u.guild_id = d.guild_id AND u.player_id = d.player_id
+                    AND u.disabled = false AND u.discord_id IS NOT NULL
+                  ORDER BY u.created_at LIMIT 1) AS "discordId"
            FROM war_deployments d
            JOIN players p ON p.guild_id = d.guild_id AND p.id = d.player_id
           WHERE d.guild_id = $1

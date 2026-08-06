@@ -166,10 +166,14 @@ asks for the same permission — *Ver el roster*, which members have by default 
 rather than inventing a Discord-only rule. Your own profile never needs it.
 
 `/guerra` shows the board a lane at a time — one card each for the Yellow, Red
-and Blue lines, in their own colour — with attack and defence side by side
-inside, everyone grouped by role, and the lane leader crowned. Above it, the
-war in progress if there is one and how full each side is. It asks for *Ver la
-War Room*, and is private unless `publico: Sí`.
+and Blue lines, in their own colour — with attack above defence inside,
+everyone grouped by role, and the lane leader crowned. Each person is named
+twice: their roster name and their Discord, so you can see who is deployed and
+write to them without looking anyone up. Whoever has no Discord linked appears
+with their name alone, which is worth seeing — they are the ones who will not
+read anything posted here. Above it, the war in progress if there is one and
+how full each side is. It asks for *Ver la War Room*, and is private unless
+`publico: Sí`.
 
 Discord delivers commands as ordinary HTTPS requests to this app, so there is no
 extra process to run — but it has to be able to prove they are really from
