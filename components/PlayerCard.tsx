@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { Player, PlayerBuild, Role, MembershipStatus, GuildRank, WeaponSet, WarSide, WAR_SIDE_LABELS } from '../types';
 import { ROLE_COLORS, ROLE_ICONS, PLATFORM_ICONS } from '../constants';
 import Sheet from './Sheet';
+import Grapa from './Grapa';
 
 export const ROLE_NAMES: Record<Role, string> = {
   [Role.TANK]: 'Tanque',
@@ -170,7 +171,9 @@ const PlayerCard: React.FC<PlayerCardProps> = ({
         gone
           ? 'border-slate-800 opacity-50 grayscale'
           : player.isStarter
-            ? 'border-staple shadow-[0_0_0_1px_rgb(var(--w-500)/0.35)]'
+            ? // Anillo a opacidad completa: al 35% era una insinuación, y la
+              // queja fue literal -- no se notaba quién es titular.
+              'border-staple shadow-[0_0_0_1px_rgb(var(--w-500))]'
             : 'border-slate-800'
       } ${className}`}
     >
@@ -199,6 +202,16 @@ const PlayerCard: React.FC<PlayerCardProps> = ({
                 contenido, así que a 320 px la tarjeta empujaba la página entera
                 fuera de la pantalla. Ahora el nombre ocupa lo que hay. */}
             <div className="flex items-center gap-2 min-w-0">
+              {/* La grapa delante del nombre: "te han fijado a la alineación".
+                  El borde de latón solo no bastaba -- a una cuadrícula se la
+                  recorre leyendo nombres, y la marca tiene que estar donde va
+                  la mirada. */}
+              {player.isStarter && !gone && (
+                <span className="shrink-0 text-staple" title="Titular">
+                  <Grapa />
+                  <span className="sr-only">Titular</span>
+                </span>
+              )}
               <h4 className="font-bold text-slate-100 leading-tight truncate">{player.name}</h4>
               {player.platform && (
                 <span className="text-slate-500 text-[10px] shrink-0" title={player.platform}>

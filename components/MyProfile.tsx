@@ -11,6 +11,7 @@ import {
   WeaponSet,
 } from '../types';
 import { ROLE_NAMES, buildColours } from './PlayerCard';
+import Grapa from './Grapa';
 import { SetBadge } from './BuildEditor';
 import MyWars from './MyWars';
 import GearSheet from './GearSheet';
@@ -76,8 +77,11 @@ const MyProfile: React.FC<Props> = ({ player, weaponSets, onEditBuilds }) => {
             </p>
             <div className="flex items-center gap-2 mt-3 flex-wrap">
               {player.isStarter && (
-                <span className="text-[11px] px-2 py-0.5 rounded border border-staple text-staple bg-staple/10 uppercase font-bold tracking-wider">
-                  <i className="fa-solid fa-star mr-1"></i>
+                // La grapa y no una estrella: es la marca de titular del
+                // sistema (DIRECCION_VISUAL.md §5), la misma que lleva la
+                // tarjeta del roster.
+                <span className="inline-flex items-center gap-1.5 text-[11px] px-2 py-0.5 rounded border border-staple text-staple uppercase font-bold tracking-wider">
+                  <Grapa width={18} />
                   Titular
                 </span>
               )}
