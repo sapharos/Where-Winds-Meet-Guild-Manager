@@ -56,7 +56,6 @@ const App: React.FC = () => {
   );
 
   const rosterLocked = !can('roster.edit');
-  const ranksLocked = !can('ranks.manage');
   const warLocked = !can('war.edit');
 
   // Surfaces a write failure instead of letting the UI show state the server
@@ -195,23 +194,10 @@ const App: React.FC = () => {
   // builds and the wars they fought, which is the whole point of keeping them --
   // and they can come back without arriving as a stranger.
 
-  const handleAddRank = (r: GuildRank) => {
-    if (ranksLocked) return;
-    const updated = [...ranks, r];
-    setRanks(updated);
-    persist(storageService.saveRanks(updated));
-  };
-
-  const handleDeleteRank = (id: string) => {
-    if (ranksLocked) return;
-    const updated = ranks.filter(r => r.id !== id);
-    setRanks(updated);
-    persist(storageService.saveRanks(updated));
-
-    const updatedPlayers = players.map(p => p.rankId === id ? { ...p, rankId: undefined } : p);
-    setPlayers(updatedPlayers);
-    if (!rosterLocked) persist(storageService.savePlayers(updatedPlayers));
-  };
+  // El alta y la baja de rangos vivieron aquí hasta agosto de 2026, colgadas
+  // del formulario de miembro. Quién es líder u oficial lo dicen ahora los
+  // roles del sistema de usuarios; el catálogo de rangos sólo se lee, para
+  // pintar el que un miembro ya tenga puesto.
 
   const handleExport = () => storageService.exportAllData();
   const handleImportClick = () => fileInputRef.current?.click();
@@ -566,8 +552,6 @@ const App: React.FC = () => {
             isViewer={rosterLocked}
             onAdd={handleAddPlayer}
             onUpdate={handleUpdatePlayer}
-            onAddRank={handleAddRank}
-            onDeleteRank={handleDeleteRank}
             onShowHistory={setHistoryFor}
             onShowBuilds={setBuildsFor}
             onToggleStarter={handleToggleStarter}
@@ -575,7 +559,6 @@ const App: React.FC = () => {
             onToggleActive={handleToggleActive}
             builds={builds}
             weaponSets={weaponSets}
-            canManageRanks={!ranksLocked}
           />
         ) : (
           <WarBoard

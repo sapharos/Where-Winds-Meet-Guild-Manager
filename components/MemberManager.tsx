@@ -13,14 +13,11 @@ interface MemberManagerProps {
   isViewer?: boolean;
   onAdd: (p: Player) => void;
   onUpdate: (p: Player) => void;
-  onAddRank: (r: GuildRank) => void;
-  onDeleteRank: (id: string) => void;
   onShowHistory?: (p: Player) => void;
   onShowBuilds?: (p: Player) => void;
   onToggleStarter?: (p: Player) => void;
   onCycleSide?: (p: Player) => void;
   onToggleActive?: (p: Player) => void;
-  canManageRanks?: boolean;
 }
 
 /** One weapon in the filter list, with how many members carry it. */
@@ -55,7 +52,6 @@ const EMPTY: Omit<Player, 'id'> = {
   sect: 'Sectless',
   platform: undefined,
   status: MembershipStatus.APPRENTICE,
-  rankId: undefined,
   notes: '',
 };
 
@@ -67,22 +63,15 @@ const MemberManager: React.FC<MemberManagerProps> = ({
   isViewer = false,
   onAdd,
   onUpdate,
-  onAddRank,
-  onDeleteRank,
   onShowHistory,
   onShowBuilds,
   onToggleStarter,
   onCycleSide,
   onToggleActive,
-  canManageRanks = false,
 }) => {
   const [editing, setEditing] = useState<Player | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   const [formData, setFormData] = useState<Omit<Player, 'id'>>(EMPTY);
-
-  const [showRankEditor, setShowRankEditor] = useState(false);
-  const [newRankName, setNewRankName] = useState('');
-  const [newRankColor, setNewRankColor] = useState('#f59e0b');
 
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState<'' | Role>('');
@@ -222,7 +211,6 @@ const MemberManager: React.FC<MemberManagerProps> = ({
       sect: p.sect || 'Sectless',
       platform: p.platform,
       status: p.status || MembershipStatus.FULL_MEMBER,
-      rankId: p.rankId,
       notes: p.notes,
     });
     setFormOpen(true);
@@ -231,18 +219,15 @@ const MemberManager: React.FC<MemberManagerProps> = ({
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     if (isViewer) return;
-    if (editing) onUpdate({ ...formData, id: editing.id });
+    // Sobre el jugador que ya existe, no en su lugar: el formulario sólo sabe
+    // de sus ocho campos, y mandarlo solo borraba todo lo demás -- titular,
+    // bando, maestría, el rango puesto, hasta el estado de baja. Guardar una
+    // edición sin tocar nada dejaba al miembro desnudo.
+    if (editing) onUpdate({ ...editing, ...formData, id: editing.id });
     else onAdd({ ...formData, id: Date.now().toString() });
     setFormOpen(false);
     setEditing(null);
     setFormData(EMPTY);
-  };
-
-  const addRank = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (isViewer || !newRankName.trim()) return;
-    onAddRank({ id: `rank-${Date.now()}`, name: newRankName, color: newRankColor });
-    setNewRankName('');
   };
 
   /** Todo lo que estrecha la lista, de una vez: la salida del estado vacío. */
@@ -631,83 +616,12 @@ const MemberManager: React.FC<MemberManagerProps> = ({
                 </select>
               </div>
 
-              <div>
-                <label className="block text-xs uppercase tracking-wider text-slate-500 mb-1">
-                  Rango del gremio
-                  {!canManageRanks && (
-                    <span className="ml-2 normal-case tracking-normal text-slate-600">
-                      solo el líder y el administrador
-                    </span>
-                  )}
-                </label>
-                <div className="flex gap-2">
-                  <select
-                    disabled={!canManageRanks}
-                    className="flex-1 bg-slate-950 border border-slate-800 rounded p-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
-                    value={formData.rankId || ''}
-                    onChange={(e) => setFormData({ ...formData, rankId: e.target.value || undefined })}
-                  >
-                    <option value="">Sin rango especial</option>
-                    {ranks.map((r) => (
-                      <option key={r.id} value={r.id}>
-                        {r.name}
-                      </option>
-                    ))}
-                  </select>
-                  {canManageRanks && (
-                    <button
-                      type="button"
-                      onClick={() => setShowRankEditor(!showRankEditor)}
-                      className={`p-2 rounded border transition-colors ${
-                        showRankEditor
-                          ? 'bg-amber-600 border-amber-500 text-white'
-                          : 'bg-slate-950 border-slate-800 text-slate-500'
-                      }`}
-                    >
-                      <i className="fa-solid fa-gear"></i>
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {showRankEditor && canManageRanks && (
-                <div className="p-3 bg-slate-950 border border-slate-800 rounded-lg space-y-2">
-                  <p className="text-[10px] text-slate-500 uppercase font-bold">Gestionar rangos</p>
-                  {ranks.map((r) => (
-                    <div key={r.id} className="flex items-center justify-between text-xs bg-slate-900 p-1.5 rounded border border-slate-800">
-                      <span className="flex items-center gap-2">
-                        <span className="w-2 h-2 rounded-full" style={{ backgroundColor: r.color }} />
-                        {r.name}
-                      </span>
-                      <button type="button" onClick={() => onDeleteRank(r.id)} className="text-slate-600 hover:text-red-500">
-                        <i className="fa-solid fa-trash-can"></i>
-                      </button>
-                    </div>
-                  ))}
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      value={newRankName}
-                      placeholder="Nombre del rango"
-                      onChange={(e) => setNewRankName(e.target.value)}
-                      className="flex-1 bg-slate-900 border border-slate-800 rounded p-1.5 text-xs outline-none"
-                    />
-                    <input
-                      type="color"
-                      value={newRankColor}
-                      onChange={(e) => setNewRankColor(e.target.value)}
-                      className="w-9 h-8 bg-slate-900 border border-slate-800 rounded cursor-pointer"
-                    />
-                    <button
-                      type="button"
-                      onClick={addRank}
-                      className="bg-slate-800 hover:bg-slate-700 text-xs px-3 rounded transition-all"
-                    >
-                      Añadir
-                    </button>
-                  </div>
-                </div>
-              )}
+              {/* Aquí hubo un selector de "Rango del gremio" con su propio
+                  editor de catálogo. Se quitó a propósito: quién es líder u
+                  oficial lo dicen los roles del sistema de usuarios, y un
+                  segundo sitio donde escribir lo mismo es un sitio donde
+                  contradecirlo. El rankId que un miembro ya tenga se conserva
+                  tal cual al guardar. */}
 
               <div>
                 <label className="block text-xs uppercase tracking-wider text-slate-500 mb-1">Membresía</label>
