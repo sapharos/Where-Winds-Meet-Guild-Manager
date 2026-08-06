@@ -173,8 +173,18 @@
     }
   }
 
+  /*
+   * `backwards` y no `both`: el relleno hacia atrás es el que hace falta -- que
+   * la tarjeta esté invisible durante su retardo en vez de parpadear -- pero el
+   * de hacia delante no caduca nunca. Una animación que sigue rellenando deja
+   * `transform` puesto para siempre, aunque el valor acabe siendo la identidad,
+   * y un `transform` distinto de `none` convierte al elemento en contexto de
+   * apilamiento y en bloque contenedor de sus hijos `fixed`. Con eso, la hoja
+   * de acciones de una tarjeta del roster se dibujaba dentro de su celda del
+   * grid y por debajo de las tarjetas siguientes.
+   */
   .entra {
-    animation: entra-en-lista var(--dur-micro) var(--ease-glaze) both;
+    animation: entra-en-lista var(--dur-micro) var(--ease-glaze) backwards;
     animation-delay: calc(var(--paso, 0) * 40ms);
   }
 

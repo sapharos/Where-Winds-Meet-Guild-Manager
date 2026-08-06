@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 /**
  * La superficie que se abre por encima de todo lo demás.
@@ -129,7 +130,21 @@ const Sheet: React.FC<Props> = ({ title, subtitle, size = 'md', footer, onClose,
     else setArrastre(0);
   };
 
-  return (
+  /**
+   * La hoja se cuelga del `body`, no de donde se abrió.
+   *
+   * `fixed` no significa "respecto a la pantalla" si algún antepasado tiene un
+   * `transform`, un `filter` o una animación que los rellene: ese antepasado
+   * pasa a ser el bloque contenedor y además el contexto de apilamiento, así
+   * que `inset-0` se queda en el tamaño de la caja de arriba y `z-60` sólo
+   * compite dentro de ella. En el roster eso ponía la hoja dentro de la celda
+   * del grid y por debajo de las tarjetas que vienen después.
+   *
+   * Un portal lo resuelve de una vez para las nueve hojas, y no cada vez que
+   * alguien anime un contenedor. Los eventos de React siguen subiendo por el
+   * árbol de componentes, así que quien la abrió sigue oyéndolos.
+   */
+  return createPortal(
     <div
       className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center sm:p-6"
       style={{
@@ -208,7 +223,8 @@ const Sheet: React.FC<Props> = ({ title, subtitle, size = 'md', footer, onClose,
         {/* Sin pie, el área de gestos del teléfono se come el último elemento. */}
         {!footer && <div className="shrink-0 h-safe-b sm:hidden" aria-hidden />}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 };
 
