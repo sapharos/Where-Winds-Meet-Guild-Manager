@@ -165,15 +165,22 @@ Looking at someone else is the same act as opening the roster on the web, so it
 asks for the same permission — *Ver el roster*, which members have by default —
 rather than inventing a Discord-only rule. Your own profile never needs it.
 
-`/guerra` shows the board a lane at a time — one card each for the Yellow, Red
-and Blue lines, in their own colour — with attack above defence inside,
-everyone grouped by role, and the lane leader crowned. Each person is named
+`/guerra` shows the board one card per side and lane — the three attack lanes
+first, then the three defence ones, each keeping its line's colour — with
+everyone grouped by role and the lane leader crowned. Each person is named
 twice: their roster name and their Discord, so you can see who is deployed and
 write to them without looking anyone up. Whoever has no Discord linked appears
 with their name alone, which is worth seeing — they are the ones who will not
-read anything posted here. Above it, the war in progress if there is one and
-how full each side is. It asks for *Ver la War Room*, and is private unless
-`publico: Sí`.
+read anything posted here.
+
+Tactical units travel too. A member's units show as coloured squares beside
+their name — the nearest of the nine Discord has to whatever colour the unit
+was given — and each card lists, underneath, the name of every square used in
+that lane, so the colour is never the only thing identifying a unit. Only the
+units of the strategy each side currently has in force are drawn.
+
+Above it all, the war in progress if there is one and how full each side is. It
+asks for *Ver la War Room*, and is private unless `publico: Sí`.
 
 Two optional filters narrow it: `bando` shows one side across all three lanes,
 and `linea` shows one lane — together, one lane of one side. Either works on its

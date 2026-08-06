@@ -29,7 +29,7 @@ import { SCAN_FIELDS } from './scans.js';
 import { listBuilds } from './builds.js';
 import { listWeaponSets } from './weapons.js';
 import { permissionsFor } from './auth.js';
-import { LANE_INFO, LANE_CAPACITY, WAR_CAPACITY, SIDES, getBoard } from './war.js';
+import { LANE_INFO, LANE_CAPACITY, WAR_CAPACITY, SIDES, getBoard, listStrategies } from './war.js';
 
 const API = 'https://discord.com/api/v10';
 
@@ -402,11 +402,63 @@ const literal = (texto) => String(texto).replace(/([*_`~|\\])/g, '\\$1');
  * A quien no tiene Discord vinculado se le pone sólo el nombre, y esa ausencia
  * es información: son los que no van a leer nada de lo que se escriba aquí.
  */
-const nombra = (d) =>
-  `${d.isLaneLeader ? '👑 ' : ''}${literal(d.name)}${d.discordId ? ` <@${d.discordId}>` : ''}`;
+/**
+ * Los nueve cuadros de color que tiene Discord, con el color que pinta cada
+ * uno. Es todo el color que se puede meter en un renglón de texto: un embed
+ * tiñe su barra lateral y nada más, así que una unidad táctica que en la web
+ * es naranja aquí es el cuadro naranja.
+ */
+const CUADROS = [
+  { emoji: '🟥', rgb: [237, 66, 69] },
+  { emoji: '🟧', rgb: [244, 144, 12] },
+  { emoji: '🟨', rgb: [253, 203, 88] },
+  { emoji: '🟩', rgb: [120, 177, 89] },
+  { emoji: '🟦', rgb: [85, 172, 238] },
+  { emoji: '🟪', rgb: [170, 142, 214] },
+  { emoji: '🟫', rgb: [153, 108, 78] },
+  { emoji: '⬛', rgb: [49, 55, 61] },
+  { emoji: '⬜', rgb: [230, 231, 232] },
+];
+
+/** El cuadro que más se parece a un color del usuario. */
+function cuadroDe(hex) {
+  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(String(hex ?? ''));
+  if (!m) return CUADROS[1].emoji; // el naranja, que es el color por defecto
+  const [r, g, b] = m.slice(1).map((h) => parseInt(h, 16));
+  let mejor = CUADROS[0];
+  let cerca = Infinity;
+  for (const c of CUADROS) {
+    const d = (c.rgb[0] - r) ** 2 + (c.rgb[1] - g) ** 2 + (c.rgb[2] - b) ** 2;
+    if (d < cerca) {
+      cerca = d;
+      mejor = c;
+    }
+  }
+  return mejor.emoji;
+}
+
+/**
+ * Cómo se nombra a un desplegado: su nombre, su Discord y sus unidades.
+ *
+ * Las unidades van como cuadros de color y no con su nombre escrito: alguien
+ * puede estar en dos a la vez -- el mismo sanador en la escolta y en los
+ * campamentos -- y diez nombres con dos unidades cada uno no es una lista, es
+ * un párrafo. Los cuadros se explican debajo, en la leyenda de la tarjeta, así
+ * que el color nunca es lo único que dice de qué unidad se trata.
+ */
+const nombra = (d, unidades) => {
+  const suyas = (d.unitIds ?? [])
+    .map((id) => unidades?.get(id))
+    .filter(Boolean)
+    .map((u) => cuadroDe(u.color))
+    .join('');
+  return `${d.isLaneLeader ? '👑 ' : ''}${literal(d.name)}${
+    d.discordId ? ` <@${d.discordId}>` : ''
+  }${suyas ? ` ${suyas}` : ''}`;
+};
 
 /** Los desplegados de una línea y un bando, agrupados por lo que hacen. */
-function porRoles(gente) {
+function porRoles(gente, unidades) {
   if (!gente.length) return '*nadie asignado*';
 
   return GRUPOS.map(({ role, label }) => {
@@ -414,20 +466,42 @@ function porRoles(gente) {
     // La línea del rol se escribe aunque esté vacía: que a la Amarilla no le
     // quede ningún tanque es justo lo que hay que ver de un vistazo, y un
     // renglón que falta no se ve.
-    const nombres = suyos.length ? suyos.map(nombra).join(' · ') : '—';
+    const nombres = suyos.length ? suyos.map((d) => nombra(d, unidades)).join(' · ') : '—';
     return `**${label}** ${nombres}`;
   }).join('\n');
 }
 
 /**
+ * Qué unidades aparecen en esta línea, para poder leer los cuadros.
+ *
+ * Sólo las que están puestas a alguien de aquí: la leyenda entera de la
+ * estrategia en cada una de las seis tarjetas sería repetir seis veces lo que
+ * hace falta una.
+ */
+function leyenda(gente, unidades) {
+  if (!unidades?.size) return null;
+  const vistas = new Map();
+  for (const d of gente) {
+    for (const id of d.unitIds ?? []) {
+      const u = unidades.get(id);
+      if (u && !vistas.has(id)) vistas.set(id, u);
+    }
+  }
+  if (!vistas.size) return null;
+  return [...vistas.values()].map((u) => `${cuadroDe(u.color)} ${literal(u.name)}`).join('   ');
+}
+
+/**
  * El tablero de guerra: una tarjeta por línea, con su color.
  *
- * Una por línea y no una por bando porque el color es ahora el nombre -- la
- * barra lateral amarilla, roja o azul dice de cuál se habla antes de leer
- * nada. Dentro, un bando debajo del otro y no en dos columnas: desde que cada
- * persona trae su nombre y su Discord, una entrada ocupa el doble, y en media
- * tarjeta diez de ellas se parten en cinco renglones. A lo ancho caben cuatro
- * por línea y la lista se lee de un tirón.
+ * Una tarjeta por bando y línea, y los bandos sin mezclarse: primero las tres
+ * de ataque, después las tres de defensa. Antes cada línea traía los dos
+ * dentro y para leer la defensa entera había que ir saltando de tarjeta en
+ * tarjeta leyendo sólo la mitad de abajo de cada una.
+ *
+ * La barra lateral sigue siendo el color de la línea, que es su nombre; quién
+ * es de quién lo dice el título. Y debajo, si en esa línea hay unidades
+ * tácticas puestas, la leyenda de los cuadros que llevan sus miembros.
  *
  * Función pura y exportada, como `perfilEmbed`, para poder mirarla sin un
  * Discord delante.
@@ -438,8 +512,14 @@ export function tableroDeGuerra({
   locked = {},
   bando = null,
   linea = null,
+  // Las unidades tácticas del plan en vigor de cada bando: { attack: [...] }.
+  unidades = {},
   ahora = Date.now(),
 }) {
+  const porBando = Object.fromEntries(
+    SIDES.map((side) => [side, new Map((unidades[side] ?? []).map((u) => [u.id, u]))]),
+  );
+
   // Lo que se enseña. Filtrar no cambia nada de lo que hay debajo: es la misma
   // lista mirada por una rendija.
   const bandos = bando ? SIDES.filter((s) => s === bando) : SIDES;
@@ -467,18 +547,20 @@ export function tableroDeGuerra({
   // nadie tenga que refrescarlo para descubrirlo.
   recuento.push(`actualizado <t:${Math.floor(ahora / 1000)}:R>`);
 
-  const embeds = lineas.map((l) => ({
-    title: l.label,
-    color: l.colour,
-    fields: bandos.map((side) => {
+  // Bando por fuera y línea por dentro: así las tres de ataque salen juntas y
+  // después las tres de defensa, en vez de alternarse.
+  const embeds = bandos.flatMap((side) =>
+    lineas.map((l) => {
       const gente = despliegues.filter((d) => d.lane === l.id && d.side === side);
+      const suyas = leyenda(gente, porBando[side]);
       return {
-        name: `${WAR_SIDES[side]} · ${gente.length}/${LANE_CAPACITY}`,
-        value: porRoles(gente),
-        inline: false,
+        title: `${WAR_SIDES[side]} · ${l.label} — ${gente.length}/${LANE_CAPACITY}`,
+        color: l.colour,
+        description: porRoles(gente, porBando[side]),
+        ...(suyas ? { fields: [{ name: 'Unidades tácticas', value: suyas, inline: false }] } : {}),
       };
     }),
-  }));
+  );
 
   return {
     content: `${cabecera}\n${recuento.join('  ·  ')}`,
@@ -683,7 +765,7 @@ async function respuestaGuerra({ usuario, bando, linea, publico, tipo }) {
     return aviso('Tu cuenta no tiene permiso para ver la Sala de Guerra.');
   }
 
-  const [tablero, despliegues] = await Promise.all([
+  const [tablero, despliegues, estrategias] = await Promise.all([
     getBoard(),
     pool
       .query(
@@ -694,7 +776,8 @@ async function respuestaGuerra({ usuario, bando, linea, publico, tipo }) {
         // impide que dos cuentas apunten a la misma ficha -- no hay índice
         // único que lo prohíba -- y un JOIN pondría a esa persona dos veces en
         // su línea. Una subconsulta escalar devuelve uno o ninguno, nunca dos.
-        `SELECT d.side, d.lane, d.is_lane_leader AS "isLaneLeader", p.name, p.role,
+        `SELECT d.side, d.lane, d.unit_ids AS "unitIds",
+                d.is_lane_leader AS "isLaneLeader", p.name, p.role,
                 (SELECT u.discord_id FROM users u
                   WHERE u.guild_id = d.guild_id AND u.player_id = d.player_id
                     AND u.disabled = false AND u.discord_id IS NOT NULL
@@ -706,7 +789,18 @@ async function respuestaGuerra({ usuario, bando, linea, publico, tipo }) {
         [GUILD_ID],
       )
       .then((r) => r.rows),
+    listStrategies(),
   ]);
+
+  // Las unidades viven dentro de una estrategia, y cada bando tiene la suya en
+  // vigor. Sin plan activo no hay unidades que enseñar, que es distinto de que
+  // no haya nadie asignado a ninguna.
+  const unidades = Object.fromEntries(
+    SIDES.map((side) => [
+      side,
+      estrategias.find((s) => s.id === tablero.active?.[side])?.units ?? [],
+    ]),
+  );
 
   const { content, embeds, components } = tableroDeGuerra({
     despliegues,
@@ -714,6 +808,7 @@ async function respuestaGuerra({ usuario, bando, linea, publico, tipo }) {
     locked: tablero.locked,
     bando,
     linea,
+    unidades,
   });
 
   return {
