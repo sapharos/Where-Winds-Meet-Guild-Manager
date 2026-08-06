@@ -39,6 +39,9 @@ services:
       # linking them by hand. Empty just hides that feature.
       DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN:-}
       DISCORD_GUILD_ID: ${DISCORD_GUILD_ID:-}
+      # Proves an incoming slash command really came from Discord. Empty and
+      # the interactions endpoint answers 503, so the portal refuses the URL.
+      DISCORD_PUBLIC_KEY: ${DISCORD_PUBLIC_KEY:-}
       # The address members reach the app at, which is where Discord sends them
       # back. Must match the redirect URI registered with Discord exactly.
       PUBLIC_URL: ${PUBLIC_URL:-}
