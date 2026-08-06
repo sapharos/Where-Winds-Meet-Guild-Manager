@@ -2,7 +2,26 @@ import { randomUUID } from 'node:crypto';
 import { pool, GUILD_ID } from './db.js';
 
 export const SIDES = ['attack', 'defense'];
-export const LANES = ['left', 'center', 'right'];
+
+/**
+ * Las líneas: su id, que es lo guardado, y el nombre y el color con que se
+ * dicen. Gemelas de `WAR_LANES` en types.ts -- allí las lee la interfaz, aquí
+ * el bot, y no se pueden compartir porque este servidor es JavaScript sin
+ * compilar. Si se renombra una línea, se renombra en los dos sitios.
+ *
+ * El id no sigue al nombre a propósito: `left`/`center`/`right` está escrito
+ * en cada despliegue guardado, y cambiarlo obligaría a reescribir las guerras
+ * pasadas para no ganar nada.
+ */
+export const LANE_INFO = [
+  { id: 'left', label: 'Línea Amarilla', colour: 0xeab308 },
+  { id: 'center', label: 'Línea Roja', colour: 0xef4444 },
+  { id: 'right', label: 'Línea Azul', colour: 0x3b82f6 },
+];
+
+// Derivado y no escrito aparte: eran dos listas que había que mantener en el
+// mismo orden, y el orden importa -- lo usan las ranuras de voz.
+export const LANES = LANE_INFO.map((l) => l.id);
 export const LANE_CAPACITY = 10;
 // The guild fields thirty people in a war, and attack and defence share them.
 // Ten to a lane still holds, but the two boards draw on one pool.

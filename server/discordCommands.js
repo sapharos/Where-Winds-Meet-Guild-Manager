@@ -29,6 +29,7 @@ import { SCAN_FIELDS } from './scans.js';
 import { listBuilds } from './builds.js';
 import { listWeaponSets } from './weapons.js';
 import { permissionsFor } from './auth.js';
+import { LANE_INFO, LANE_CAPACITY, WAR_CAPACITY, SIDES, getBoard } from './war.js';
 
 const API = 'https://discord.com/api/v10';
 
@@ -125,6 +126,18 @@ const COMMANDS = [
         type: 5, // booleano
         name: 'publico',
         description: 'Enseñarlas en el canal en vez de sólo a ti',
+        required: false,
+      },
+    ],
+  },
+  {
+    name: 'guerra',
+    description: 'Quién está asignado a cada línea, en ataque y en defensa',
+    options: [
+      {
+        type: 5,
+        name: 'publico',
+        description: 'Enseñarlo en el canal en vez de sólo a ti',
         required: false,
       },
     ],
@@ -329,6 +342,86 @@ export function perfilEmbed({ player, scans, builds, weaponSets, avatarUrl, guil
   return embed;
 }
 
+/**
+ * Los roles como se agrupan dentro de una línea.
+ *
+ * En este orden y no en otro: es el de la formación -- quién aguanta, quién
+ * cura, quién pega -- y es el mismo que usan el planificador y el tablero.
+ */
+const GRUPOS = [
+  { role: 'Tank', label: 'Tanques' },
+  { role: 'Healer', label: 'Sanadores' },
+  { role: 'DPS', label: 'DPS' },
+];
+
+/**
+ * Un nombre de jugador no es marcado.
+ *
+ * Alguien que se llame `**Xx**` o `Wei_Chen` convertiría media lista en
+ * cursiva o en negrita; escapar los cuatro caracteres que Discord interpreta
+ * deja el nombre como está escrito en el roster.
+ */
+const literal = (texto) => String(texto).replace(/([*_`~|\\])/g, '\\$1');
+
+/** Los desplegados de una línea y un bando, agrupados por lo que hacen. */
+function porRoles(gente) {
+  if (!gente.length) return '*nadie asignado*';
+
+  return GRUPOS.map(({ role, label }) => {
+    const suyos = gente.filter((d) => d.role === role);
+    // La línea del rol se escribe aunque esté vacía: que a la Amarilla no le
+    // quede ningún tanque es justo lo que hay que ver de un vistazo, y un
+    // renglón que falta no se ve.
+    const nombres = suyos.length
+      ? suyos.map((d) => `${d.isLaneLeader ? '👑 ' : ''}${literal(d.name)}`).join(' · ')
+      : '—';
+    return `**${label}** ${nombres}`;
+  }).join('\n');
+}
+
+/**
+ * El tablero de guerra: una tarjeta por línea, con su color.
+ *
+ * Una por línea y no una por bando porque el color es ahora el nombre -- la
+ * barra lateral amarilla, roja o azul dice de cuál se habla antes de leer
+ * nada. Dentro, los dos bandos como dos columnas: la pregunta que se hace
+ * mirando esto es «¿quién tengo aquí, y quién enfrente?».
+ *
+ * Función pura y exportada, como `perfilEmbed`, para poder mirarla sin un
+ * Discord delante.
+ */
+export function tableroDeGuerra({ despliegues, guerra, locked = {} }) {
+  const cuantos = (side) => despliegues.filter((d) => d.side === side).length;
+
+  const cabecera = guerra
+    ? // La hora en el reloj de quien lo lee, no en el del servidor: el gremio
+      // no está todo en el mismo huso.
+      `⚔ **${literal(guerra.name)}** · empezó <t:${Math.floor(
+        new Date(guerra.startedAt).getTime() / 1000,
+      )}:R>`
+    : 'Sin guerra en curso. Así está el tablero:';
+
+  const recuento = SIDES.map(
+    (side) =>
+      `${WAR_SIDES[side]} ${cuantos(side)}/${WAR_CAPACITY}${locked[side] ? ' 🔒' : ''}`,
+  ).join('  ·  ');
+
+  const embeds = LANE_INFO.map((linea) => ({
+    title: linea.label,
+    color: linea.colour,
+    fields: SIDES.map((side) => {
+      const gente = despliegues.filter((d) => d.lane === linea.id && d.side === side);
+      return {
+        name: `${WAR_SIDES[side]} · ${gente.length}/${LANE_CAPACITY}`,
+        value: porRoles(gente),
+        inline: true,
+      };
+    }),
+  }));
+
+  return { content: `${cabecera}\n${recuento}`, embeds };
+}
+
 /* ---------------------------------------------------------------- comandos */
 
 /** Un aviso corto, siempre sólo para quien escribió el comando. */
@@ -483,6 +576,63 @@ async function comandoPerfil(interaction) {
 }
 
 /**
+ * `/guerra` -- el tablero, por líneas.
+ *
+ * Pide `war.view`, que es el permiso que abre la Sala de Guerra en la web, por
+ * la misma razón que `/perfil` pide `roster.view`: la regla ya existe y tener
+ * dos es tener una que se contradice.
+ */
+async function comandoGuerra(interaction) {
+  const usuario = interaction.member?.user ?? interaction.user;
+  if (!usuario?.id) return aviso('No he podido saber quién eres. Inténtalo otra vez.');
+
+  const quienPregunta = await cuentaDe(usuario.id);
+  if (!quienPregunta) {
+    return aviso(
+      'Tu Discord no está vinculado a ninguna cuenta del gremio. Entra en la web con el botón de Discord y pide tu registro; un líder lo aprueba.',
+    );
+  }
+  const permisos = await permissionsFor(quienPregunta.cuentaRol);
+  if (!permisos.includes('war.view')) {
+    return aviso('Tu cuenta no tiene permiso para ver la Sala de Guerra.');
+  }
+
+  const [tablero, despliegues] = await Promise.all([
+    getBoard(),
+    pool
+      .query(
+        // Un miembro dado de baja que siga en el tablero se enseña igual: es
+        // un hueco que hay que ver, no una fila que esconder.
+        `SELECT d.side, d.lane, d.is_lane_leader AS "isLaneLeader", p.name, p.role
+           FROM war_deployments d
+           JOIN players p ON p.guild_id = d.guild_id AND p.id = d.player_id
+          WHERE d.guild_id = $1
+          ORDER BY d.side, d.lane, d.position`,
+        [GUILD_ID],
+      )
+      .then((r) => r.rows),
+  ]);
+
+  const { content, embeds } = tableroDeGuerra({
+    despliegues,
+    guerra: tablero.current,
+    locked: tablero.locked,
+  });
+
+  return {
+    type: MESSAGE,
+    data: {
+      content,
+      embeds,
+      // El nombre de la guerra lo escribe una persona, y sin esto un «@everyone»
+      // ahí dentro avisaría al servidor entero desde un comando de consulta.
+      allowed_mentions: { parse: [] },
+      ...(opcion(interaction, 'publico') === true ? {} : { flags: EPHEMERAL }),
+    },
+  };
+}
+
+/**
  * La lista que Discord ofrece mientras se escribe en `nombre`.
  *
  * Devuelve el id como valor y el nombre como etiqueta, así que elegir de la
@@ -548,7 +698,9 @@ export async function handleInteraction(body) {
   switch (body.data?.name) {
     case 'perfil':
       return comandoPerfil(body);
+    case 'guerra':
+      return comandoGuerra(body);
     default:
-      return aviso('Ese comando ya no existe. Prueba con `/perfil`.');
+      return aviso('Ese comando ya no existe. Prueba con `/perfil` o `/guerra`.');
   }
 }

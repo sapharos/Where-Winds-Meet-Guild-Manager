@@ -24,10 +24,18 @@ export const LANE_NAMES: Record<Lane, string> = {
 // The battlefield as the guild fights it: three lanes, each side fielding ten.
 export type WarLane = 'left' | 'center' | 'right';
 
+// Los nombres son de color y los ids de posición, y no es una incoherencia: el
+// gremio las llama por su color, pero `left`/`center`/`right` está escrito en
+// cada despliegue guardado desde que existe el tablero. Renombrar el id sería
+// reescribir todas las guerras pasadas para no ganar nada -- el nombre que se
+// lee es este `label`, y con cambiarlo aquí cambia en todo el producto.
+//
+// El color ya era el que ahora da nombre: amarillo, rojo y azul estaban en el
+// tablero mucho antes de que nadie los dijera en voz alta.
 export const WAR_LANES: { id: WarLane; label: string; colour: string }[] = [
-  { id: 'left', label: 'Línea Izquierda', colour: '#eab308' },
-  { id: 'center', label: 'Línea Central', colour: '#ef4444' },
-  { id: 'right', label: 'Línea Derecha', colour: '#3b82f6' },
+  { id: 'left', label: 'Línea Amarilla', colour: '#eab308' },
+  { id: 'center', label: 'Línea Roja', colour: '#ef4444' },
+  { id: 'right', label: 'Línea Azul', colour: '#3b82f6' },
 ];
 
 export const LANE_CAPACITY = 10;

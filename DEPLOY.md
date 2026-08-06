@@ -165,6 +165,12 @@ Looking at someone else is the same act as opening the roster on the web, so it
 asks for the same permission — *Ver el roster*, which members have by default —
 rather than inventing a Discord-only rule. Your own profile never needs it.
 
+`/guerra` shows the board a lane at a time — one card each for the Yellow, Red
+and Blue lines, in their own colour — with attack and defence side by side
+inside, everyone grouped by role, and the lane leader crowned. Above it, the
+war in progress if there is one and how full each side is. It asks for *Ver la
+War Room*, and is private unless `publico: Sí`.
+
 Discord delivers commands as ordinary HTTPS requests to this app, so there is no
 extra process to run — but it has to be able to prove they are really from
 Discord:
