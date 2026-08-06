@@ -202,8 +202,20 @@ class Identifier:
 
         self.panels[name] = self.panels.get(name, 0) + 1
         got = self.fields.setdefault(name, set())
+        # Lo que este fotograma aporta de nuevo, para poder enseñarlo. Los
+        # repetidos se callan: al bajar el scroll las posiciones se solapan a
+        # proposito, y volver a listar lo mismo tres veces entierra lo nuevo.
+        nuevos = []
+        for key in ("level", "sect"):
+            if key in header and key not in got:
+                nuevos.append((key, header[key]))
         got.update(key for key in ("level", "sect") if key in header)
-        got.update(self.parse.FIELDS[label][0] for label, _, _ in self.parse.pair_fields(readings, width, height))
+
+        for label, value, _ in self.parse.pair_fields(readings, width, height):
+            key = self.parse.FIELDS[label][0]
+            if key not in got:
+                nuevos.append((key, value))
+            got.add(key)
 
         # Naming what is still missing is the whole point: it says how much
         # further to scroll, while going back is still one click away. Which way
@@ -218,6 +230,20 @@ class Identifier:
 
         warning = "" if name in self.uids else f"   {BOLD}<- sin UID todavia{RESET}"
         self.announce(f"       {name}   {progress}{warning}")
+
+        # Y lo leido, con su valor. Sirve para lo que ninguna cuenta puede: ver
+        # que el 35336 de la pantalla se ha leido 35336 y no 3536, mientras el
+        # panel sigue delante. Un campo mal leido descubierto aqui cuesta un
+        # scroll; descubierto al importar, otro barrido.
+        #
+        # Separador ASCII a proposito, como el resto de lo que sale por consola:
+        # la consola vieja de Windows escupe un rombo por cada caracter que no
+        # entra en su pagina de codigos, y un valor ilegible no vale de nada.
+        if nuevos:
+            self.announce(
+                "          "
+                + f"{GREY} | {RESET}".join(f"{GREY}{k}{RESET} {v}" for k, v in nuevos)
+            )
 
 
 @dataclass(frozen=True)
@@ -304,6 +330,11 @@ def main() -> int:
         "--no-identify",
         action="store_true",
         help="skip naming frames as they are captured (faster startup, no live report)",
+    )
+    parser.add_argument(
+        "--no-parse",
+        action="store_true",
+        help="no escribir roster.json al terminar; hazlo luego con parse.py",
     )
     args = parser.parse_args()
 
@@ -457,6 +488,28 @@ def main() -> int:
                     print(f"  con datos incompletos ({len(incompletos)}):")
                     for n, m in sorted(incompletos.items()):
                         print(f"    {n}: faltan {', '.join(m)}")
+
+            # Y el roster.json, aqui mismo. Eran dos ordenes y la segunda habia
+            # que recordarla con el nombre exacto de la carpeta; ahora sale del
+            # mismo comando. Se delega entero en parse.py en vez de repetir su
+            # logica -- los votos entre fotogramas, los motes de secta, los
+            # duplicados -- que es donde vive lo dificil. Con el cache que acaba
+            # de escribirse no reconoce nada de nuevo: son unos segundos.
+            if not args.no_parse and any(counts.values()):
+                print("\n  escribiendo roster.json...")
+                try:
+                    import parse
+
+                    argv = sys.argv
+                    sys.argv = ["parse.py", str(out_dir)]
+                    try:
+                        parse.main()
+                    finally:
+                        sys.argv = argv
+                except Exception as err:  # noqa: BLE001
+                    # Los PNG estan a salvo: esto siempre se puede repetir a mano.
+                    print(f"  no se pudo escribir roster.json ({err})")
+                    print(f"  hazlo con:  python parse.py {out_dir}")
             return 0
 
 

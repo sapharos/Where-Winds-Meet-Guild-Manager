@@ -41,7 +41,10 @@ half-frame, and anything already seen is skipped -- revisiting a member, going
 back, or pausing costs nothing. The running count tells you it is working.
 
 Ctrl+C in the console when you are done. Frames land in
-`frames/<date>-<time>/`, named `panel-0001.png` and `list-0001.png`.
+`frames/<date>-<time>/`, named `panel-0001.png` and `list-0001.png`, y ahi mismo
+queda escrito el `roster.json` listo para importar: al terminar se llama a
+`parse.py` por ti sobre la carpeta recien capturada. Con `--no-parse` no se
+escribe y lo haces luego a mano.
 
 Expect roughly three panel frames per member plus a handful of list frames.
 For a guild of 76 that is around 240 files and a few tens of megabytes.
@@ -62,6 +65,9 @@ Windows PowerShell 5.1 no admite `&&` como separador. Usa `;`, o el lanzador
 shell y tambien haciendo doble clic.
 
 ## Leer las capturas
+
+Normalmente no hace falta: `capture.py` lo hace solo al terminar. Se usa a mano
+para volver a leer un barrido viejo, o para fusionar varias carpetas:
 
 ```bash
 python parse.py frames/20260728-130959
@@ -93,9 +99,17 @@ de quien es:
        UID de Muerte: 1087315722   (7 identificados)
   14:51:52  panel  #031 guardado  SIGUIENTE
        Muerte   13/18   faltan: martial_mastery, exploration_mastery...
+          weekly_clears 0 | last_week_clears 2 | highest_floor 0
   14:51:58  panel  #032 guardado  SIGUIENTE
        Muerte   18/18 completo
+          martial_mastery 35336 | exploration_mastery 21704
 ```
+
+Debajo de cada cuenta van los valores que ese fotograma aporta de nuevos, para
+poder cotejarlos con la pantalla mientras sigue delante: un 35336 leido 3536 se
+arregla con un scroll si se ve ahora, y con otro barrido si se descubre al
+importar. Los repetidos se callan -- las posiciones de scroll se solapan a
+proposito y volver a listarlos enterraria lo nuevo.
 
 El contador dice cuanto falta por bajar: si tras el ultimo scroll no pone
 `completo`, los campos que nombra siguen mas abajo en el panel. Al terminar se
