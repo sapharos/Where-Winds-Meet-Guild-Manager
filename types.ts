@@ -530,6 +530,28 @@ export interface GuildEvent {
   responses?: EventResponse[];
 }
 
+/** Lo que se repite cada semana y de lo que salen los eventos concretos. */
+export interface EventSeries {
+  id: string;
+  kind: EventKind;
+  title: string;
+  /** 0 = domingo … 6 = sábado. */
+  weekday: number;
+  timeLocal: string;
+  timezone: string;
+  minutes: number;
+  rounds: number | null;
+  notes: string | null;
+  opensDaysBefore: number;
+  opensTime: string;
+  closesDaysBefore: number;
+  closesTime: string;
+  autoPublish: boolean;
+  active: boolean;
+}
+
+export const DIAS = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+
 /** Un sonido del panel de sonidos del servidor de Discord. */
 export interface DiscordSoundboardSound {
   id: string;

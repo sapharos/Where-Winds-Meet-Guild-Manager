@@ -230,6 +230,20 @@ Friday.
 Answering needs a linked Discord and a roster entry, and the poll's window is
 enforced wherever the answer comes from.
 
+**The weekly wars run themselves.** Two series are seeded on first start —
+Saturday and Sunday at 19:30 `America/Bogota`, five rounds — and the same panel
+edits them: day, hour, rounds, and how far ahead each poll opens and closes
+(out of the box: opens Monday, closes Saturday at noon, for both). Events are
+materialised three weeks ahead, each poll is posted when it opens, and six hours
+before it closes the bot pings whoever has not answered yet — once, and naming
+anyone with no Discord linked so somebody can go ask them in person. That
+reminder is the one message the bot mentions people in; everything else has
+mentions off.
+
+A series stores wall-clock time and a timezone, not an instant, so "Saturdays at
+19:30" keeps meaning that across a daylight-saving change. Editing a series
+never rewrites events already created: what is already summoned stays as it is.
+
 ### War voice channels
 
 With the bot set up, **Administración → Canales de voz de guerra** maps the

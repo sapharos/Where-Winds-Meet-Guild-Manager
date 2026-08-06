@@ -272,6 +272,22 @@ const respuestas: Record<string, RespuestaFalsa[]> = {
 /** Dónde publica la agenda. Empieza sin elegir, como un gremio recién montado. */
 let canalAgenda: string | null = null;
 
+/** Las dos series que siembra el servidor de verdad al arrancar. */
+const seriesFalsas: Record<string, unknown>[] = [
+  {
+    id: 'serie-guerra-domingo', kind: 'war', title: 'Guerra del domingo', weekday: 0,
+    timeLocal: '19:30', timezone: 'America/Bogota', minutes: 150, rounds: 5, notes: null,
+    opensDaysBefore: 6, opensTime: '00:00', closesDaysBefore: 1, closesTime: '12:00',
+    autoPublish: true, active: true,
+  },
+  {
+    id: 'serie-guerra-sabado', kind: 'war', title: 'Guerra del sábado', weekday: 6,
+    timeLocal: '19:30', timezone: 'America/Bogota', minutes: 150, rounds: 5, notes: null,
+    opensDaysBefore: 5, opensTime: '00:00', closesDaysBefore: 0, closesTime: '12:00',
+    autoPublish: true, active: true,
+  },
+];
+
 const cuenta = (id: string, answer: string) =>
   (respuestas[id] ?? []).filter((r) => r.answer === answer).length;
 
@@ -326,6 +342,7 @@ const GET: [RegExp, Ruta][] = [
       { id: '300000000000000003', name: 'general' },
     ],
   })],
+  [/^\/events\/series$/, () => seriesFalsas],
   [/^\/events\/([^/]+)$/, (m) => conRespuestas(m[1])],
   [/^\/auth\/config$/, () => ({ discord: false })],
   [/^\/state$/, () => ({ players: store.players, sessions: [], ranks: store.ranks })],
@@ -385,6 +402,19 @@ const ESCRITURAS: [string, RegExp, Ruta][] = [
     anotar(m[1], fake.session.user.playerId ?? '', body ?? {}, null)],
   ['PUT', /^\/events\/([^/]+)\/responses\/([^/]+)$/, (m, _req, body) =>
     anotar(m[1], m[2], body ?? {}, fake.session.user.id)],
+  ['PUT', /^\/events\/series\/?([^/]*)$/, (m, _req, body) => {
+    const id = m[1] || `serie-${Date.now()}`;
+    const at = seriesFalsas.findIndex((s) => s.id === id);
+    const fila = { ...(at >= 0 ? seriesFalsas[at] : seriesFalsas[0]), ...body, id };
+    if (at >= 0) seriesFalsas[at] = fila;
+    else seriesFalsas.push(fila);
+    return fila;
+  }],
+  ['DELETE', /^\/events\/series\/([^/]+)$/, (m) => {
+    const at = seriesFalsas.findIndex((s) => s.id === m[1]);
+    if (at >= 0) seriesFalsas.splice(at, 1);
+    return { ok: true };
+  }],
   ['PUT', /^\/events\/config\/channel$/, (_m, _req, body) => {
     canalAgenda = body?.channel ?? null;
     return { channel: canalAgenda };

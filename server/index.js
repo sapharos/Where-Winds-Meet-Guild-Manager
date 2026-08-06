@@ -68,7 +68,9 @@ import {
   registerCommands,
   publicarEvento,
   refrescarEvento,
+  startAgendaScheduler,
 } from './discordCommands.js';
+import { listSeries, saveSeries, deleteSeries, seedSeries, asegurarEventos } from './agenda.js';
 import { listTextChannels } from './discordBot.js';
 import { VOICE_SLOTS, getVoiceChannels, setVoiceChannels, deployVoice } from './voice.js';
 import {
@@ -472,6 +474,25 @@ app.get('/api/events/config/channel', requireAuth, requirePermission('events.man
 
 app.put('/api/events/config/channel', requireAuth, requirePermission('events.manage'), asHandler(async (req, res) => {
   res.json({ channel: await setAgendaChannel(req.body?.channel) });
+}));
+
+/* --- lo que se repite cada semana --- */
+
+app.get('/api/events/series', requireAuth, requirePermission('events.manage'), asHandler(async (_req, res) => {
+  res.json(await listSeries());
+}));
+
+app.put('/api/events/series/:id?', requireAuth, requirePermission('events.manage'), asHandler(async (req, res) => {
+  const serie = await saveSeries({ ...req.body, id: req.params.id || req.body?.id });
+  // Al guardar se materializa ya, para que quien acaba de cambiar la hora vea
+  // el resultado en la agenda en vez de esperar al siguiente turno del reloj.
+  await asegurarEventos();
+  res.json(serie);
+}));
+
+app.delete('/api/events/series/:id', requireAuth, requirePermission('events.manage'), asHandler(async (req, res) => {
+  await deleteSeries(req.params.id);
+  res.json({ ok: true });
 }));
 
 /* ------------------------------------------------------------- discord bot */
@@ -1077,6 +1098,7 @@ app.patch('/api/users/:id/player', requireAuth, requirePermission('users.manage'
 migrate()
   .then(initAuth)
   .then(seedWeaponSets)
+  .then(seedSeries)
   .then(migrateLegacyStats)
   .then(() => {
     // El cuerno automático de jungla y boss. Sin bot configurado no hace nada.
@@ -1084,6 +1106,9 @@ migrate()
     // Los comandos de barra, al día en cada despliegue. No bloquea el arranque:
     // que Discord no conteste no puede dejar la API sin levantar.
     void registerCommands();
+    // Las guerras de la semana se crean y se publican solas. Sin bot sigue
+    // creándolas: la agenda de la web no depende de Discord.
+    startAgendaScheduler();
     app.listen(PORT, () => console.log(`API listening on ${PORT}`));
   })
   .catch((err) => {

@@ -39,6 +39,14 @@ import {
   setDiscordMessage,
 } from './events.js';
 import { botEnabled, postMessage, editMessage } from './discordBot.js';
+import {
+  asegurarEventos,
+  pendientesDePublicar,
+  pendientesDeAviso,
+  marcarAvisado,
+  sinContestar,
+  AVISO_HORAS,
+} from './agenda.js';
 
 const API = 'https://discord.com/api/v10';
 
@@ -780,6 +788,83 @@ export async function refrescarEvento(id) {
   } catch (err) {
     console.error(`No se pudo refrescar el evento ${id} en Discord:`, err.message);
   }
+}
+
+/**
+ * El recordatorio a quien no ha contestado.
+ *
+ * Es el único mensaje del bot que menciona de verdad. Todo lo demás lleva las
+ * menciones apagadas porque avisar a alguien de algo que no preguntó es ruido;
+ * aquí avisar **es** lo que se pide, y una lista de nombres sin notificación no
+ * la lee justo quien tenía que leerla.
+ *
+ * Devuelve a cuántos avisó, o null si no había a quién.
+ */
+export async function avisarPendientes(id) {
+  if (!botEnabled()) return null;
+  const evento = await getEvent(id);
+  if (!evento.discordChannelId) return null;
+
+  const faltan = await sinContestar(id);
+  if (!faltan.length) return null;
+
+  const conDiscord = faltan.filter((p) => p.discordId);
+  const sinDiscord = faltan.filter((p) => !p.discordId);
+
+  const lineas = [
+    `⏳  **${literal(evento.title)}** — la encuesta se cierra ${marca(evento.closesAt, 'R')}.`,
+    conDiscord.length ? conDiscord.map((p) => `<@${p.discordId}>`).join(' ') : null,
+    // A quien no tiene Discord vinculado se le nombra igual, para que quien
+    // organiza sepa a quién le toca preguntar por voz.
+    sinDiscord.length
+      ? `Sin Discord vinculado: ${sinDiscord.map((p) => literal(p.name)).join(' · ')}`
+      : null,
+  ].filter(Boolean);
+
+  await postMessage(evento.discordChannelId, {
+    content: lineas.join('\n'),
+    allowed_mentions: { users: conDiscord.map((p) => p.discordId).slice(0, 100) },
+  });
+  await marcarAvisado(id);
+  return faltan.length;
+}
+
+/**
+ * El reloj de la agenda.
+ *
+ * Tres cosas, en orden: crear lo que falta de las series, publicar lo que ya
+ * toca, y recordar lo que está a punto de cerrarse. Cada una es idempotente por
+ * su cuenta -- un índice único, una columna de mensaje, una de aviso -- así que
+ * pasar de más no hace daño y perderse un turno tampoco: al siguiente se pone
+ * al día.
+ *
+ * Cada cinco minutos y no cada cinco segundos como el cuerno: aquí lo que se
+ * mide son días, y una encuesta que sale cinco minutos tarde un lunes no la
+ * nota nadie.
+ */
+async function tickAgenda() {
+  await asegurarEventos();
+  if (!botEnabled()) return;
+
+  for (const id of await pendientesDePublicar()) {
+    await publicarEvento(id);
+  }
+  for (const id of await pendientesDeAviso()) {
+    await avisarPendientes(id).catch((err) =>
+      console.error(`[agenda] no se pudo avisar del evento ${id}:`, err.message),
+    );
+    // Aunque avisar falle se marca, para no repetir el intento cada cinco
+    // minutos hasta que cierre: un canal lleno de recordatorios rotos es peor
+    // que un recordatorio perdido.
+    await marcarAvisado(id);
+  }
+}
+
+export function startAgendaScheduler() {
+  const correr = () =>
+    tickAgenda().catch((err) => console.error('[agenda] tick falló:', err.message));
+  void correr();
+  setInterval(correr, 5 * 60 * 1000);
 }
 
 /**

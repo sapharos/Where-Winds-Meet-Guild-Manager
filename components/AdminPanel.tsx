@@ -18,6 +18,8 @@ import {
   DiscordSoundboardSound,
   VOICE_SLOT_LABELS,
   VoiceChannelMap,
+  EventSeries,
+  DIAS,
 } from '../types';
 
 // Mirrors the server's LOCKED table so the boxes it will refuse to clear are
@@ -85,6 +87,8 @@ const AdminPanel: React.FC<Props> = ({
     channel: string | null;
     channels: { id: string; name: string }[];
   } | null>(null);
+  /** Lo que se repite cada semana. */
+  const [series, setSeries] = useState<EventSeries[]>([]);
   const [mapaVoz, setMapaVoz] = useState<VoiceChannelMap>({});
   const [vozSucia, setVozSucia] = useState(false);
   /** El panel de sonidos del servidor y qué sonido toca en cada aviso de guerra. */
@@ -155,6 +159,7 @@ const AdminPanel: React.FC<Props> = ({
             '/events/config/channel',
           ).catch(() => ({ bot: false, channel: null, channels: [] })),
         );
+        setSeries(await api<EventSeries[]>('/events/series').catch(() => []));
       }
     } catch (err) {
       report(err instanceof Error ? err.message : 'No se pudo cargar la configuración', false);
@@ -930,6 +935,58 @@ const AdminPanel: React.FC<Props> = ({
               </select>
             </label>
           )}
+
+          <div className="mt-8 pt-6 border-t border-slate-800">
+            <div className="flex items-center justify-between gap-4 flex-wrap mb-1">
+              <h3 className="cinzel text-xl font-bold text-amber-500">Lo que se repite cada semana</h3>
+              <button
+                onClick={async () => {
+                  const nueva = await api<EventSeries>('/events/series', {
+                    method: 'PUT',
+                    body: JSON.stringify({ kind: 'war', title: 'Nuevo evento semanal' }),
+                  }).catch(() => null);
+                  if (nueva) setSeries((prev) => [...prev, nueva]);
+                }}
+                className="min-h-tap px-4 rounded-md border border-slate-700 text-slate-200 text-sm"
+              >
+                <i className="fa-solid fa-plus mr-2"></i>
+                Añadir
+              </button>
+            </div>
+            <p className="text-xs text-slate-500 mb-5">
+              De aquí salen solos los eventos y sus encuestas, tres semanas por delante. Cambiar algo
+              no toca los eventos ya creados: lo que ya está convocado se queda como está.
+            </p>
+
+            {series.length === 0 ? (
+              <p className="text-sm text-slate-500">Nada se repite todavía.</p>
+            ) : (
+              <div className="space-y-3">
+                {series.map((s) => (
+                  <SerieFila
+                    key={s.id}
+                    serie={s}
+                    onGuardar={async (cambios) => {
+                      const guardada = await api<EventSeries>(`/events/series/${s.id}`, {
+                        method: 'PUT',
+                        body: JSON.stringify({ ...s, ...cambios }),
+                      }).catch(() => null);
+                      if (guardada) {
+                        setSeries((prev) => prev.map((x) => (x.id === s.id ? guardada : x)));
+                        report('Serie guardada');
+                      } else {
+                        report('No se pudo guardar la serie', false);
+                      }
+                    }}
+                    onBorrar={async () => {
+                      await api(`/events/series/${s.id}`, { method: 'DELETE' }).catch(() => null);
+                      setSeries((prev) => prev.filter((x) => x.id !== s.id));
+                    }}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
         </section>
       )}
 
@@ -1073,6 +1130,122 @@ const AdminPanel: React.FC<Props> = ({
           </div>
         </section>
       )}
+    </div>
+  );
+};
+
+/**
+ * Una serie semanal, editable en su sitio.
+ *
+ * Los borradores viven aquí y no arriba porque cada fila se toca por separado:
+ * subir el estado de siete campos por cada serie al panel entero sería que
+ * escribir en una redibujara todas.
+ */
+const SerieFila: React.FC<{
+  serie: EventSeries;
+  onGuardar: (cambios: Partial<EventSeries>) => void;
+  onBorrar: () => void;
+}> = ({ serie, onGuardar, onBorrar }) => {
+  const [b, setB] = useState(serie);
+  const sucia = JSON.stringify(b) !== JSON.stringify(serie);
+  const campo = 'w-full bg-slate-950 border border-slate-800 rounded p-2 text-sm outline-none focus:ring-1 focus:ring-amber-500';
+  const etiqueta = 'block text-[11px] uppercase tracking-wider text-slate-500 mb-1';
+
+  return (
+    <div className={`bg-slate-950 border rounded-lg p-3 ${b.active ? 'border-slate-800' : 'border-slate-800 opacity-60'}`}>
+      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <label className="lg:col-span-2">
+          <span className={etiqueta}>Nombre</span>
+          <input className={campo} value={b.title} onChange={(e) => setB({ ...b, title: e.target.value })} />
+        </label>
+        <label>
+          <span className={etiqueta}>Día</span>
+          <select className={campo} value={b.weekday} onChange={(e) => setB({ ...b, weekday: Number(e.target.value) })}>
+            {DIAS.map((d, i) => (
+              <option key={d} value={i}>
+                {d}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span className={etiqueta}>Hora ({b.timezone})</span>
+          <input className={campo} value={b.timeLocal} onChange={(e) => setB({ ...b, timeLocal: e.target.value })} />
+        </label>
+
+        {b.kind === 'war' && (
+          <label>
+            <span className={etiqueta}>Partidas</span>
+            <input
+              type="number"
+              className={campo}
+              value={b.rounds ?? 5}
+              onChange={(e) => setB({ ...b, rounds: Number(e.target.value) || 1 })}
+            />
+          </label>
+        )}
+        <label>
+          <span className={etiqueta}>Abre (días antes)</span>
+          <div className="flex gap-2">
+            <input
+              type="number"
+              className={campo}
+              value={b.opensDaysBefore}
+              onChange={(e) => setB({ ...b, opensDaysBefore: Number(e.target.value) || 0 })}
+            />
+            <input className={campo} value={b.opensTime} onChange={(e) => setB({ ...b, opensTime: e.target.value })} />
+          </div>
+        </label>
+        <label>
+          <span className={etiqueta}>Cierra (días antes)</span>
+          <div className="flex gap-2">
+            <input
+              type="number"
+              className={campo}
+              value={b.closesDaysBefore}
+              onChange={(e) => setB({ ...b, closesDaysBefore: Number(e.target.value) || 0 })}
+            />
+            <input className={campo} value={b.closesTime} onChange={(e) => setB({ ...b, closesTime: e.target.value })} />
+          </div>
+        </label>
+      </div>
+
+      <div className="flex items-center gap-4 flex-wrap mt-3">
+        <label className="flex items-center gap-2 text-sm text-slate-300 tap-suelto">
+          <input
+            type="checkbox"
+            className="accent-amber-500 tap-suelto"
+            checked={b.active}
+            onChange={(e) => setB({ ...b, active: e.target.checked })}
+          />
+          Activa
+        </label>
+        <label className="flex items-center gap-2 text-sm text-slate-300 tap-suelto">
+          <input
+            type="checkbox"
+            className="accent-amber-500 tap-suelto"
+            checked={b.autoPublish}
+            onChange={(e) => setB({ ...b, autoPublish: e.target.checked })}
+          />
+          Publicar sola en Discord
+        </label>
+
+        <div className="ml-auto flex gap-2">
+          <button
+            onClick={onBorrar}
+            className="min-h-tap px-3 rounded-md border border-red-900 text-red-400 text-sm"
+          >
+            Borrar
+          </button>
+          <button
+            onClick={() => onGuardar(b)}
+            disabled={!sucia}
+            className="min-h-tap px-4 rounded-md bg-amber-600 hover:bg-amber-500 disabled:bg-slate-800 disabled:text-slate-600 text-white text-sm font-bold"
+          >
+            Guardar
+          </button>
+        </div>
+      </div>
     </div>
   );
 };

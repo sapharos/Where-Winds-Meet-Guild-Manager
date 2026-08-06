@@ -600,3 +600,49 @@ INSERT INTO app_settings (key, value) VALUES ('seeded:events.manage', 'true')
 -- sólo en la web, y el bot puede no estar configurado.
 ALTER TABLE guild_events ADD COLUMN IF NOT EXISTS discord_channel_id TEXT;
 ALTER TABLE guild_events ADD COLUMN IF NOT EXISTS discord_message_id TEXT;
+
+-- ---------------------------------------------------------------------------
+-- Las series: lo que se repite cada semana
+--
+-- Guardan la hora de pared y su zona, no un instante. «Los sábados a las 7:30
+-- de Colombia» tiene que seguir queriendo decir lo mismo dentro de seis meses,
+-- y un instante se desfasa en cuanto una zona cambia de hora. Colombia no la
+-- cambia; la regla no puede depender de eso.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS event_series (
+  id           TEXT NOT NULL,
+  guild_id     TEXT NOT NULL REFERENCES guilds(id) ON DELETE CASCADE,
+  kind         TEXT NOT NULL,
+  title        TEXT NOT NULL,
+  -- 0 = domingo … 6 = sábado, como los cuenta JavaScript.
+  weekday      SMALLINT NOT NULL,
+  time_local   TEXT NOT NULL,
+  timezone     TEXT NOT NULL DEFAULT 'America/Bogota',
+  minutes      INTEGER NOT NULL DEFAULT 150,
+  rounds       INTEGER,
+  notes        TEXT,
+  -- La ventana, dicha en relación al evento: «se abre cinco días antes a las
+  -- 00:00» y «se cierra el mismo día a las 12:00». Relativo y no por día de la
+  -- semana, para que la misma regla valga para cualquier evento.
+  opens_days_before  INTEGER NOT NULL DEFAULT 5,
+  opens_time         TEXT    NOT NULL DEFAULT '00:00',
+  closes_days_before INTEGER NOT NULL DEFAULT 0,
+  closes_time        TEXT    NOT NULL DEFAULT '12:00',
+  -- Si el bot publica la encuesta solo al abrirse.
+  auto_publish BOOLEAN NOT NULL DEFAULT true,
+  active       BOOLEAN NOT NULL DEFAULT true,
+  PRIMARY KEY (guild_id, id)
+);
+
+ALTER TABLE guild_events ADD COLUMN IF NOT EXISTS series_id   TEXT;
+ALTER TABLE guild_events ADD COLUMN IF NOT EXISTS reminded_at TIMESTAMPTZ;
+
+-- Una ocasión por serie e instante. Es lo que deja que el programador pase cada
+-- cinco minutos, y que el arranque se repita, sin convocar dos veces el sábado.
+CREATE UNIQUE INDEX IF NOT EXISTS guild_events_series_idx
+  ON guild_events (guild_id, series_id, starts_at) WHERE series_id IS NOT NULL;
+
+-- Las dos guerras de la semana se siembran desde `agenda.js` y no aquí: este
+-- archivo corre antes de que exista la fila del gremio a la que apuntaría la
+-- clave ajena, y además no sustituye el GUILD_ID.
