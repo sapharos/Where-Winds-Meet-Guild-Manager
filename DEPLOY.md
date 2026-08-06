@@ -175,6 +175,13 @@ read anything posted here. Above it, the war in progress if there is one and
 how full each side is. It asks for *Ver la War Room*, and is private unless
 `publico: Sí`.
 
+Two optional filters narrow it: `bando` shows one side across all three lanes,
+and `linea` shows one lane — together, one lane of one side. Either works on its
+own. Every reply carries an **Actualizar** button that redraws the board in
+place, keeping whatever filter it was drawn with; the line above says when it
+was last looked at, and Discord keeps counting that up on its own, so a stale
+board says so without anyone pressing anything.
+
 Discord delivers commands as ordinary HTTPS requests to this app, so there is no
 extra process to run — but it has to be able to prove they are really from
 Discord:

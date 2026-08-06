@@ -44,13 +44,22 @@ const API = 'https://discord.com/api/v10';
  */
 const SPKI_ED25519 = Buffer.from('302a300506032b6570032100', 'hex');
 
+// Arriba del todo porque la lista de comandos, que se construye al cargar el
+// módulo, saca de aquí los nombres de las opciones. Declarado más abajo, leerlo
+// desde COMMANDS reventaría el import entero.
+const WAR_SIDES = { attack: 'Ataque', defense: 'Defensa' };
+
 /** Tipos de interacción y de respuesta que se usan aquí. */
 const PING = 1;
 const APPLICATION_COMMAND = 2;
+/** Alguien ha pulsado un botón de un mensaje nuestro. */
+const MESSAGE_COMPONENT = 3;
 /** Discord pregunta mientras alguien escribe, para ofrecerle la lista. */
 const AUTOCOMPLETE = 4;
 const PONG = 1;
 const MESSAGE = 4;
+/** Reescribe el mensaje donde está, en vez de mandar otro debajo. */
+const UPDATE_MESSAGE = 7;
 const CHOICES = 8;
 /** Sólo la ve quien escribió el comando. */
 const EPHEMERAL = 64;
@@ -134,6 +143,23 @@ const COMMANDS = [
     name: 'guerra',
     description: 'Quién está asignado a cada línea, en ataque y en defensa',
     options: [
+      // Las dos como lista cerrada y no como texto: se elige de un desplegable,
+      // no hay nada que escribir mal, y los valores que viajan son los ids
+      // guardados aunque lo que se lea sea el color.
+      {
+        type: 3,
+        name: 'bando',
+        description: 'Sólo un bando',
+        required: false,
+        choices: SIDES.map((side) => ({ name: WAR_SIDES[side], value: side })),
+      },
+      {
+        type: 3,
+        name: 'linea',
+        description: 'Sólo una línea',
+        required: false,
+        choices: LANE_INFO.map((l) => ({ name: l.label, value: l.id })),
+      },
       {
         type: 5,
         name: 'publico',
@@ -201,7 +227,6 @@ const miles = new Intl.NumberFormat('es');
 const LATON = 0xd3a155;
 
 const ROLE_NAMES = { Tank: 'Tanque', Healer: 'Sanador', DPS: 'DPS' };
-const WAR_SIDES = { attack: 'Ataque', defense: 'Defensa' };
 
 /**
  * Las etiquetas de las cifras, copiadas de SCAN_FIELD_CATALOG en types.ts.
@@ -407,7 +432,19 @@ function porRoles(gente) {
  * Función pura y exportada, como `perfilEmbed`, para poder mirarla sin un
  * Discord delante.
  */
-export function tableroDeGuerra({ despliegues, guerra, locked = {} }) {
+export function tableroDeGuerra({
+  despliegues,
+  guerra,
+  locked = {},
+  bando = null,
+  linea = null,
+  ahora = Date.now(),
+}) {
+  // Lo que se enseña. Filtrar no cambia nada de lo que hay debajo: es la misma
+  // lista mirada por una rendija.
+  const bandos = bando ? SIDES.filter((s) => s === bando) : SIDES;
+  const lineas = linea ? LANE_INFO.filter((l) => l.id === linea) : LANE_INFO;
+
   const cuantos = (side) => despliegues.filter((d) => d.side === side).length;
 
   const cabecera = guerra
@@ -418,16 +455,23 @@ export function tableroDeGuerra({ despliegues, guerra, locked = {} }) {
       )}:R>`
     : 'Sin guerra en curso. Así está el tablero:';
 
-  const recuento = SIDES.map(
-    (side) =>
-      `${WAR_SIDES[side]} ${cuantos(side)}/${WAR_CAPACITY}${locked[side] ? ' 🔒' : ''}`,
-  ).join('  ·  ');
+  // El recuento del bando entero aunque se mire una sola línea: son los treinta
+  // que caben en el frente, y saber cuántos faltan es la mitad de la pregunta.
+  // Filtrado por bando se calla el otro, que ya no se está enseñando.
+  const recuento = bandos.map(
+    (side) => `${WAR_SIDES[side]} ${cuantos(side)}/${WAR_CAPACITY}${locked[side] ? ' 🔒' : ''}`,
+  );
 
-  const embeds = LANE_INFO.map((linea) => ({
-    title: linea.label,
-    color: linea.colour,
-    fields: SIDES.map((side) => {
-      const gente = despliegues.filter((d) => d.lane === linea.id && d.side === side);
+  // Cuándo se miró esto. Discord lo cuenta solo en el cliente -- «hace unos
+  // segundos», «hace 4 minutos» -- así que un tablero viejo se delata sin que
+  // nadie tenga que refrescarlo para descubrirlo.
+  recuento.push(`actualizado <t:${Math.floor(ahora / 1000)}:R>`);
+
+  const embeds = lineas.map((l) => ({
+    title: l.label,
+    color: l.colour,
+    fields: bandos.map((side) => {
+      const gente = despliegues.filter((d) => d.lane === l.id && d.side === side);
       return {
         name: `${WAR_SIDES[side]} · ${gente.length}/${LANE_CAPACITY}`,
         value: porRoles(gente),
@@ -436,7 +480,28 @@ export function tableroDeGuerra({ despliegues, guerra, locked = {} }) {
     }),
   }));
 
-  return { content: `${cabecera}\n${recuento}`, embeds };
+  return {
+    content: `${cabecera}\n${recuento.join('  ·  ')}`,
+    embeds,
+    // El botón se lleva puesto el filtro con el que se pintó, así que
+    // actualizar devuelve lo mismo que se estaba mirando y no el tablero
+    // entero. Es el único sitio donde ese filtro sobrevive: el mensaje no
+    // recuerda con qué opciones se escribió el comando.
+    components: [
+      {
+        type: 1,
+        components: [
+          {
+            type: 2,
+            style: 2,
+            label: 'Actualizar',
+            emoji: { name: '🔄' },
+            custom_id: `guerra:${bando ?? ''}:${linea ?? ''}`,
+          },
+        ],
+      },
+    ],
+  };
 }
 
 /* ---------------------------------------------------------------- comandos */
@@ -593,14 +658,18 @@ async function comandoPerfil(interaction) {
 }
 
 /**
- * `/guerra` -- el tablero, por líneas.
+ * El tablero, contestado igual lo pida un comando o el botón de actualizar.
  *
- * Pide `war.view`, que es el permiso que abre la Sala de Guerra en la web, por
- * la misma razón que `/perfil` pide `roster.view`: la regla ya existe y tener
- * dos es tener una que se contradice.
+ * `tipo` es lo único que cambia entre los dos: un comando manda un mensaje
+ * nuevo y el botón reescribe el que ya está. Todo lo demás -- quién puede
+ * verlo, qué se consulta, cómo se pinta -- es el mismo camino, que es la razón
+ * de que esto sea una función y no dos parecidas.
+ *
+ * Pide `war.view`, el permiso que abre la Sala de Guerra en la web, por la
+ * misma razón que `/perfil` pide `roster.view`: la regla ya existe y tener dos
+ * es tener una que se contradice.
  */
-async function comandoGuerra(interaction) {
-  const usuario = interaction.member?.user ?? interaction.user;
+async function respuestaGuerra({ usuario, bando, linea, publico, tipo }) {
   if (!usuario?.id) return aviso('No he podido saber quién eres. Inténtalo otra vez.');
 
   const quienPregunta = await cuentaDe(usuario.id);
@@ -639,23 +708,59 @@ async function comandoGuerra(interaction) {
       .then((r) => r.rows),
   ]);
 
-  const { content, embeds } = tableroDeGuerra({
+  const { content, embeds, components } = tableroDeGuerra({
     despliegues,
     guerra: tablero.current,
     locked: tablero.locked,
+    bando,
+    linea,
   });
 
   return {
-    type: MESSAGE,
+    type: tipo,
     data: {
       content,
       embeds,
+      components,
       // El nombre de la guerra lo escribe una persona, y sin esto un «@everyone»
       // ahí dentro avisaría al servidor entero desde un comando de consulta.
+      // Y las menciones de los desplegados tampoco avisan a nadie.
       allowed_mentions: { parse: [] },
-      ...(opcion(interaction, 'publico') === true ? {} : { flags: EPHEMERAL }),
+      // Al reescribir un mensaje no se toca su visibilidad: ya nació público o
+      // privado, y mandar el flag otra vez sólo puede contradecirlo.
+      ...(tipo === UPDATE_MESSAGE || publico ? {} : { flags: EPHEMERAL }),
     },
   };
+}
+
+/** `/guerra [bando] [linea]` -- el tablero, entero o por la rendija que se pida. */
+function comandoGuerra(interaction) {
+  return respuestaGuerra({
+    usuario: interaction.member?.user ?? interaction.user,
+    bando: opcion(interaction, 'bando') ?? null,
+    linea: opcion(interaction, 'linea') ?? null,
+    publico: opcion(interaction, 'publico') === true,
+    tipo: MESSAGE,
+  });
+}
+
+/**
+ * El botón de actualizar.
+ *
+ * Vuelve a preguntar por el tablero y reescribe el mensaje donde está. El
+ * permiso se comprueba otra vez y no se da por hecho: un mensaje público lo
+ * puede pulsar cualquiera del servidor, incluido quien no tenga cuenta.
+ */
+function botonGuerra(interaction) {
+  const [, bando, linea] = String(interaction.data?.custom_id ?? '').split(':');
+  return respuestaGuerra({
+    usuario: interaction.member?.user ?? interaction.user,
+    // Un filtro que ya no existe -- porque se renombró una línea o se tocó el
+    // botón de un mensaje viejo -- se deja caer en vez de no enseñar nada.
+    bando: SIDES.includes(bando) ? bando : null,
+    linea: LANE_INFO.some((l) => l.id === linea) ? linea : null,
+    tipo: UPDATE_MESSAGE,
+  });
 }
 
 /**
@@ -717,6 +822,12 @@ export async function handleInteraction(body) {
     // El autocompletado tiene el mismo presupuesto de tres segundos, y encima
     // llega una vez por tecla: una consulta por índice y nada más.
     return body.data?.name === 'perfil' ? autocompletarNombre(body) : { type: CHOICES, data: { choices: [] } };
+  }
+
+  if (body?.type === MESSAGE_COMPONENT) {
+    return String(body.data?.custom_id ?? '').startsWith('guerra:')
+      ? botonGuerra(body)
+      : aviso('Ese botón es de una versión anterior del bot. Vuelve a escribir el comando.');
   }
 
   if (body?.type !== APPLICATION_COMMAND) return null;
