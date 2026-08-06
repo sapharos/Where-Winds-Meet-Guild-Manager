@@ -442,7 +442,8 @@ const ESCRITURAS: [string, RegExp, Ruta][] = [
     const e = eventos.find((x) => x.id === m[1]);
     if (e) {
       e.discordChannelId = canalAgenda;
-      e.discordMessageId = `msg-${Date.now()}`;
+      e.discordMessageId = `${Date.now()}`;
+      e.discordUrl = `https://discord.com/channels/700000000000000000/${canalAgenda}/${e.discordMessageId}`;
     }
     return conRespuestas(m[1]);
   }],

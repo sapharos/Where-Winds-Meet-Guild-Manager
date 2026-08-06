@@ -216,7 +216,9 @@ told, privately, to link theirs first.
 to. From an event in the **Agenda** tab, *Publicar en Discord* posts it there;
 the bot then rewrites that same message every time anyone answers, from either
 side. Publishing is a deliberate act rather than a side effect of saving, so
-fixing a typo does not summon the guild twice.
+fixing a typo does not summon the guild twice. Whether an event has gone out
+shows on its card — *publicada*, or *sin publicar* for whoever can publish it —
+and opening it links straight to the message.
 
 A guild war is answered with a dropdown — *Voy a todas (5)*, *a 4*, … , *Tal
 vez*, *No puedo* — because the useful answer is not "I'm coming" but "I'm coming

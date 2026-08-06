@@ -305,7 +305,7 @@ const Agenda: React.FC<Props> = ({ players, myPlayerId, canManage }) => {
               ) : (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                   {delDiaElegido.map((event) => (
-                    <TarjetaEvento key={event.id} event={event} onAbrir={() => abrir(event.id)} />
+                    <TarjetaEvento key={event.id} event={event} onAbrir={() => abrir(event.id)} canManage={canManage} />
                   ))}
                 </div>
               )}
@@ -325,7 +325,7 @@ const Agenda: React.FC<Props> = ({ players, myPlayerId, canManage }) => {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
           {events.map((event, at) => (
             <div key={event.id} className="entra" style={{ '--paso': Math.min(at, 6) } as React.CSSProperties}>
-              <TarjetaEvento event={event} onAbrir={() => abrir(event.id)} />
+              <TarjetaEvento event={event} onAbrir={() => abrir(event.id)} canManage={canManage} />
             </div>
           ))}
         </div>
@@ -385,7 +385,12 @@ const Agenda: React.FC<Props> = ({ players, myPlayerId, canManage }) => {
  * y por eso vive suelta: las dos vistas tienen que decir lo mismo del mismo
  * evento, y dos copias del mismo bloque acaban diciendo cosas distintas.
  */
-const TarjetaEvento: React.FC<{ event: GuildEvent; onAbrir: () => void }> = ({ event, onAbrir }) => (
+const TarjetaEvento: React.FC<{
+  event: GuildEvent;
+  onAbrir: () => void;
+  /** Enseña «sin publicar», que sólo le sirve a quien puede publicarlo. */
+  canManage?: boolean;
+}> = ({ event, onAbrir, canManage = false }) => (
   <button
     onClick={onAbrir}
     className={`w-full text-left h-full p-3 rounded-lg border bg-slate-900 transition-colors duration-micro hover:border-slate-700 ${
@@ -414,7 +419,7 @@ const TarjetaEvento: React.FC<{ event: GuildEvent; onAbrir: () => void }> = ({ e
       </div>
     </div>
 
-    <div className="flex items-center gap-2 mt-2 pl-11">
+    <div className="flex items-center gap-2 mt-2 pl-11 flex-wrap">
       {ORDEN.map((answer) => (
         <span
           key={answer}
@@ -423,6 +428,20 @@ const TarjetaEvento: React.FC<{ event: GuildEvent; onAbrir: () => void }> = ({ e
           {EVENT_ANSWER_LABELS[answer]} {event[answer] ?? 0}
         </span>
       ))}
+
+      {/* Si la encuesta ya salió al canal. Publicada lo ve todo el mundo --
+          saber si el bot ya avisó es de todos--; «sin publicar» sólo quien
+          puede publicarla, que para el resto sería una queja sin botón. */}
+      {event.discordMessageId ? (
+        <span className="text-[11px] leading-none px-1.5 py-[3px] rounded border border-indigo-700 text-indigo-300 uppercase font-bold tracking-tighter">
+          <i className="fa-brands fa-discord mr-1"></i>
+          publicada
+        </span>
+      ) : canManage && !event.cancelledAt ? (
+        <span className="text-[11px] leading-none px-1.5 py-[3px] rounded border border-slate-700 text-slate-500 uppercase font-bold tracking-tighter">
+          sin publicar
+        </span>
+      ) : null}
     </div>
   </button>
 );
@@ -599,6 +618,30 @@ const DetalleEvento: React.FC<{
             : `Se puede contestar hasta el ${fechaCorta(event.closesAt)}.`}
         </p>
       )}
+
+      {/* Si la encuesta salió al canal, y por dónde. El enlace lleva al mensaje
+          mismo, que es lo que hace falta cuando se quiere comprobar que está o
+          mandárselo a alguien. */}
+      <p className="text-meta text-slate-500">
+        <i className="fa-brands fa-discord mr-1.5"></i>
+        {event.discordMessageId ? (
+          <>
+            Publicada en Discord.{' '}
+            {event.discordUrl && (
+              <a
+                href={event.discordUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="text-amber-500 underline tap-suelto"
+              >
+                Ver el mensaje
+              </a>
+            )}
+          </>
+        ) : (
+          'Todavía no se ha publicado en Discord.'
+        )}
+      </p>
 
       {myPlayerId && !event.cancelledAt && (
         <div>

@@ -522,6 +522,8 @@ export interface GuildEvent {
   /** Dónde quedó publicada la encuesta, cuando se publicó. */
   discordChannelId?: string | null;
   discordMessageId?: string | null;
+  /** El enlace a ese mensaje, si el servidor sabe componerlo. */
+  discordUrl?: string | null;
   /** Sólo al listar: el recuento de cada respuesta. */
   yes?: number;
   maybe?: number;

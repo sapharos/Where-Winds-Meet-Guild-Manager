@@ -89,6 +89,25 @@ const CAMPOS = `id, kind, title, starts_at AS "startsAt", minutes, rounds, notes
                 discord_channel_id AS "discordChannelId",
                 discord_message_id AS "discordMessageId"`;
 
+/**
+ * El enlace al mensaje de la encuesta, cuando está publicada.
+ *
+ * Se compone aquí y no en la pantalla porque hace falta el id del servidor de
+ * Discord, que vive en el entorno del servidor. Sin él -- bot sin configurar --
+ * queda null y la interfaz enseña que está publicada sin ofrecer un enlace roto.
+ */
+const conEnlace = (fila) => {
+  if (!fila) return fila;
+  const servidor = process.env.DISCORD_GUILD_ID;
+  return {
+    ...fila,
+    discordUrl:
+      servidor && fila.discordChannelId && fila.discordMessageId
+        ? `https://discord.com/channels/${servidor}/${fila.discordChannelId}/${fila.discordMessageId}`
+        : null,
+  };
+};
+
 /** El canal donde se publican las encuestas. Vacío: no se publica nada. */
 export async function getAgendaChannel() {
   const { rows } = await pool.query(`SELECT value FROM app_settings WHERE key = 'agenda_channel'`);
@@ -145,7 +164,7 @@ export async function listEvents({ past = false, from = null, to = null } = {}) 
       ORDER BY e.starts_at`,
     [GUILD_ID, past, tramo ? fecha(from) : null, tramo ? fecha(to) : null],
   );
-  return rows;
+  return rows.map(conEnlace);
 }
 
 /** Un evento con todo lo que se ha contestado, con nombres. */
@@ -165,7 +184,7 @@ export async function getEvent(id) {
       ORDER BY p.name`,
     [GUILD_ID, id],
   );
-  return { ...rows[0], responses: respuestas.rows };
+  return { ...conEnlace(rows[0]), responses: respuestas.rows };
 }
 
 /**
@@ -194,7 +213,7 @@ export async function nextWar() {
        FROM event_responses WHERE guild_id = $1 AND event_id = $2`,
     [GUILD_ID, rows[0].id],
   );
-  return { ...rows[0], responses: respuestas.rows };
+  return { ...conEnlace(rows[0]), responses: respuestas.rows };
 }
 
 export async function saveEvent(body, createdBy) {
