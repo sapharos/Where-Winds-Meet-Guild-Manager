@@ -119,6 +119,17 @@ const COMMANDS = [
  * log, que es donde se mira cuando un comando no aparece.
  */
 export async function registerCommands() {
+  // El bot puesto y la clave no es la única forma de equivocarse, pero es la
+  // que no se ve: Discord contesta «no se ha podido verificar la URL» sin
+  // decir por qué, y desde fuera un 503 y un servidor caído se parecen. Si
+  // hay bot, decirlo aquí ahorra la media hora de buscarlo en el portal.
+  if (process.env.DISCORD_BOT_TOKEN && process.env.DISCORD_GUILD_ID && !process.env.DISCORD_PUBLIC_KEY) {
+    console.warn(
+      'Discord: falta DISCORD_PUBLIC_KEY, así que no hay comandos de barra. ' +
+        'Está en la página «General Information» de la aplicación; sin ella, ' +
+        '/api/discord/interactions responde 503 y el portal rechaza la URL.',
+    );
+  }
   if (!commandsEnabled() || !process.env.DISCORD_BOT_TOKEN || !process.env.DISCORD_GUILD_ID) return;
 
   try {
