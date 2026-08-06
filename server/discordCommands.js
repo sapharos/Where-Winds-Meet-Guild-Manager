@@ -30,6 +30,15 @@ import { listBuilds } from './builds.js';
 import { listWeaponSets } from './weapons.js';
 import { permissionsFor } from './auth.js';
 import { LANE_INFO, LANE_CAPACITY, WAR_CAPACITY, SIDES, getBoard, listStrategies } from './war.js';
+import {
+  getEvent,
+  listEvents,
+  respond,
+  cuentaPartidas,
+  getAgendaChannel,
+  setDiscordMessage,
+} from './events.js';
+import { botEnabled, postMessage, editMessage } from './discordBot.js';
 
 const API = 'https://discord.com/api/v10';
 
@@ -180,6 +189,10 @@ const COMMANDS = [
         required: false,
       },
     ],
+  },
+  {
+    name: 'agenda',
+    description: 'Lo que viene y qué has contestado',
   },
 ];
 
@@ -607,6 +620,253 @@ export function tableroDeGuerra({
   };
 }
 
+/* ------------------------------------------------------------------ agenda */
+
+const EVENTO_TIPOS = {
+  war: { label: 'Guerra de gremio', emoji: '⚔' },
+  practice: { label: 'Guerra de práctica', emoji: '🎯' },
+  pve: { label: 'Evento PvE', emoji: '🐉' },
+  casual: { label: 'Actividad del gremio', emoji: '🍵' },
+};
+
+const RESPUESTAS = [
+  { answer: 'yes', label: 'Voy', emoji: '✅' },
+  { answer: 'maybe', label: 'Tal vez', emoji: '❔' },
+  { answer: 'no', label: 'No puedo', emoji: '✖' },
+];
+
+const marca = (iso, formato) => `<t:${Math.floor(new Date(iso).getTime() / 1000)}:${formato}>`;
+
+/**
+ * Un evento como mensaje de Discord: lo que se lee y lo que se pulsa.
+ *
+ * La hora va como marca de Discord y no escrita, y eso resuelve solo lo que en
+ * la web costó una tarjeta de aviso: cada uno la ve en su reloj, sin que la
+ * aplicación tenga que saber dónde vive nadie ni escribir «hora de Colombia».
+ *
+ * Función pura, como las otras dos: se puede mirar sin un Discord delante.
+ */
+export function eventoMensaje(evento) {
+  const tipo = EVENTO_TIPOS[evento.kind] ?? EVENTO_TIPOS.casual;
+  const cerrada =
+    Boolean(evento.cancelledAt) ||
+    Boolean(evento.closesAt && new Date() > new Date(evento.closesAt));
+
+  const cabecera = [
+    `${marca(evento.startsAt, 'F')}  ·  ${marca(evento.startsAt, 'R')}`,
+    cuentaPartidas(evento.kind) && evento.rounds > 1
+      ? `**${evento.rounds} partidas** esa noche. Di a cuántas llegas.`
+      : null,
+    evento.notes ? literal(evento.notes) : null,
+    evento.cancelledAt
+      ? '**Cancelado.**'
+      : evento.closesAt
+        ? `Se puede contestar hasta ${marca(evento.closesAt, 'f')}.`
+        : null,
+  ].filter(Boolean);
+
+  const de = (answer) => (evento.responses ?? []).filter((r) => r.answer === answer);
+
+  const fields = RESPUESTAS.map(({ answer, label, emoji }) => {
+    const suyos = de(answer);
+    return {
+      name: `${emoji} ${label} · ${suyos.length}`,
+      value: suyos.length
+        ? suyos
+            .map(
+              (r) =>
+                `${literal(r.name)}${answer === 'yes' && r.rounds ? ` (${r.rounds})` : ''}`,
+            )
+            .join(' · ')
+            .slice(0, 1024)
+        : '—',
+      inline: false,
+    };
+  });
+
+  const embed = {
+    author: { name: tipo.label },
+    title: `${tipo.emoji}  ${literal(evento.title)}`,
+    description: cabecera.join('\n'),
+    color: evento.cancelledAt ? 0x74251a : LATON,
+    fields,
+    footer: { text: 'Contesta aquí o en la web; es la misma lista.' },
+  };
+
+  // Cerrada o cancelada, el mensaje se queda sin nada que pulsar: enseñar un
+  // botón que va a contestar «ya está cerrada» es ofrecer algo que no existe.
+  if (cerrada) return { embeds: [embed], components: [] };
+
+  // Una guerra con varias partidas no se responde con tres botones, porque la
+  // respuesta útil no es «voy» sino «voy a tres». Un desplegable dice las dos
+  // cosas en un toque, y encima no gasta cinco botones en una fila.
+  const components = cuentaPartidas(evento.kind) && evento.rounds > 1
+    ? [
+        {
+          type: 1,
+          components: [
+            {
+              type: 3,
+              custom_id: `evento:${evento.id}`,
+              placeholder: '¿Vas? ¿A cuántas?',
+              options: [
+                ...Array.from({ length: evento.rounds }, (_, i) => evento.rounds - i).map((n) => ({
+                  label: n === evento.rounds ? `Voy a todas (${n})` : `Voy a ${n}`,
+                  value: `yes:${n}`,
+                  emoji: { name: '✅' },
+                })),
+                { label: 'Tal vez', value: 'maybe', emoji: { name: '❔' } },
+                { label: 'No puedo', value: 'no', emoji: { name: '✖' } },
+              ].slice(0, 25),
+            },
+          ],
+        },
+      ]
+    : [
+        {
+          type: 1,
+          components: RESPUESTAS.map(({ answer, label, emoji }) => ({
+            type: 2,
+            style: answer === 'yes' ? 3 : answer === 'no' ? 4 : 2,
+            label,
+            emoji: { name: emoji },
+            custom_id: `evento:${evento.id}:${answer}`,
+          })),
+        },
+      ];
+
+  return { embeds: [embed], components };
+}
+
+/** Lo que se manda a Discord, con las menciones desactivadas siempre. */
+const cuerpoDe = (evento) => ({ ...eventoMensaje(evento), allowed_mentions: { parse: [] } });
+
+/**
+ * Publica la encuesta de un evento, o rehace la publicación si el mensaje ya no
+ * está. Devuelve dónde quedó, o null si no había dónde publicarla.
+ */
+export async function publicarEvento(id) {
+  if (!botEnabled()) return null;
+  const canal = await getAgendaChannel();
+  if (!canal) return null;
+
+  const evento = await getEvent(id);
+  const mensaje = await postMessage(canal, cuerpoDe(evento));
+  await setDiscordMessage(id, mensaje.channelId, mensaje.id);
+  return mensaje;
+}
+
+/**
+ * Pone al día el mensaje ya publicado.
+ *
+ * Se llama después de cada respuesta venga de donde venga, y por eso no lanza:
+ * que Discord esté caído no puede tumbar el guardado de una respuesta que la
+ * base de datos ya aceptó. Lo peor que pasa es que el mensaje quede viejo, y
+ * eso se arregla volviendo a publicar.
+ */
+export async function refrescarEvento(id) {
+  if (!botEnabled()) return;
+  try {
+    const evento = await getEvent(id);
+    if (!evento.discordChannelId || !evento.discordMessageId) return;
+    const salida = await editMessage(
+      evento.discordChannelId,
+      evento.discordMessageId,
+      cuerpoDe(evento),
+    );
+    // Borrado desde Discord: se olvida dónde estaba, para que publicar otra vez
+    // no intente escribir sobre un mensaje que ya no existe.
+    if (salida.gone) await setDiscordMessage(id, null, null);
+  } catch (err) {
+    console.error(`No se pudo refrescar el evento ${id} en Discord:`, err.message);
+  }
+}
+
+/**
+ * Contestar desde un botón o desde el desplegable.
+ *
+ * El mismo camino que la web: se resuelve quién es por su Discord vinculado, se
+ * escribe en la misma fila, y el mensaje se reescribe con el recuento nuevo. La
+ * ventana de la encuesta la sigue comprobando el modelo, no esto.
+ */
+async function botonEvento(interaction) {
+  const [, eventId, respuestaDelBoton] = String(interaction.data?.custom_id ?? '').split(':');
+  const usuario = interaction.member?.user ?? interaction.user;
+
+  const quien = usuario?.id ? await cuentaDe(usuario.id) : null;
+  if (!quien) {
+    return aviso(
+      'Tu Discord no está vinculado a ninguna cuenta del gremio, así que no sé por quién apuntarte. Entra en la web con el botón de Discord.',
+    );
+  }
+  if (!quien.playerId) {
+    return aviso('Tu cuenta todavía no está unida a una ficha del roster. Avisa a un líder.');
+  }
+
+  // Del desplegable llega «yes:3»; de un botón, la respuesta en el propio id.
+  const elegido = interaction.data?.values?.[0] ?? respuestaDelBoton ?? '';
+  const [answer, rounds] = String(elegido).split(':');
+
+  try {
+    await respond(eventId, quien.playerId, { answer, rounds }, { source: 'discord' });
+  } catch (err) {
+    return aviso(err.message);
+  }
+
+  const evento = await getEvent(eventId);
+  return { type: UPDATE_MESSAGE, data: cuerpoDe(evento) };
+}
+
+/**
+ * `/agenda` -- lo que viene y qué contestaste.
+ *
+ * Existe porque el mensaje de la encuesta se entierra: en un canal con
+ * conversación, el del lunes no se encuentra el viernes. Esto lo trae de vuelta
+ * sin buscarlo, y en privado, que es donde uno mira sus cosas.
+ */
+async function comandoAgenda(interaction) {
+  const usuario = interaction.member?.user ?? interaction.user;
+  const quien = usuario?.id ? await cuentaDe(usuario.id) : null;
+  if (!quien) {
+    return aviso(
+      'Tu Discord no está vinculado a ninguna cuenta del gremio. Entra en la web con el botón de Discord y pide tu registro.',
+    );
+  }
+
+  const eventos = await listEvents();
+  if (!eventos.length) return aviso('No hay nada programado por delante.');
+
+  const conMiRespuesta = await Promise.all(
+    eventos.slice(0, 10).map(async (e) => {
+      const detalle = await getEvent(e.id);
+      const mia = detalle.responses.find((r) => r.playerId === quien.playerId);
+      return { ...e, mia };
+    }),
+  );
+
+  const embed = {
+    author: { name: process.env.GUILD_NAME || 'Zona Zero' },
+    title: '🗓  Lo que viene',
+    color: LATON,
+    fields: conMiRespuesta.map((e) => {
+      const tipo = EVENTO_TIPOS[e.kind] ?? EVENTO_TIPOS.casual;
+      const tuya = e.mia
+        ? `**${RESPUESTAS.find((r) => r.answer === e.mia.answer)?.label ?? e.mia.answer}**${
+            e.mia.rounds ? ` (${e.mia.rounds})` : ''
+          }`
+        : '*sin contestar*';
+      return {
+        name: `${tipo.emoji}  ${literal(e.title)}${e.cancelledAt ? '  ·  CANCELADO' : ''}`,
+        value: `${marca(e.startsAt, 'F')}\n✅ ${e.yes} · ❔ ${e.maybe} · ✖ ${e.no}  —  tú: ${tuya}`,
+        inline: false,
+      };
+    }),
+    footer: { text: 'Para contestar, busca la encuesta en el canal o entra en la web.' },
+  };
+
+  return { type: MESSAGE, data: { embeds: [embed], flags: EPHEMERAL } };
+}
+
 /* ---------------------------------------------------------------- comandos */
 
 /** Un aviso corto, siempre sólo para quien escribió el comando. */
@@ -941,9 +1201,11 @@ export async function handleInteraction(body) {
   }
 
   if (body?.type === MESSAGE_COMPONENT) {
-    return String(body.data?.custom_id ?? '').startsWith('guerra:')
-      ? botonGuerra(body)
-      : aviso('Ese botón es de una versión anterior del bot. Vuelve a escribir el comando.');
+    // Botones y desplegables llegan igual; los distingue el id que llevan.
+    const id = String(body.data?.custom_id ?? '');
+    if (id.startsWith('guerra:')) return botonGuerra(body);
+    if (id.startsWith('evento:')) return botonEvento(body);
+    return aviso('Ese botón es de una versión anterior del bot. Vuelve a escribir el comando.');
   }
 
   if (body?.type !== APPLICATION_COMMAND) return null;
@@ -953,7 +1215,9 @@ export async function handleInteraction(body) {
       return comandoPerfil(body);
     case 'guerra':
       return comandoGuerra(body);
+    case 'agenda':
+      return comandoAgenda(body);
     default:
-      return aviso('Ese comando ya no existe. Prueba con `/perfil` o `/guerra`.');
+      return aviso('Ese comando ya no existe. Prueba con `/perfil`, `/guerra` o `/agenda`.');
   }
 }

@@ -545,6 +545,7 @@ const App: React.FC = () => {
             canManagePermissions={can('permissions.manage')}
             canManageBuilds={can('builds.manage')}
             canScan={can('roster.edit')}
+            canManageEvents={can('events.manage')}
             players={players}
             onScanImported={() => void loadAllData({ quiet: true })}
             onWeaponSetsChanged={reloadWeaponSets}

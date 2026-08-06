@@ -269,6 +269,9 @@ const respuestas: Record<string, RespuestaFalsa[]> = {
   }
 }
 
+/** Dónde publica la agenda. Empieza sin elegir, como un gremio recién montado. */
+let canalAgenda: string | null = null;
+
 const cuenta = (id: string, answer: string) =>
   (respuestas[id] ?? []).filter((r) => r.answer === answer).length;
 
@@ -314,6 +317,15 @@ const anotar = (id: string, playerId: string, body: Record<string, unknown>, por
 const GET: [RegExp, Ruta][] = [
   [/^\/auth\/me$/, () => fake.session],
   [/^\/events$/, () => eventos.map(conRecuento)],
+  [/^\/events\/config\/channel$/, () => ({
+    bot: true,
+    channel: canalAgenda,
+    channels: [
+      { id: '300000000000000001', name: 'anuncios' },
+      { id: '300000000000000002', name: 'guerras' },
+      { id: '300000000000000003', name: 'general' },
+    ],
+  })],
   [/^\/events\/([^/]+)$/, (m) => conRespuestas(m[1])],
   [/^\/auth\/config$/, () => ({ discord: false })],
   [/^\/state$/, () => ({ players: store.players, sessions: [], ranks: store.ranks })],
@@ -373,6 +385,19 @@ const ESCRITURAS: [string, RegExp, Ruta][] = [
     anotar(m[1], fake.session.user.playerId ?? '', body ?? {}, null)],
   ['PUT', /^\/events\/([^/]+)\/responses\/([^/]+)$/, (m, _req, body) =>
     anotar(m[1], m[2], body ?? {}, fake.session.user.id)],
+  ['PUT', /^\/events\/config\/channel$/, (_m, _req, body) => {
+    canalAgenda = body?.channel ?? null;
+    return { channel: canalAgenda };
+  }],
+  ['POST', /^\/events\/([^/]+)\/publish$/, (m) => {
+    if (!canalAgenda) return { error: 'falta elegir el canal de la agenda en Administración' };
+    const e = eventos.find((x) => x.id === m[1]);
+    if (e) {
+      e.discordChannelId = canalAgenda;
+      e.discordMessageId = `msg-${Date.now()}`;
+    }
+    return conRespuestas(m[1]);
+  }],
   ['POST', /^\/events\/([^/]+)\/cancel$/, (m, _req, body) => {
     const e = eventos.find((x) => x.id === m[1]);
     if (e) e.cancelledAt = body?.cancelled === false ? null : new Date().toISOString();

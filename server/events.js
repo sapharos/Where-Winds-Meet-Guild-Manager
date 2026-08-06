@@ -85,7 +85,38 @@ function limpiar(body) {
 
 const CAMPOS = `id, kind, title, starts_at AS "startsAt", minutes, rounds, notes,
                 opens_at AS "opensAt", closes_at AS "closesAt",
-                cancelled_at AS "cancelledAt", created_by AS "createdBy"`;
+                cancelled_at AS "cancelledAt", created_by AS "createdBy",
+                discord_channel_id AS "discordChannelId",
+                discord_message_id AS "discordMessageId"`;
+
+/** El canal donde se publican las encuestas. Vacío: no se publica nada. */
+export async function getAgendaChannel() {
+  const { rows } = await pool.query(`SELECT value FROM app_settings WHERE key = 'agenda_channel'`);
+  return rows[0]?.value || null;
+}
+
+export async function setAgendaChannel(channelId) {
+  const limpio = /^\d{5,25}$/.test(String(channelId ?? '')) ? String(channelId) : null;
+  if (!limpio) {
+    await pool.query(`DELETE FROM app_settings WHERE key = 'agenda_channel'`);
+    return null;
+  }
+  await pool.query(
+    `INSERT INTO app_settings (key, value) VALUES ('agenda_channel', $1)
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+    [limpio],
+  );
+  return limpio;
+}
+
+/** Dónde quedó publicada la encuesta de un evento. */
+export async function setDiscordMessage(id, channelId, messageId) {
+  await pool.query(
+    `UPDATE guild_events SET discord_channel_id = $3, discord_message_id = $4
+      WHERE guild_id = $1 AND id = $2`,
+    [GUILD_ID, id, channelId, messageId],
+  );
+}
 
 /**
  * La agenda.

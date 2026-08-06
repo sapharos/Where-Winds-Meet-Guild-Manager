@@ -594,3 +594,9 @@ ON CONFLICT DO NOTHING;
 
 INSERT INTO app_settings (key, value) VALUES ('seeded:events.manage', 'true')
   ON CONFLICT (key) DO NOTHING;
+
+-- Dónde quedó publicada la encuesta, para poder reescribir ese mensaje en vez
+-- de mandar otro cada vez que alguien contesta. Nullable: un evento puede vivir
+-- sólo en la web, y el bot puede no estar configurado.
+ALTER TABLE guild_events ADD COLUMN IF NOT EXISTS discord_channel_id TEXT;
+ALTER TABLE guild_events ADD COLUMN IF NOT EXISTS discord_message_id TEXT;

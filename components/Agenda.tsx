@@ -273,6 +273,16 @@ const Agenda: React.FC<Props> = ({ players, myPlayerId, canManage }) => {
             }}
             onEditar={() => setEditando(abierto)}
             onCancelar={() => cancelar(abierto)}
+            onPublicar={async () => {
+              setError(null);
+              try {
+                await tras(
+                  await api<GuildEvent>(`/events/${abierto.id}/publish`, { method: 'POST' }),
+                );
+              } catch (err) {
+                setError(err instanceof Error ? err.message : 'No se pudo publicar');
+              }
+            }}
           />
         </Sheet>
       )}
@@ -301,6 +311,7 @@ const DetalleEvento: React.FC<{
   onContestarPor: (playerId: string, answer: EventAnswer, rounds?: number) => void;
   onEditar: () => void;
   onCancelar: () => void;
+  onPublicar: () => void;
 }> = ({
   event,
   players,
@@ -312,6 +323,7 @@ const DetalleEvento: React.FC<{
   onContestarPor,
   onEditar,
   onCancelar,
+  onPublicar,
 }) => {
   const cuenta = cuentaPartidas(event.kind) && (event.rounds ?? 0) > 1;
   const [partidas, setPartidas] = useState(misPartidas ?? event.rounds ?? 1);
@@ -448,6 +460,16 @@ const DetalleEvento: React.FC<{
 
       {canManage && (
         <div className="pt-3 border-t border-slate-800 flex gap-2 flex-wrap">
+          {/* Publicar es un acto y no una consecuencia de guardar: un evento se
+              crea, se corrige y se mira antes de convocar a nadie. */}
+          <button
+            onClick={onPublicar}
+            disabled={Boolean(event.cancelledAt)}
+            className="min-h-tap px-4 rounded-md border border-indigo-700 text-indigo-300 transition-colors duration-micro disabled:opacity-40"
+          >
+            <i className="fa-brands fa-discord mr-2"></i>
+            {event.discordMessageId ? 'Volver a publicar' : 'Publicar en Discord'}
+          </button>
           <button
             onClick={onEditar}
             className="min-h-tap px-4 rounded-md border border-slate-700 text-slate-200 transition-colors duration-micro"

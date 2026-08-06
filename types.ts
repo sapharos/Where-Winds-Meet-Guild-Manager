@@ -519,6 +519,9 @@ export interface GuildEvent {
   closesAt: string | null;
   cancelledAt: string | null;
   createdBy: string | null;
+  /** Dónde quedó publicada la encuesta, cuando se publicó. */
+  discordChannelId?: string | null;
+  discordMessageId?: string | null;
   /** Sólo al listar: el recuento de cada respuesta. */
   yes?: number;
   maybe?: number;

@@ -210,6 +210,26 @@ with 403 and the log says so; reinviting with the same link fixes it.
 Only members whose Discord is linked to an account get an answer; anyone else is
 told, privately, to link theirs first.
 
+### The agenda
+
+**Administración → Agenda** picks the text channel the event polls are posted
+to. From an event in the **Agenda** tab, *Publicar en Discord* posts it there;
+the bot then rewrites that same message every time anyone answers, from either
+side. Publishing is a deliberate act rather than a side effect of saving, so
+fixing a typo does not summon the guild twice.
+
+A guild war is answered with a dropdown — *Voy a todas (5)*, *a 4*, … , *Tal
+vez*, *No puedo* — because the useful answer is not "I'm coming" but "I'm coming
+to three". Everything else gets three buttons. A closed or cancelled poll keeps
+its message and loses its controls.
+
+`/agenda` lists what is coming with your own answer against each, privately —
+the poll message gets buried in a busy channel, and Monday's is not findable on
+Friday.
+
+Answering needs a linked Discord and a roster entry, and the poll's window is
+enforced wherever the answer comes from.
+
 ### War voice channels
 
 With the bot set up, **Administración → Canales de voz de guerra** maps the

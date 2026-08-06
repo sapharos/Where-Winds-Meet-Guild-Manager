@@ -61,7 +61,15 @@ import {
   rejectRegistration,
 } from './discord.js';
 import { botEnabled, searchGuildMembers, listVoiceChannels, listSoundboardSounds } from './discordBot.js';
-import { commandsEnabled, verifyInteraction, handleInteraction, registerCommands } from './discordCommands.js';
+import {
+  commandsEnabled,
+  verifyInteraction,
+  handleInteraction,
+  registerCommands,
+  publicarEvento,
+  refrescarEvento,
+} from './discordCommands.js';
+import { listTextChannels } from './discordBot.js';
 import { VOICE_SLOTS, getVoiceChannels, setVoiceChannels, deployVoice } from './voice.js';
 import {
   listEvents,
@@ -70,6 +78,8 @@ import {
   cancelEvent,
   deleteEvent,
   respond,
+  getAgendaChannel,
+  setAgendaChannel,
 } from './events.js';
 import { getHorn, setHorn, sweepSound, warnEvent, startHornScheduler } from './horn.js';
 import {
@@ -392,11 +402,27 @@ app.post('/api/events', requireAuth, requirePermission('events.manage'), asHandl
 }));
 
 app.put('/api/events/:id', requireAuth, requirePermission('events.manage'), asHandler(async (req, res) => {
-  res.json(await saveEvent({ ...req.body, id: req.params.id }, req.user.id));
+  const guardado = await saveEvent({ ...req.body, id: req.params.id }, req.user.id);
+  void refrescarEvento(guardado.id);
+  res.json(guardado);
 }));
 
 app.post('/api/events/:id/cancel', requireAuth, requirePermission('events.manage'), asHandler(async (req, res) => {
-  res.json(await cancelEvent(req.params.id, req.body?.cancelled !== false));
+  const actualizado = await cancelEvent(req.params.id, req.body?.cancelled !== false);
+  void refrescarEvento(actualizado.id);
+  res.json(actualizado);
+}));
+
+// Lanzar la encuesta al canal. Es un acto y no un efecto de guardar: un evento
+// se crea, se corrige y se mira antes de convocar a nadie, y publicar dos veces
+// por haber arreglado una errata sería avisar dos veces al gremio.
+app.post('/api/events/:id/publish', requireAuth, requirePermission('events.manage'), asHandler(async (req, res) => {
+  if (!(await getAgendaChannel())) {
+    return res.status(409).json({ error: 'falta elegir el canal de la agenda en Administración' });
+  }
+  const mensaje = await publicarEvento(req.params.id);
+  if (!mensaje) return res.status(503).json({ error: 'el bot de Discord no está configurado' });
+  res.json(await getEvent(req.params.id));
 }));
 
 app.delete('/api/events/:id', requireAuth, requirePermission('events.manage'), asHandler(async (req, res) => {
@@ -411,7 +437,12 @@ app.put('/api/events/:id/response', requireAuth, asHandler(async (req, res) => {
   if (!req.user.playerId) {
     return res.status(403).json({ error: 'tu cuenta no está unida a una ficha del roster' });
   }
-  res.json(await respond(req.params.id, req.user.playerId, req.body));
+  const actualizado = await respond(req.params.id, req.user.playerId, req.body);
+  // El mensaje de Discord se pone al día aunque la respuesta se diera aquí: es
+  // la misma lista, y una encuesta que no cuenta lo contestado en la web es una
+  // segunda verdad de las que este modelo existe para no tener.
+  void refrescarEvento(req.params.id);
+  res.json(actualizado);
 }));
 
 // Y la de otro, que es cosa de quien organiza: hay miembros que no entran ni a
@@ -421,11 +452,27 @@ app.put(
   requireAuth,
   requirePermission('events.manage'),
   asHandler(async (req, res) => {
-    res.json(
-      await respond(req.params.id, req.params.playerId, req.body, { porOtro: req.user.id }),
-    );
+    const actualizado = await respond(req.params.id, req.params.playerId, req.body, {
+      porOtro: req.user.id,
+    });
+    void refrescarEvento(req.params.id);
+    res.json(actualizado);
   }),
 );
+
+// El canal donde se publican las encuestas, elegido de una lista y no copiado a
+// mano. Leerlo pide gestionar eventos, que es quien va a publicar en él.
+app.get('/api/events/config/channel', requireAuth, requirePermission('events.manage'), asHandler(async (_req, res) => {
+  res.json({
+    bot: botEnabled(),
+    channel: await getAgendaChannel(),
+    channels: botEnabled() ? await listTextChannels().catch(() => []) : [],
+  });
+}));
+
+app.put('/api/events/config/channel', requireAuth, requirePermission('events.manage'), asHandler(async (req, res) => {
+  res.json({ channel: await setAgendaChannel(req.body?.channel) });
+}));
 
 /* ------------------------------------------------------------- discord bot */
 

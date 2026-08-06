@@ -91,6 +91,52 @@ export async function listVoiceChannels() {
 }
 
 /**
+ * Los canales de texto donde se puede escribir, en el orden en que Discord los
+ * pinta. Sirven para que elegir dónde se publican las encuestas sea escoger de
+ * una lista y no copiar un id con el modo desarrollador puesto.
+ *
+ * Se cuelan los hilos y los anuncios (tipos 0 y 5) porque en los dos se puede
+ * publicar; las categorías y los canales de voz, no.
+ */
+export async function listTextChannels() {
+  const channels = await botFetch(`/guilds/${process.env.DISCORD_GUILD_ID}/channels`);
+  return channels
+    .filter((c) => c.type === 0 || c.type === 5)
+    .sort((a, b) => a.position - b.position)
+    .map((c) => ({ id: c.id, name: c.name }));
+}
+
+/** Publica un mensaje y devuelve su id, que es lo que hay que guardar. */
+export async function postMessage(channelId, payload) {
+  const mensaje = await botFetch(`/channels/${channelId}/messages`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  return { id: mensaje.id, channelId };
+}
+
+/**
+ * Reescribe un mensaje ya publicado.
+ *
+ * Devuelve un veredicto en vez de lanzar cuando el mensaje ya no está: alguien
+ * pudo borrarlo desde Discord, y eso no es un error del que avisar sino una
+ * publicación que hay que rehacer. Quien llama decide si la rehace.
+ */
+export async function editMessage(channelId, messageId, payload) {
+  try {
+    await botFetch(`/channels/${channelId}/messages/${messageId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+    return { edited: true };
+  } catch (err) {
+    // 10008: Unknown Message. 10003: Unknown Channel.
+    if (err.discordCode === 10008 || err.discordCode === 10003) return { edited: false, gone: true };
+    throw err;
+  }
+}
+
+/**
  * Los sonidos del panel del servidor, para elegir el cuerno de guerra.
  * El panel lo administra el gremio desde Discord; aquí sólo se lee.
  */

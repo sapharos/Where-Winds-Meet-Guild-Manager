@@ -34,6 +34,8 @@ interface Props {
   canManageBuilds: boolean;
   /** Importar un barrido del roster es una tarea administrativa, y vive aquí. */
   canScan: boolean;
+  /** Quien programa eventos es quien elige dónde se publican sus encuestas. */
+  canManageEvents: boolean;
   players: Player[];
   onScanImported: () => void;
   /** The impact score reads the sets, so a change here has to reach the rest. */
@@ -54,6 +56,7 @@ const AdminPanel: React.FC<Props> = ({
   canManagePermissions,
   canManageBuilds,
   canScan,
+  canManageEvents,
   players,
   onScanImported,
   onWeaponSetsChanged,
@@ -76,6 +79,12 @@ const AdminPanel: React.FC<Props> = ({
   const [jugadorNuevo, setJugadorNuevo] = useState('');
   /** Los canales de voz del servidor de Discord, o null mientras no se sabe. */
   const [canalesVoz, setCanalesVoz] = useState<DiscordVoiceChannel[] | null>(null);
+  /** Dónde se publican las encuestas de la agenda, y entre qué canales elegir. */
+  const [agenda, setAgenda] = useState<{
+    bot: boolean;
+    channel: string | null;
+    channels: { id: string; name: string }[];
+  } | null>(null);
   const [mapaVoz, setMapaVoz] = useState<VoiceChannelMap>({});
   const [vozSucia, setVozSucia] = useState(false);
   /** El panel de sonidos del servidor y qué sonido toca en cada aviso de guerra. */
@@ -137,6 +146,15 @@ const AdminPanel: React.FC<Props> = ({
             ).catch(() => ({ jungle: null, boss: null, slots: [] })),
           );
         }
+      }
+      // Aparte de `canManageUsers`: programar eventos y gestionar cuentas son
+      // permisos distintos, y un oficial puede tener el primero sin el segundo.
+      if (canManageEvents) {
+        setAgenda(
+          await api<{ bot: boolean; channel: string | null; channels: { id: string; name: string }[] }>(
+            '/events/config/channel',
+          ).catch(() => ({ bot: false, channel: null, channels: [] })),
+        );
       }
     } catch (err) {
       report(err instanceof Error ? err.message : 'No se pudo cargar la configuración', false);
@@ -345,6 +363,7 @@ const AdminPanel: React.FC<Props> = ({
     ...(canManageUsers && botDiscord
       ? [{ id: 'voz', label: 'Voz y cuerno', icon: 'fa-headset', badge: 0 }]
       : []),
+    ...(canManageEvents ? [{ id: 'agenda', label: 'Agenda', icon: 'fa-calendar-day', badge: 0 }] : []),
     { id: 'armas', label: 'Conjuntos de armas', icon: 'fa-khanda', badge: 0 },
   ];
   const activa = secciones.some((s) => s.id === seccion) ? seccion : secciones[0].id;
@@ -861,6 +880,56 @@ const AdminPanel: React.FC<Props> = ({
               </tbody>
             </table>
           </TablaAncha>
+        </section>
+      )}
+
+      {activa === 'agenda' && canManageEvents && (
+        <section className="bg-slate-900/60 border border-slate-800 rounded-xl p-6">
+          <h2 className="cinzel text-2xl font-bold text-amber-500 mb-1">Agenda</h2>
+          <p className="text-xs text-slate-500 mb-5">
+            En qué canal se publican las encuestas de los eventos. El bot escribe ahí y reescribe ese
+            mismo mensaje cada vez que alguien contesta, venga la respuesta de Discord o de la web.
+          </p>
+
+          {agenda && !agenda.bot ? (
+            <p className="text-sm text-slate-400 bg-slate-950 border border-slate-800 rounded-lg p-3">
+              <i className="fa-solid fa-triangle-exclamation mr-2 text-amber-500"></i>
+              El bot de Discord no está configurado, así que no hay dónde publicar. La agenda sigue
+              funcionando en la web.
+            </p>
+          ) : agenda && agenda.channels.length === 0 ? (
+            <p className="text-sm text-slate-400 bg-slate-950 border border-slate-800 rounded-lg p-3">
+              <i className="fa-solid fa-triangle-exclamation mr-2 text-amber-500"></i>
+              El bot no ve ningún canal de texto. Comprueba que puede ver el canal donde quieres que
+              escriba.
+            </p>
+          ) : (
+            <label className="block max-w-md">
+              <span className="block text-[11px] uppercase tracking-wider text-slate-500 mb-1">
+                Canal de difusión
+              </span>
+              <select
+                className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
+                value={agenda?.channel ?? ''}
+                onChange={async (e) => {
+                  const channel = e.target.value || null;
+                  setAgenda((prev) => (prev ? { ...prev, channel } : prev));
+                  await api('/events/config/channel', {
+                    method: 'PUT',
+                    body: JSON.stringify({ channel }),
+                  }).catch(() => report('No se pudo guardar el canal', false));
+                  report(channel ? 'Canal de la agenda guardado' : 'La agenda ya no publica en Discord');
+                }}
+              >
+                <option value="">No publicar en Discord</option>
+                {(agenda?.channels ?? []).map((c) => (
+                  <option key={c.id} value={c.id}>
+                    #{c.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
         </section>
       )}
 
