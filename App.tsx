@@ -568,6 +568,7 @@ const App: React.FC = () => {
             onToggleStarter={handleToggleStarter}
             onCycleSide={handleCycleSide}
             onToggleActive={handleToggleActive}
+            canEditUid={can('roster.uid')}
             builds={builds}
             weaponSets={weaponSets}
           />

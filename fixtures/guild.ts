@@ -265,7 +265,7 @@ export const scansOf = (playerId: string) => {
 export const session = {
   user: { id: 'u-1', username: 'jinwei', role: 'leader' as const, playerId: 'p-3' },
   permissions: [
-    'roster.view', 'roster.edit', 'ranks.manage', 'war.view', 'war.edit', 'war.voice',
+    'roster.view', 'roster.edit', 'roster.uid', 'ranks.manage', 'war.view', 'war.edit', 'war.voice',
     'events.manage', 'data.export', 'data.import', 'builds.manage', 'users.manage',
     'permissions.manage',
   ],

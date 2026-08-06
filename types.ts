@@ -398,10 +398,12 @@ export const ROLE_LABELS: Record<UserRole, string> = {
 export const PERMISSION_LABELS: Record<string, string> = {
   'roster.view': 'Ver el roster',
   'roster.edit': 'Editar miembros',
+  'roster.uid': 'Cambiar el UID del juego',
   'ranks.manage': 'Gestionar rangos',
   'war.view': 'Ver la War Room',
   'war.edit': 'Editar despliegues y unidades',
   'war.voice': 'Mover a canales de voz',
+  'events.manage': 'Programar eventos',
   'data.export': 'Exportar datos',
   'data.import': 'Importar datos',
   'builds.manage': 'Editar builds de cualquiera',

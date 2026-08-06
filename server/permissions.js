@@ -5,6 +5,10 @@ export const ROLES = ['admin', 'leader', 'subleader', 'officer', 'member'];
 export const PERMISSIONS = [
   'roster.view',
   'roster.edit',
+  // Cambiar el UID del juego. Aparte de editar el resto de la ficha porque es
+  // la identidad del miembro: es lo que empareja los escaneos, y tocarlo mal
+  // rompe el historial de alguien sin decir nada.
+  'roster.uid',
   'ranks.manage',
   'war.view',
   'war.edit',
@@ -25,6 +29,7 @@ export const DEFAULT_PERMISSIONS = {
   subleader: [
     'roster.view',
     'roster.edit',
+    'roster.uid',
     'war.view',
     'war.edit',
     'war.voice',

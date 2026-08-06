@@ -790,7 +790,10 @@ app.get('/api/state', requireAuth, asHandler(async (_req, res) => {
 app.put('/api/players', requireAuth, requirePermission('roster.edit'), asHandler(async (req, res) => {
   const players = requireArray(req, res);
   if (!players) return;
-  await replacePlayers(players, { mayAssignRanks: req.permissions.includes('ranks.manage') });
+  await replacePlayers(players, {
+    mayAssignRanks: req.permissions.includes('ranks.manage'),
+    mayEditUid: req.permissions.includes('roster.uid'),
+  });
   res.json({ saved: players.length });
 }));
 

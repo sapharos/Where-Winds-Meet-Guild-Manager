@@ -646,3 +646,16 @@ CREATE UNIQUE INDEX IF NOT EXISTS guild_events_series_idx
 -- Las dos guerras de la semana se siembran desde `agenda.js` y no aquí: este
 -- archivo corre antes de que exista la fila del gremio a la que apuntaría la
 -- clave ajena, y además no sustituye el GUILD_ID.
+
+-- `roster.uid` es nuevo, y sin sembrarlo un gremio con su matriz ya decidida se
+-- quedaría sin nadie que pueda corregir un UID. Se le da a quien ya edita el
+-- roster -- que por defecto es de sublíder hacia arriba -- una sola vez, con su
+-- marcador para que no vuelva si se decide quitarlo.
+INSERT INTO role_permissions (guild_id, role, permission)
+SELECT DISTINCT guild_id, role, 'roster.uid' FROM role_permissions
+ WHERE permission = 'roster.edit'
+   AND NOT EXISTS (SELECT 1 FROM app_settings WHERE key = 'seeded:roster.uid')
+ON CONFLICT DO NOTHING;
+
+INSERT INTO app_settings (key, value) VALUES ('seeded:roster.uid', 'true')
+  ON CONFLICT (key) DO NOTHING;

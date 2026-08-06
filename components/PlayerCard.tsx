@@ -130,6 +130,8 @@ const PlayerCard: React.FC<PlayerCardProps> = ({
   const { from } = buildColour(build, weaponSets);
   const gone = player.isActive === false;
   const [menu, setMenu] = useState(false);
+  /** Acuse de recibo del copiado, que dura lo que se tarda en verlo. */
+  const [copiado, setCopiado] = useState(false);
 
   /**
    * Las acciones de la tarjeta, como datos.
@@ -144,6 +146,29 @@ const PlayerCard: React.FC<PlayerCardProps> = ({
    * objetivo que se falla a dos sobre uno que no.
    */
   const acciones = [
+    // Copiar el UID va primero porque es lo que más se hace con una ficha
+    // abierta: se pega en el buscador del juego para encontrar a alguien. Y
+    // lleva el número escrito, así que también sirve para leerlo sin copiar --
+    // en un teléfono, donde no hay `title` que valga, era invisible.
+    player.gameUid && {
+      id: 'uid',
+      icono: copiado ? 'fa-check' : 'fa-copy',
+      familia: 'fa-solid',
+      tono: copiado ? 'text-emerald-400' : 'text-slate-400',
+      texto: copiado ? 'UID copiado' : `Copiar UID · ${player.gameUid}`,
+      // Sin cerrar la hoja: copiar no lleva a ninguna parte, y cerrarla se
+      // llevaría por delante el acuse de recibo.
+      cerrar: false,
+      hacer: () => {
+        void navigator.clipboard
+          .writeText(player.gameUid as string)
+          .then(() => {
+            setCopiado(true);
+            setTimeout(() => setCopiado(false), 1500);
+          })
+          .catch(() => setCopiado(false));
+      },
+    },
     onToggleStarter && !gone && {
       id: 'titular',
       icono: player.isStarter ? 'fa-star' : 'fa-star',
@@ -199,6 +224,8 @@ const PlayerCard: React.FC<PlayerCardProps> = ({
     familia: string;
     tono: string;
     texto: string;
+    /** Si la hoja se cierra al pulsarla. Casi todas sí; copiar, no. */
+    cerrar?: boolean;
     hacer: () => void;
   }[];
 
@@ -361,7 +388,7 @@ const PlayerCard: React.FC<PlayerCardProps> = ({
                 key={accion.id}
                 onClick={() => {
                   accion.hacer();
-                  setMenu(false);
+                  if (accion.cerrar !== false) setMenu(false);
                 }}
                 className="min-h-tap flex items-center gap-3 px-3 -mx-1 rounded-md text-left text-slate-200 hover:bg-slate-800/60 transition-colors duration-micro"
               >

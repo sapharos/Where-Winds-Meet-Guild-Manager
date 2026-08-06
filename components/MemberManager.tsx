@@ -18,6 +18,8 @@ interface MemberManagerProps {
   onToggleStarter?: (p: Player) => void;
   onCycleSide?: (p: Player) => void;
   onToggleActive?: (p: Player) => void;
+  /** El UID empareja los escaneos, así que se toca de sublíder hacia arriba. */
+  canEditUid?: boolean;
 }
 
 /** One weapon in the filter list, with how many members carry it. */
@@ -68,6 +70,7 @@ const MemberManager: React.FC<MemberManagerProps> = ({
   onToggleStarter,
   onCycleSide,
   onToggleActive,
+  canEditUid = false,
 }) => {
   const [editing, setEditing] = useState<Player | null>(null);
   const [formOpen, setFormOpen] = useState(false);
@@ -211,6 +214,7 @@ const MemberManager: React.FC<MemberManagerProps> = ({
       sect: p.sect || 'Sectless',
       platform: p.platform,
       status: p.status || MembershipStatus.FULL_MEMBER,
+      gameUid: p.gameUid,
       notes: p.notes,
     });
     setFormOpen(true);
@@ -614,6 +618,40 @@ const MemberManager: React.FC<MemberManagerProps> = ({
                     </option>
                   ))}
                 </select>
+              </div>
+
+              {/* El UID del juego. Se enseña siempre -- es lo que empareja a un
+                  miembro con sus escaneos, y quien no puede tocarlo igual
+                  necesita leerlo -- y sólo se deja escribir a quien tenga el
+                  permiso, que por defecto es de sublíder hacia arriba. */}
+              <div>
+                <label className="block text-xs uppercase tracking-wider text-slate-500 mb-1">
+                  UID del juego
+                  {!canEditUid && (
+                    <span className="ml-2 normal-case tracking-normal text-slate-600">
+                      sólo sublíder o superior
+                    </span>
+                  )}
+                </label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  disabled={!canEditUid}
+                  placeholder="100015838"
+                  className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-sm font-mono outline-none focus:ring-1 focus:ring-amber-500 disabled:opacity-50"
+                  value={formData.gameUid ?? ''}
+                  // Sólo dígitos, que es lo que el juego enseña. Filtrar al
+                  // escribir evita que un espacio pegado del portapapeles se
+                  // convierta en un UID que no empareja con nada.
+                  onChange={(e) =>
+                    setFormData({ ...formData, gameUid: e.target.value.replace(/[^0-9]/g, '') || undefined })
+                  }
+                />
+                <p className="text-meta text-slate-500 mt-1">
+                  El número que sale en su ficha social. Es lo que reconoce a un miembro cuando se
+                  cambia el nombre.
+                </p>
               </div>
 
               {/* Aquí hubo un selector de "Rango del gremio" con su propio

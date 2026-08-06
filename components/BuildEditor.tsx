@@ -28,6 +28,13 @@ const blank = (): PlayerBuild => ({
   isPrimary: false,
 });
 
+/**
+ * Cuántas armas lleva una build: las dos que se pueden equipar en el juego.
+ *
+ * Gemelo de MAX_WEAPONS en server/builds.js, que es quien recorta de verdad.
+ */
+const MAX_ARMAS = 2;
+
 interface Props {
   player: Player;
   canEdit: boolean;
@@ -65,6 +72,16 @@ const BuildEditor: React.FC<Props> = ({ player, canEdit, onClose, onSaved }) => 
 
   const toggle = <T,>(list: T[], value: T): T[] =>
     list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
+
+  /**
+   * Las armas, con el tope puesto.
+   *
+   * Quitar siempre se puede; añadir sólo mientras quepa. El servidor recorta a
+   * dos de todas formas, y una pantalla que deja elegir una tercera para que
+   * después desaparezca al guardar es peor que una que no la ofrece.
+   */
+  const toggleArma = (armas: string[], arma: string): string[] =>
+    armas.includes(arma) || armas.length < MAX_ARMAS ? toggle(armas, arma) : armas;
 
   // Only one build can be the primary; picking a new one clears the rest.
   const makePrimary = (id: string) =>
@@ -259,7 +276,12 @@ const BuildEditor: React.FC<Props> = ({ player, canEdit, onClose, onSaved }) => 
 
               <div>
                 <span className="block text-[10px] uppercase tracking-wider text-slate-500 mb-1.5">
-                  Armas ({build.weapons.length}/4)
+                  Armas ({build.weapons.length}/{MAX_ARMAS})
+                  {build.weapons.length >= MAX_ARMAS && (
+                    <span className="ml-2 normal-case tracking-normal text-slate-600">
+                      quita una para cambiarla
+                    </span>
+                  )}
                 </span>
                 <div className="space-y-1.5">
                   {sets.map((set) => (
@@ -267,12 +289,16 @@ const BuildEditor: React.FC<Props> = ({ player, canEdit, onClose, onSaved }) => 
                       <SetBadge set={set} />
                       {set.weapons.map((weapon) => {
                         const picked = build.weapons.includes(weapon);
+                        const lleno = !picked && build.weapons.length >= MAX_ARMAS;
                         return (
                           <button
                             key={weapon}
-                            disabled={!canEdit}
-                            onClick={() => update(build.id, { weapons: toggle(build.weapons, weapon) })}
-                            className="text-[11px] px-2 py-1 rounded border transition-all"
+                            disabled={!canEdit || lleno}
+                            title={lleno ? `Ya llevas ${MAX_ARMAS} armas` : undefined}
+                            onClick={() =>
+                              update(build.id, { weapons: toggleArma(build.weapons, weapon) })
+                            }
+                            className="text-[11px] px-2 py-1 rounded border transition-all disabled:opacity-40"
                             style={
                               picked
                                 ? { borderColor: set.color, color: set.color, backgroundColor: `${set.color}1a` }

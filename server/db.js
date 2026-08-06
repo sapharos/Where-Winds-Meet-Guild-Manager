@@ -50,10 +50,13 @@ export async function migrate() {
  * so the delete-then-insert used for the other collections would throw away
  * every past sweep each time somebody renamed a member. Only players actually
  * removed from the roster are deleted; the rest are updated in place, which
- * also leaves server-owned columns like game_uid alone -- the UI never sends
- * those back and would otherwise blank them.
+ * also leaves server-owned columns alone -- the UI never sends most of them
+ * back and would otherwise blank them.
  */
-export async function replacePlayers(players, { mayAssignRanks = false } = {}) {
+export async function replacePlayers(
+  players,
+  { mayAssignRanks = false, mayEditUid = false } = {},
+) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -61,14 +64,22 @@ export async function replacePlayers(players, { mayAssignRanks = false } = {}) {
     // Rank is a leader's decision, not part of ordinary roster upkeep. Whoever
     // may not assign it gets their submitted rank_id ignored rather than an
     // error, so editing a member's level never depends on rights they lack.
-    if (!mayAssignRanks) {
-      const { rows } = await client.query(
-        `SELECT id, rank_id AS "rankId" FROM players WHERE guild_id = $1`,
-        [GUILD_ID],
-      );
-      const existing = new Map(rows.map((r) => [r.id, r.rankId]));
-      players = players.map((p) => ({ ...p, rankId: existing.get(p.id) ?? null }));
-    }
+    //
+    // The account number works the same way, and for a stronger reason: it is
+    // what matches a member across sweeps, so a wrong one silently detaches
+    // somebody from their own history. Same treatment -- ignored, not refused --
+    // so an officer can still fix a typo in a name.
+    const { rows: previos } = await client.query(
+      `SELECT id, rank_id AS "rankId", game_uid AS "gameUid" FROM players WHERE guild_id = $1`,
+      [GUILD_ID],
+    );
+    const antes = new Map(previos.map((r) => [r.id, r]));
+
+    players = players.map((p) => ({
+      ...p,
+      rankId: mayAssignRanks ? p.rankId : (antes.get(p.id)?.rankId ?? null),
+      gameUid: mayEditUid ? limpiarUid(p.gameUid) : (antes.get(p.id)?.gameUid ?? null),
+    }));
 
     const keep = players.map((p) => p.id);
     if (keep.length) {
@@ -79,15 +90,16 @@ export async function replacePlayers(players, { mayAssignRanks = false } = {}) {
 
     for (const p of players) {
       await client.query(
-        `INSERT INTO players (guild_id, id, name, role, level, sect, platform, status, rank_id, notes)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        `INSERT INTO players (guild_id, id, name, role, level, sect, platform, status, rank_id, notes, game_uid)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
          ON CONFLICT (guild_id, id) DO UPDATE SET
            name = EXCLUDED.name, role = EXCLUDED.role, level = EXCLUDED.level,
            sect = EXCLUDED.sect, platform = EXCLUDED.platform, status = EXCLUDED.status,
-           rank_id = EXCLUDED.rank_id, notes = EXCLUDED.notes`,
+           rank_id = EXCLUDED.rank_id, notes = EXCLUDED.notes, game_uid = EXCLUDED.game_uid`,
         [
           GUILD_ID, p.id, p.name, p.role, p.level, p.sect,
           p.platform ?? null, p.status, p.rankId ?? null, p.notes ?? null,
+          p.gameUid ?? null,
         ],
       );
     }
@@ -95,11 +107,22 @@ export async function replacePlayers(players, { mayAssignRanks = false } = {}) {
     await client.query('COMMIT');
   } catch (err) {
     await client.query('ROLLBACK');
+    // Dos miembros con el mismo UID es lo único que el índice prohíbe, y ocurre
+    // al copiar mal un número. Vale la pena decirlo con palabras.
+    if (err.code === '23505' && err.constraint === 'players_game_uid_idx') {
+      throw Object.assign(new Error('ese UID ya lo tiene otro miembro'), { status: 409 });
+    }
     throw err;
   } finally {
     client.release();
   }
 }
+
+/** El UID como lo escribe el juego: sólo dígitos, o nada. */
+const limpiarUid = (valor) => {
+  const limpio = String(valor ?? '').replace(/[^0-9]/g, '');
+  return limpio ? limpio.slice(0, 20) : null;
+};
 
 // Replace a whole collection atomically. The UI edits arrays in place and saves
 // the result, so a delete-then-insert inside one transaction matches what it

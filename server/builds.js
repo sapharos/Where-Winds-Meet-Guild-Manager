@@ -6,7 +6,10 @@ import { pool, GUILD_ID } from './db.js';
 const ROLES = ['Tank', 'Healer', 'DPS'];
 
 const MAX_BUILDS = 12;
-const MAX_WEAPONS = 4;
+// Dos, que es lo que se lleva a una guerra: el juego deja equipar un arma
+// principal y una secundaria. Eran cuatro y no correspondía a nada -- una build
+// con tres armas describía algo que no se puede jugar.
+export const MAX_WEAPONS = 2;
 
 /**
  * Whether this request may write builds for this member.
