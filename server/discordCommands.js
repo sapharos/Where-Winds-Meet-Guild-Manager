@@ -28,6 +28,7 @@ import { pool, GUILD_ID } from './db.js';
 import { SCAN_FIELDS } from './scans.js';
 import { listBuilds } from './builds.js';
 import { listWeaponSets } from './weapons.js';
+import { permissionsFor } from './auth.js';
 
 const API = 'https://discord.com/api/v10';
 
@@ -45,8 +46,11 @@ const SPKI_ED25519 = Buffer.from('302a300506032b6570032100', 'hex');
 /** Tipos de interacción y de respuesta que se usan aquí. */
 const PING = 1;
 const APPLICATION_COMMAND = 2;
+/** Discord pregunta mientras alguien escribe, para ofrecerle la lista. */
+const AUTOCOMPLETE = 4;
 const PONG = 1;
 const MESSAGE = 4;
+const CHOICES = 8;
 /** Sólo la ve quien escribió el comando. */
 const EPHEMERAL = 64;
 
@@ -99,8 +103,24 @@ export function verifyInteraction(req) {
 const COMMANDS = [
   {
     name: 'perfil',
-    description: 'Tus estadísticas del último escaneo del gremio',
+    description: 'Estadísticas del último escaneo del gremio',
     options: [
+      // Dos formas de nombrar a otro, porque ninguna sola llega a todo el
+      // roster: por mención sólo aparece quien tenga cuenta vinculada, y por
+      // nombre aparece cualquiera aunque nunca haya entrado en la web.
+      {
+        type: 6, // usuario de Discord
+        name: 'miembro',
+        description: 'De quién, si tiene su Discord vinculado',
+        required: false,
+      },
+      {
+        type: 3, // texto
+        name: 'nombre',
+        description: 'De quién, buscándolo en el roster por su nombre',
+        required: false,
+        autocomplete: true,
+      },
       {
         type: 5, // booleano
         name: 'publico',
@@ -225,7 +245,7 @@ function comoEntero(hex) {
  * Función pura y exportada a propósito: es la parte que hay que poder mirar y
  * corregir sin un Discord delante ni una base de datos detrás.
  */
-export function perfilEmbed({ player, scans, builds, weaponSets, avatarUrl, guildName }) {
+export function perfilEmbed({ player, scans, builds, weaponSets, avatarUrl, guildName, ajeno = false }) {
   const ultimo = scans[0] ?? null;
   const previo = scans[1] ?? null;
   const principal = builds.find((b) => b.isPrimary) ?? builds[0] ?? null;
@@ -299,7 +319,11 @@ export function perfilEmbed({ player, scans, builds, weaponSets, avatarUrl, guil
     };
     embed.timestamp = new Date(ultimo.scannedAt).toISOString();
   } else {
-    embed.footer = { text: 'Todavía no apareces en ningún escaneo del gremio' };
+    embed.footer = {
+      text: ajeno
+        ? 'Todavía no aparece en ningún escaneo del gremio'
+        : 'Todavía no apareces en ningún escaneo del gremio',
+    };
   }
 
   return embed;
@@ -317,66 +341,187 @@ function avatarDe(usuario) {
   return `https://cdn.discordapp.com/avatars/${usuario.id}/${usuario.avatar}.${ext}?size=128`;
 }
 
-/**
- * `/perfil` -- las estadísticas de quien lo escribe.
- *
- * Quién es se resuelve por el Discord con el que ya está vinculada su cuenta;
- * no hay forma de pedir las de otro, ni falta: el roster de la web ya las
- * enseña a quien tiene permiso para verlas.
- */
-async function comandoPerfil(interaction) {
-  const usuario = interaction.member?.user ?? interaction.user;
-  if (!usuario?.id) return aviso('No he podido saber quién eres. Inténtalo otra vez.');
+/** Las columnas de la ficha que pinta el embed, siempre las mismas. */
+const FICHA = `p.id AS "playerId", p.name, p.role, p.level, p.sect,
+               p.is_starter AS "isStarter", p.war_side AS "warSide",
+               COALESCE(p.is_active, true) AS "isActive"`;
 
+/**
+ * La cuenta del gremio de un Discord, con su ficha si tiene una unida.
+ *
+ * `u.role` sale como «cuentaRol» y no como «role» a propósito, y es el mismo
+ * cuidado que se toma en `war.js` con los nombres: una cuenta tiene un rol
+ * -- oficial, miembro -- y una ficha tiene otro -- tanque, sanador --, se
+ * llaman igual, y el driver se queda con la última que llegue. Escritos los
+ * dos como `role`, el permiso se acaba consultando contra «Healer».
+ */
+async function cuentaDe(discordId) {
   const { rows } = await pool.query(
-    `SELECT u.player_id AS "playerId", p.name, p.role, p.level, p.sect,
-            p.is_starter AS "isStarter", p.war_side AS "warSide",
-            COALESCE(p.is_active, true) AS "isActive"
+    `SELECT u.role AS "cuentaRol", ${FICHA}
        FROM users u
        LEFT JOIN players p ON p.guild_id = u.guild_id AND p.id = u.player_id
       WHERE u.guild_id = $1 AND u.discord_id = $2 AND u.disabled = false`,
-    [GUILD_ID, usuario.id],
+    [GUILD_ID, discordId],
   );
+  return rows[0] ?? null;
+}
 
-  const cuenta = rows[0];
-  if (!cuenta) {
-    return aviso(
-      'Tu Discord no está vinculado a ninguna cuenta del gremio. Entra en la web con el botón de Discord y pide tu registro; un líder lo aprueba.',
-    );
-  }
-  if (!cuenta.playerId || !cuenta.name) {
-    return aviso('Tu cuenta todavía no está unida a una ficha del roster. Avisa a un líder.');
-  }
+/**
+ * La ficha de alguien nombrado por el buscador.
+ *
+ * El autocompletado manda el id, pero nadie obliga a elegir de la lista: se
+ * puede escribir un nombre a mano y enviar. Por eso se prueban las dos cosas,
+ * y el nombre se compara sin distinguir mayúsculas.
+ */
+async function fichaPorTexto(texto) {
+  const { rows } = await pool.query(
+    `SELECT ${FICHA} FROM players p
+      WHERE p.guild_id = $1 AND (p.id = $2 OR lower(p.name) = lower($2))
+      LIMIT 1`,
+    [GUILD_ID, texto],
+  );
+  return rows[0] ?? null;
+}
 
-  const [scans, builds, weaponSets] = await Promise.all([
+/** Lo que hace falta para pintar a alguien, en una sola espera. */
+function datosDe(playerId) {
+  return Promise.all([
     pool
       .query(
         `SELECT scanned_at AS "scannedAt", ${SCAN_FIELDS.join(', ')}
            FROM player_scans WHERE guild_id = $1 AND player_id = $2
           ORDER BY scanned_at DESC LIMIT 2`,
-        [GUILD_ID, cuenta.playerId],
+        [GUILD_ID, playerId],
       )
       .then((r) => r.rows),
-    listBuilds(cuenta.playerId),
+    listBuilds(playerId),
     listWeaponSets(),
   ]);
+}
 
-  const publico = interaction.data?.options?.find((o) => o.name === 'publico')?.value === true;
+const opcion = (interaction, nombre) =>
+  interaction.data?.options?.find((o) => o.name === nombre)?.value;
+
+/**
+ * `/perfil` -- las estadísticas de quien lo escribe, o las de otro.
+ *
+ * Quién pregunta se resuelve siempre por el Discord con el que ya está
+ * vinculada su cuenta; no hay otra forma de entrar. Mirar la ficha de otro es
+ * lo mismo que abrir el roster en la web, así que pide el mismo permiso que la
+ * web -- `roster.view` -- y no uno nuevo: un permiso que sólo existe en
+ * Discord sería una regla más que mantener y otra que se puede contradecir.
+ * La propia ficha no lo pide, igual que en la web nadie necesita permiso para
+ * verse a sí mismo.
+ */
+async function comandoPerfil(interaction) {
+  const usuario = interaction.member?.user ?? interaction.user;
+  if (!usuario?.id) return aviso('No he podido saber quién eres. Inténtalo otra vez.');
+
+  const quienPregunta = await cuentaDe(usuario.id);
+  if (!quienPregunta) {
+    return aviso(
+      'Tu Discord no está vinculado a ninguna cuenta del gremio. Entra en la web con el botón de Discord y pide tu registro; un líder lo aprueba.',
+    );
+  }
+
+  const mencionado = opcion(interaction, 'miembro');
+  const escrito = opcion(interaction, 'nombre');
+  if (mencionado && escrito) {
+    return aviso('Elige una de las dos: o `miembro`, o `nombre`.');
+  }
+
+  // A quién se pide, y de paso su foto de Discord cuando la interacción la
+  // trae -- que es sólo en el caso de la mención.
+  let ficha = quienPregunta;
+  let avatar = avatarDe(usuario);
+
+  if (mencionado) {
+    const suya = await cuentaDe(mencionado);
+    if (!suya?.playerId) {
+      return aviso(
+        'Ese miembro no tiene su Discord vinculado a una ficha del roster. Búscalo por nombre con la opción `nombre`.',
+      );
+    }
+    ficha = suya;
+    avatar = avatarDe(interaction.data?.resolved?.users?.[mencionado]);
+  } else if (escrito) {
+    const suya = await fichaPorTexto(String(escrito));
+    if (!suya) return aviso(`No encuentro a nadie llamado «${escrito}» en el roster.`);
+    ficha = suya;
+    avatar = null;
+  }
+
+  const esOtro = ficha.playerId !== quienPregunta.playerId;
+  if (esOtro) {
+    const permisos = await permissionsFor(quienPregunta.cuentaRol);
+    if (!permisos.includes('roster.view')) {
+      return aviso('Tu cuenta no tiene permiso para ver el roster, así que sólo puedes mirar la tuya.');
+    }
+  } else if (!ficha.playerId || !ficha.name) {
+    return aviso('Tu cuenta todavía no está unida a una ficha del roster. Avisa a un líder.');
+  }
+
+  const [scans, builds, weaponSets] = await datosDe(ficha.playerId);
 
   return {
     type: MESSAGE,
     data: {
       embeds: [
         perfilEmbed({
-          player: cuenta,
+          player: ficha,
           scans,
           builds,
           weaponSets,
-          avatarUrl: avatarDe(usuario),
+          avatarUrl: avatar,
           guildName: process.env.GUILD_NAME || 'Zona Zero',
+          ajeno: esOtro,
         }),
       ],
-      ...(publico ? {} : { flags: EPHEMERAL }),
+      ...(opcion(interaction, 'publico') === true ? {} : { flags: EPHEMERAL }),
+    },
+  };
+}
+
+/**
+ * La lista que Discord ofrece mientras se escribe en `nombre`.
+ *
+ * Devuelve el id como valor y el nombre como etiqueta, así que elegir de la
+ * lista no depende de escribir el nombre igual que está guardado. Y pide el
+ * mismo permiso que enseñar la ficha: si no, el buscador sería una forma de
+ * leer el roster entero sin tenerlo.
+ */
+async function autocompletarNombre(interaction) {
+  const vacio = { type: CHOICES, data: { choices: [] } };
+  const usuario = interaction.member?.user ?? interaction.user;
+  if (!usuario?.id) return vacio;
+
+  const quienPregunta = await cuentaDe(usuario.id);
+  if (!quienPregunta) return vacio;
+  const permisos = await permissionsFor(quienPregunta.cuentaRol);
+  if (!permisos.includes('roster.view')) return vacio;
+
+  const escrito = String(
+    interaction.data?.options?.find((o) => o.focused)?.value ?? '',
+  ).trim();
+
+  const { rows } = await pool.query(
+    // Los que están en el gremio primero: a quien se fue se le busca a
+    // propósito, y hasta entonces sólo estorba en la lista.
+    `SELECT p.id, p.name, p.level, COALESCE(p.is_active, true) AS "isActive"
+       FROM players p
+      WHERE p.guild_id = $1 AND ($2 = '' OR p.name ILIKE '%' || $2 || '%')
+      ORDER BY COALESCE(p.is_active, true) DESC, p.name
+      LIMIT 25`,
+    [GUILD_ID, escrito],
+  );
+
+  return {
+    type: CHOICES,
+    data: {
+      choices: rows.map((p) => ({
+        name: `${p.name} · Nv.${p.level}${p.isActive ? '' : ' · fuera del gremio'}`.slice(0, 100),
+        value: p.id,
+      })),
     },
   };
 }
@@ -391,6 +536,13 @@ async function comandoPerfil(interaction) {
  */
 export async function handleInteraction(body) {
   if (body?.type === PING) return { type: PONG };
+
+  if (body?.type === AUTOCOMPLETE) {
+    // El autocompletado tiene el mismo presupuesto de tres segundos, y encima
+    // llega una vez por tecla: una consulta por índice y nada más.
+    return body.data?.name === 'perfil' ? autocompletarNombre(body) : { type: CHOICES, data: { choices: [] } };
+  }
+
   if (body?.type !== APPLICATION_COMMAND) return null;
 
   switch (body.data?.name) {

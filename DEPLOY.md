@@ -154,6 +154,17 @@ with its change, their primary build, and every stat the scan carried. It is
 private by default (only the person who typed it sees the reply); `publico: Sí`
 posts it in the channel instead.
 
+It can also show someone else's, two ways, because neither one alone reaches the
+whole roster:
+
+- `miembro: @alguien` — only finds people whose Discord is linked to an account.
+- `nombre: …` — searches the roster itself and autocompletes, so it reaches
+  everyone, including members who have never signed in to the web.
+
+Looking at someone else is the same act as opening the roster on the web, so it
+asks for the same permission — *Ver el roster*, which members have by default —
+rather than inventing a Discord-only rule. Your own profile never needs it.
+
 Discord delivers commands as ordinary HTTPS requests to this app, so there is no
 extra process to run — but it has to be able to prove they are really from
 Discord:
