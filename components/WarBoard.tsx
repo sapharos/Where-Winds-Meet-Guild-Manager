@@ -19,6 +19,8 @@ import {
   WarSide,
   WarStrategy,
   WeaponSet,
+  GuildEvent,
+  EventResponse,
 } from '../types';
 import { ROLE_ICONS } from '../constants';
 import { ROLE_NAMES, ArmasDeBuild, buildColour } from './PlayerCard';
@@ -83,6 +85,40 @@ const FICHA =
  * like, and the board says what it does, but nothing is stopped from differing.
  * A leader short of people needs to see the gap, not be blocked by it.
  */
+/**
+ * Lo que alguien contestó a la encuesta, en un icono.
+ *
+ * Tres estados y no dos: quien dijo que no y quien no ha dicho nada no son lo
+ * mismo, y confundirlos es desplegar a alguien que ya avisó de que no estaría.
+ * El título lo dice escrito -- el icono y el color no pueden ser lo único.
+ */
+const MarcaConvocatoria: React.FC<{ respuesta?: EventResponse }> = ({ respuesta }) => {
+  if (!respuesta) {
+    return (
+      <i
+        className="fa-regular fa-circle text-slate-600 text-[10px] shrink-0"
+        title="No ha contestado la encuesta"
+      ></i>
+    );
+  }
+  if (respuesta.answer === 'yes') {
+    return (
+      <i
+        className="fa-solid fa-circle-check text-emerald-400 text-[10px] shrink-0"
+        title={`Confirmado${respuesta.rounds ? ` · a ${respuesta.rounds} partidas` : ''}`}
+      ></i>
+    );
+  }
+  if (respuesta.answer === 'maybe') {
+    return (
+      <i className="fa-solid fa-circle-question text-staple text-[10px] shrink-0" title="Tal vez" />
+    );
+  }
+  return (
+    <i className="fa-solid fa-circle-xmark text-red-400 text-[10px] shrink-0" title="Dijo que no puede" />
+  );
+};
+
 const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit, canVoice }) => {
   const [side, setSide] = useState<WarSide>('attack');
   const [deployments, setDeployments] = useState<Deployment[]>([]);
@@ -109,6 +145,16 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit, canVo
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState<'' | Role>('');
   const [markFilter, setMarkFilter] = useState<'' | WarSide | 'none'>('');
+  /**
+   * La guerra que viene y lo que contestó cada uno en su encuesta.
+   *
+   * Armar la formación era a ciegas: el tablero sabe quién puede jugar, no
+   * quién dijo que iba a estar. Sin agenda programada esto es null y todo se
+   * comporta como antes -- la encuesta ayuda cuando existe, no hace falta para
+   * desplegar.
+   */
+  const [convocatoria, setConvocatoria] = useState<GuildEvent | null>(null);
+  const [soloConfirmados, setSoloConfirmados] = useState(false);
   const [planning, setPlanning] = useState(false);
   const [history, setHistory] = useState(false);
   // Quién tiene el menú de acciones abierto, en el tablero o en el banquillo.
@@ -155,6 +201,7 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit, canVo
       setWar(board.current);
       if (board.now) setOffset(Date.parse(board.now) - Date.now());
     }
+    setConvocatoria(await api<GuildEvent | null>('/events/next-war').catch(() => null));
     if (canVoice) {
       const voz = await api<{ bot: boolean; channels: Record<string, string> }>(
         '/war/voice-channels',
@@ -245,6 +292,10 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit, canVo
   };
 
   const needle = search.trim().toLowerCase();
+  /** Qué contestó alguien a la encuesta de la guerra que viene. */
+  const respuestaDe = (playerId: string) =>
+    convocatoria?.responses?.find((r) => r.playerId === playerId);
+
   const bench = active
     .filter((p) => !placed.has(p.id))
     .filter((p) => !needle || p.name.toLowerCase().includes(needle))
@@ -252,6 +303,7 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit, canVo
     .filter((p) =>
       !markFilter || (markFilter === 'none' ? !p.warSide : p.warSide === markFilter),
     )
+    .filter((p) => !soloConfirmados || respuestaDe(p.id)?.answer === 'yes')
     .sort((a, b) => rank(b) - rank(a) || a.name.localeCompare(b.name));
 
   const strategy = strategies.find((s) => s.id === inForce[side] && s.side === side);
@@ -1247,6 +1299,39 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit, canVo
             <span className="text-sm text-slate-500 tabular-nums">{bench.length}</span>
           </div>
 
+          {/* Lo que dijo el gremio para esta guerra, encima de la lista de la
+              que se saca a la gente. Sin nada programado no aparece nada. */}
+          {convocatoria && (
+            <button
+              onClick={() => setSoloConfirmados(!soloConfirmados)}
+              aria-pressed={soloConfirmados}
+              className={`w-full mb-3 min-h-tap px-3 rounded-md border text-left transition-colors duration-micro ${
+                soloConfirmados ? 'border-emerald-700 bg-emerald-950/40' : 'border-slate-800 bg-slate-950'
+              }`}
+            >
+              <span className="block text-[11px] uppercase tracking-wider text-slate-500 truncate">
+                {convocatoria.title}
+              </span>
+              <span className="block text-meta text-slate-300">
+                <span className="text-emerald-400 font-bold tabular-nums">
+                  {(convocatoria.responses ?? []).filter((r) => r.answer === 'yes').length}
+                </span>{' '}
+                confirmados ·{' '}
+                <span className="tabular-nums">
+                  {(convocatoria.responses ?? []).filter((r) => r.answer === 'maybe').length}
+                </span>{' '}
+                tal vez ·{' '}
+                <span className="tabular-nums">
+                  {active.length - (convocatoria.responses ?? []).length}
+                </span>{' '}
+                sin contestar
+              </span>
+              <span className="block text-[11px] text-slate-500">
+                {soloConfirmados ? 'Enseñando sólo a los que confirmaron' : 'Tocar para ver sólo a los que confirmaron'}
+              </span>
+            </button>
+          )}
+
           <div className="space-y-2 mb-3">
             <div className="relative">
               <i className="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-600 text-xs"></i>
@@ -1306,6 +1391,11 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit, canVo
                 />
 
                 <div className="flex items-center gap-1.5 min-w-0">
+                  {/* Lo que dijo en la encuesta, delante de todo: es lo primero
+                      que hay que saber de alguien a quien se va a desplegar, y
+                      va con icono y con título escrito porque el color no puede
+                      ser lo único que lo diga. */}
+                  {convocatoria && <MarcaConvocatoria respuesta={respuestaDe(p.id)} />}
                   {p.isStarter && (
                     <i className="fa-solid fa-star text-amber-400 text-[10px] shrink-0" title="Titular"></i>
                   )}

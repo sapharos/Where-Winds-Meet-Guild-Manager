@@ -244,6 +244,15 @@ A series stores wall-clock time and a timezone, not an instant, so "Saturdays at
 19:30" keeps meaning that across a daylight-saving change. Editing a series
 never rewrites events already created: what is already summoned stays as it is.
 
+**The bench knows who answered.** In the Sala de Guerra, the *Disponibles* list
+carries each member's answer to the next war's poll — confirmed (with how many
+rounds), maybe, declined, or nothing yet — and its header counts them and
+filters down to just the confirmed. Declined and unanswered are drawn
+differently on purpose: deploying someone who already said they would not be
+there is the mistake this is here to prevent. With nothing scheduled the bench
+looks exactly as it did before; the agenda helps when it exists rather than
+being required to field a lineup.
+
 ### War voice channels
 
 With the bot set up, **Administración → Canales de voz de guerra** maps the

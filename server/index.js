@@ -82,6 +82,7 @@ import {
   respond,
   getAgendaChannel,
   setAgendaChannel,
+  nextWar,
 } from './events.js';
 import { getHorn, setHorn, sweepSound, warnEvent, startHornScheduler } from './horn.js';
 import {
@@ -395,6 +396,52 @@ app.get('/api/events', requireAuth, asHandler(async (req, res) => {
   res.json(await listEvents({ past: req.query.past === 'true' }));
 }));
 
+/*
+ * Todas las rutas de nombre fijo, antes que las de `:id`.
+ *
+ * Express prueba en el orden en que se registran, y `/api/events/:id` casa con
+ * un solo segmento -- o sea, también con `/api/events/series`. Puestas después,
+ * pedir las series contestaba «no existe ese evento» y crear una guardaba un
+ * evento llamado «series». No lo vio el banco de pruebas porque su servidor
+ * falso enruta por su cuenta y allí sí estaban en orden.
+ */
+app.get('/api/events/next-war', requireAuth, asHandler(async (_req, res) => {
+  res.json(await nextWar());
+}));
+
+// El canal donde se publican las encuestas, elegido de una lista y no copiado a
+// mano. Leerlo pide gestionar eventos, que es quien va a publicar en él.
+app.get('/api/events/config/channel', requireAuth, requirePermission('events.manage'), asHandler(async (_req, res) => {
+  res.json({
+    bot: botEnabled(),
+    channel: await getAgendaChannel(),
+    channels: botEnabled() ? await listTextChannels().catch(() => []) : [],
+  });
+}));
+
+app.put('/api/events/config/channel', requireAuth, requirePermission('events.manage'), asHandler(async (req, res) => {
+  res.json({ channel: await setAgendaChannel(req.body?.channel) });
+}));
+
+/* --- lo que se repite cada semana --- */
+
+app.get('/api/events/series', requireAuth, requirePermission('events.manage'), asHandler(async (_req, res) => {
+  res.json(await listSeries());
+}));
+
+app.put('/api/events/series/:id?', requireAuth, requirePermission('events.manage'), asHandler(async (req, res) => {
+  const serie = await saveSeries({ ...req.body, id: req.params.id || req.body?.id });
+  // Al guardar se materializa ya, para que quien acaba de cambiar la hora vea
+  // el resultado en la agenda en vez de esperar al siguiente turno del reloj.
+  await asegurarEventos();
+  res.json(serie);
+}));
+
+app.delete('/api/events/series/:id', requireAuth, requirePermission('events.manage'), asHandler(async (req, res) => {
+  await deleteSeries(req.params.id);
+  res.json({ ok: true });
+}));
+
 app.get('/api/events/:id', requireAuth, asHandler(async (req, res) => {
   res.json(await getEvent(req.params.id));
 }));
@@ -461,39 +508,6 @@ app.put(
     res.json(actualizado);
   }),
 );
-
-// El canal donde se publican las encuestas, elegido de una lista y no copiado a
-// mano. Leerlo pide gestionar eventos, que es quien va a publicar en él.
-app.get('/api/events/config/channel', requireAuth, requirePermission('events.manage'), asHandler(async (_req, res) => {
-  res.json({
-    bot: botEnabled(),
-    channel: await getAgendaChannel(),
-    channels: botEnabled() ? await listTextChannels().catch(() => []) : [],
-  });
-}));
-
-app.put('/api/events/config/channel', requireAuth, requirePermission('events.manage'), asHandler(async (req, res) => {
-  res.json({ channel: await setAgendaChannel(req.body?.channel) });
-}));
-
-/* --- lo que se repite cada semana --- */
-
-app.get('/api/events/series', requireAuth, requirePermission('events.manage'), asHandler(async (_req, res) => {
-  res.json(await listSeries());
-}));
-
-app.put('/api/events/series/:id?', requireAuth, requirePermission('events.manage'), asHandler(async (req, res) => {
-  const serie = await saveSeries({ ...req.body, id: req.params.id || req.body?.id });
-  // Al guardar se materializa ya, para que quien acaba de cambiar la hora vea
-  // el resultado en la agenda en vez de esperar al siguiente turno del reloj.
-  await asegurarEventos();
-  res.json(serie);
-}));
-
-app.delete('/api/events/series/:id', requireAuth, requirePermission('events.manage'), asHandler(async (req, res) => {
-  await deleteSeries(req.params.id);
-  res.json({ ok: true });
-}));
 
 /* ------------------------------------------------------------- discord bot */
 

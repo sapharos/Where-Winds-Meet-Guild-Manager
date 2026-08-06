@@ -343,6 +343,11 @@ const GET: [RegExp, Ruta][] = [
     ],
   })],
   [/^\/events\/series$/, () => seriesFalsas],
+  // La guerra que viene, para que el banquillo enseñe quién confirmó.
+  [/^\/events\/next-war$/, () => {
+    const e = eventos.find((x) => x.kind === 'war' && !x.cancelledAt);
+    return e ? { ...e, responses: respuestas[e.id as string] ?? [] } : null;
+  }],
   [/^\/events\/([^/]+)$/, (m) => conRespuestas(m[1])],
   [/^\/auth\/config$/, () => ({ discord: false })],
   [/^\/state$/, () => ({ players: store.players, sessions: [], ranks: store.ranks })],
@@ -402,6 +407,13 @@ const ESCRITURAS: [string, RegExp, Ruta][] = [
     anotar(m[1], fake.session.user.playerId ?? '', body ?? {}, null)],
   ['PUT', /^\/events\/([^/]+)\/responses\/([^/]+)$/, (m, _req, body) =>
     anotar(m[1], m[2], body ?? {}, fake.session.user.id)],
+  // Bloquear y desbloquear un bando. Sin esto el banquillo no se podía ensayar:
+  // el gremio inventado llega con los dos frentes cerrados, que es como se ve
+  // una guerra ya en curso, y el banquillo sólo existe mientras se arma.
+  ['PUT', /^\/war\/lock\/([^/]+)$/, (m, _req, body) => {
+    store.locked = { ...store.locked, [m[1] as WarSide]: body?.locked !== false };
+    return { locked: store.locked };
+  }],
   ['PUT', /^\/events\/series\/?([^/]*)$/, (m, _req, body) => {
     const id = m[1] || `serie-${Date.now()}`;
     const at = seriesFalsas.findIndex((s) => s.id === id);

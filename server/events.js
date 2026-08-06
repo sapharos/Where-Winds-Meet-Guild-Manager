@@ -163,6 +163,35 @@ export async function getEvent(id) {
   return { ...rows[0], responses: respuestas.rows };
 }
 
+/**
+ * La guerra que viene, con lo que ha contestado cada uno.
+ *
+ * Es lo que la Sala de Guerra necesita para que armar la formación deje de ser
+ * a ciegas: quién confirmó, quién dijo que no y quién no ha dicho nada. «La que
+ * viene» es la primera que todavía no ha terminado -- durante la guerra sigue
+ * siendo esa, que es cuando más falta hace mirarla.
+ *
+ * Devuelve null sin ninguna programada, y la Sala de Guerra se comporta como
+ * antes: la agenda ayuda cuando existe, no es un requisito para desplegar.
+ */
+export async function nextWar() {
+  const { rows } = await pool.query(
+    `SELECT ${CAMPOS} FROM guild_events e
+      WHERE e.guild_id = $1 AND e.kind = 'war' AND e.cancelled_at IS NULL
+        AND e.starts_at + make_interval(mins => e.minutes) >= now()
+      ORDER BY e.starts_at LIMIT 1`,
+    [GUILD_ID],
+  );
+  if (!rows[0]) return null;
+
+  const respuestas = await pool.query(
+    `SELECT player_id AS "playerId", answer, rounds
+       FROM event_responses WHERE guild_id = $1 AND event_id = $2`,
+    [GUILD_ID, rows[0].id],
+  );
+  return { ...rows[0], responses: respuestas.rows };
+}
+
 export async function saveEvent(body, createdBy) {
   const limpio = limpiar(body);
   const id = body?.id || randomUUID();
