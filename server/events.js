@@ -83,11 +83,15 @@ function limpiar(body) {
   };
 }
 
-const CAMPOS = `id, kind, title, starts_at AS "startsAt", minutes, rounds, notes,
-                opens_at AS "opensAt", closes_at AS "closesAt",
-                cancelled_at AS "cancelledAt", created_by AS "createdBy",
-                discord_channel_id AS "discordChannelId",
-                discord_message_id AS "discordMessageId"`;
+// Cualificados con `e.` -- el alias que usan las cuatro consultas -- porque
+// `rounds` y `notes` existen también en `event_responses`, y en cuanto una de
+// ellas se une con las respuestas, sin el prefijo Postgres no sabe cuál se le
+// está pidiendo.
+const CAMPOS = `e.id, e.kind, e.title, e.starts_at AS "startsAt", e.minutes, e.rounds, e.notes,
+                e.opens_at AS "opensAt", e.closes_at AS "closesAt",
+                e.cancelled_at AS "cancelledAt", e.created_by AS "createdBy",
+                e.discord_channel_id AS "discordChannelId",
+                e.discord_message_id AS "discordMessageId"`;
 
 /**
  * El enlace al mensaje de la encuesta, cuando está publicada.
@@ -192,6 +196,38 @@ export async function getEvent(id) {
     [GUILD_ID, id],
   );
   return { ...conEnlace(rows[0], await getAgendaChannel()), responses: respuestas.rows };
+}
+
+/**
+ * Lo que viene, visto por un miembro: cada evento con lo que él contestó.
+ *
+ * Una sola consulta y no una por evento. La alternativa era pedir la lista y
+ * después el detalle de cada uno para buscarse dentro, que son diez peticiones
+ * para leer diez respuestas propias.
+ *
+ * Devuelve también lo que no ha contestado -- `mine` en null -- porque quien
+ * mira su perfil necesita las dos cosas: a qué se apuntó y qué le falta por
+ * decir. Y los cancelados a los que dijo que sí, porque quien organizó su
+ * sábado alrededor de una guerra es justo a quien hay que avisar.
+ */
+export async function myEvents(playerId) {
+  const { rows } = await pool.query(
+    `SELECT ${CAMPOS}, r.answer AS "myAnswer", r.rounds AS "myRounds"
+       FROM guild_events e
+       LEFT JOIN event_responses r
+         ON r.guild_id = e.guild_id AND r.event_id = e.id AND r.player_id = $2
+      WHERE e.guild_id = $1
+        AND e.starts_at + make_interval(mins => e.minutes) >= now()
+        AND (e.cancelled_at IS NULL OR r.answer = 'yes')
+      ORDER BY e.starts_at`,
+    [GUILD_ID, playerId],
+  );
+
+  const canal = await getAgendaChannel();
+  return rows.map(({ myAnswer, myRounds, ...evento }) => ({
+    ...conEnlace(evento, canal),
+    mine: myAnswer ? { answer: myAnswer, rounds: myRounds } : null,
+  }));
 }
 
 /**

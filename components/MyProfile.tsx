@@ -9,6 +9,11 @@ import {
   WAR_SIDE_LABELS,
   WarSide,
   WeaponSet,
+  GuildEvent,
+  EVENT_ANSWER_LABELS,
+  EVENT_KIND_ICONS,
+  EVENT_KIND_LABELS,
+  cuentaPartidas,
 } from '../types';
 import { ROLE_NAMES, ArmasDeBuild, buildColour } from './PlayerCard';
 import Grapa from './Grapa';
@@ -42,11 +47,20 @@ interface Props {
 const MyProfile: React.FC<Props> = ({ player, weaponSets, onEditBuilds }) => {
   const [scans, setScans] = useState<ScanRecord[]>([]);
   const [builds, setBuilds] = useState<PlayerBuild[]>([]);
+  /** Lo que viene, con lo que contesté a cada cosa. */
+  const [agenda, setAgenda] = useState<GuildEvent[]>([]);
 
   useEffect(() => {
     api<ScanRecord[]>(`/players/${player.id}/scans`).then(setScans).catch(() => setScans([]));
     api<PlayerBuild[]>(`/players/${player.id}/builds`).then(setBuilds).catch(() => setBuilds([]));
+    api<GuildEvent[]>('/events/mine').then(setAgenda).catch(() => setAgenda([]));
   }, [player.id]);
+
+  // A lo que dije que iba, o que quizá. Lo que dije que no ya está decidido y
+  // no hay nada que recordar; lo que no he contestado se cuenta aparte, que es
+  // lo único que aquí queda pendiente de hacer.
+  const apuntado = agenda.filter((e) => e.mine?.answer === 'yes' || e.mine?.answer === 'maybe');
+  const sinContestar = agenda.filter((e) => !e.mine && !e.cancelledAt).length;
 
   const latest = scans[scans.length - 1];
   const previous = scans[scans.length - 2];
@@ -147,6 +161,90 @@ const MyProfile: React.FC<Props> = ({ player, weaponSets, onEditBuilds }) => {
           )}
         </div>
       </section>
+
+      {/*
+        A qué me he apuntado.
+
+        Va aquí arriba, antes de las builds y las cifras, porque es lo único de
+        esta pantalla que caduca: una build se mira cuando se quiere y un
+        escaneo es de la semana pasada, pero «el sábado dije que iba» sirve
+        hasta el sábado. Sin nada a lo que apuntarse, la sección no aparece.
+      */}
+      {(apuntado.length > 0 || sinContestar > 0) && (
+        <section className="bg-slate-900/60 border border-slate-800 rounded-xl p-6">
+          <h2 className="cinzel text-2xl font-bold text-amber-500 mb-1">Mis próximos eventos</h2>
+          <p className="text-xs text-slate-500 mb-4">
+            A lo que has dicho que vas. Las horas están en la tuya.
+          </p>
+
+          {apuntado.length === 0 ? (
+            <p className="text-sm text-slate-500">No te has apuntado a nada todavía.</p>
+          ) : (
+            <div className="space-y-2">
+              {apuntado.map((e) => (
+                <div
+                  key={e.id}
+                  className={`flex items-start gap-3 bg-slate-950 border rounded-lg p-3 ${
+                    e.cancelledAt ? 'border-red-900 opacity-70' : 'border-slate-800'
+                  }`}
+                >
+                  <div className="w-8 h-8 rounded flex items-center justify-center shrink-0 bg-slate-800 text-slate-300">
+                    <i className={`fa-solid ${EVENT_KIND_ICONS[e.kind]}`}></i>
+                  </div>
+                  <div className="min-w-0 grow">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <h3
+                        className={`font-bold text-slate-100 truncate ${
+                          e.cancelledAt ? 'line-through' : ''
+                        }`}
+                      >
+                        {e.title}
+                      </h3>
+                      {e.cancelledAt && (
+                        <span className="text-[11px] leading-none px-1.5 py-[3px] rounded border border-red-700 text-red-400 uppercase font-bold tracking-tighter shrink-0">
+                          cancelado
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-meta text-slate-400 truncate">
+                      {EVENT_KIND_LABELS[e.kind]} ·{' '}
+                      {new Date(e.startsAt).toLocaleString('es', {
+                        weekday: 'long',
+                        day: 'numeric',
+                        month: 'long',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        timeZoneName: 'short',
+                      })}
+                    </p>
+                  </div>
+                  <span
+                    className={`shrink-0 text-[11px] leading-none px-1.5 py-[3px] rounded border uppercase font-bold tracking-tighter ${
+                      e.mine?.answer === 'yes'
+                        ? 'border-emerald-700 text-emerald-400'
+                        : 'border-staple text-staple'
+                    }`}
+                  >
+                    {EVENT_ANSWER_LABELS[e.mine?.answer ?? 'maybe']}
+                    {e.mine?.answer === 'yes' && cuentaPartidas(e.kind) && e.mine.rounds
+                      ? ` · ${e.mine.rounds}`
+                      : ''}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {sinContestar > 0 && (
+            <p className="text-meta text-staple mt-3">
+              <i className="fa-solid fa-circle-exclamation mr-1.5"></i>
+              {sinContestar === 1
+                ? 'Queda 1 evento por contestar en la Agenda.'
+                : `Quedan ${sinContestar} eventos por contestar en la Agenda.`}
+            </p>
+          )}
+        </section>
+      )}
 
       <section className="bg-slate-900/60 border border-slate-800 rounded-xl p-6">
         <div className="flex items-center justify-between gap-4 flex-wrap mb-4">

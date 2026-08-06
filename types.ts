@@ -534,6 +534,8 @@ export interface GuildEvent {
   no?: number;
   /** Sólo al pedir uno concreto. */
   responses?: EventResponse[];
+  /** Sólo en «lo mío»: lo que contestó quien pregunta, o null si no contestó. */
+  mine?: { answer: EventAnswer; rounds: number | null } | null;
 }
 
 /** Lo que se repite cada semana y de lo que salen los eventos concretos. */

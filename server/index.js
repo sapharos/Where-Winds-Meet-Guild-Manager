@@ -84,6 +84,7 @@ import {
   getAgendaChannel,
   setAgendaChannel,
   nextWar,
+  myEvents,
 } from './events.js';
 import { getHorn, setHorn, sweepSound, warnEvent, startHornScheduler } from './horn.js';
 import {
@@ -414,6 +415,13 @@ app.get('/api/events', requireAuth, asHandler(async (req, res) => {
  */
 app.get('/api/events/next-war', requireAuth, asHandler(async (_req, res) => {
   res.json(await nextWar());
+}));
+
+// Lo que viene, con lo que contestó quien pregunta. Sin ficha en el roster no
+// hay nada que contestar, así que se devuelve vacío en vez de un error: es una
+// sección de una pantalla, no una acción que alguien pidió.
+app.get('/api/events/mine', requireAuth, asHandler(async (req, res) => {
+  res.json(req.user.playerId ? await myEvents(req.user.playerId) : []);
 }));
 
 // El canal donde se publican las encuestas, elegido de una lista y no copiado a

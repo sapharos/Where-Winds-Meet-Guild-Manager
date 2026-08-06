@@ -349,6 +349,16 @@ const GET: [RegExp, Ruta][] = [
     ],
   })],
   [/^\/events\/series$/, () => seriesFalsas],
+  // Lo que viene con mi respuesta, para la sección del perfil.
+  [/^\/events\/mine$/, () => {
+    const yo = fake.session.user.playerId;
+    return eventos
+      .filter((e) => !e.cancelledAt || (respuestas[e.id as string] ?? []).some((r) => r.playerId === yo && r.answer === 'yes'))
+      .map((e) => {
+        const mia = (respuestas[e.id as string] ?? []).find((r) => r.playerId === yo);
+        return { ...e, mine: mia ? { answer: mia.answer, rounds: mia.rounds } : null };
+      });
+  }],
   // La guerra que viene, para que el banquillo enseñe quién confirmó.
   [/^\/events\/next-war$/, () => {
     const e = eventos.find((x) => x.kind === 'war' && !x.cancelledAt);
