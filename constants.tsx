@@ -1,16 +1,15 @@
 
 import React from 'react';
-import { Role, Lane, TacticalGroup, Platform, MembershipStatus } from './types';
+import { Role, Lane, TacticalGroup, Platform } from './types';
 
+// Relleno sólido con icono blanco, no el tinte al 10% de antes: un icono de
+// color sobre su propio color diluido era lo primero que se perdía con poco
+// contraste, y en tema claro directamente desaparecía. Los peldaños 700 llevan
+// blanco encima con holgura en los dos temas.
 export const ROLE_COLORS = {
-  [Role.TANK]: 'text-blue-400 border-blue-400 bg-blue-400/10',
-  [Role.HEALER]: 'text-green-400 border-green-400 bg-green-400/10',
-  [Role.DPS]: 'text-red-400 border-red-400 bg-red-400/10'
-};
-
-export const STATUS_COLORS = {
-  [MembershipStatus.APPRENTICE]: 'text-slate-400 bg-slate-400/10 border-slate-700',
-  [MembershipStatus.FULL_MEMBER]: 'text-amber-400 bg-amber-400/10 border-amber-900/50'
+  [Role.TANK]: 'bg-sky-700 text-white',
+  [Role.HEALER]: 'bg-emerald-700 text-white',
+  [Role.DPS]: 'bg-red-700 text-white'
 };
 
 export const ROLE_ICONS = {

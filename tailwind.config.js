@@ -29,7 +29,16 @@ const step = (token) => `rgb(var(${token}) / <alpha-value>)`;
 
 /** @type {import('tailwindcss').Config} */
 export default {
-  content: ['./index.html', './index.tsx', './App.tsx', './components/**/*.{ts,tsx}', './services/**/*.{ts,tsx}'],
+  // constants.tsx está en la lista porque define clases por dato -- ROLE_COLORS
+  // y compañía -- y una clase que sólo existe allí no se genera si no se lista.
+  content: [
+    './index.html',
+    './index.tsx',
+    './App.tsx',
+    './constants.tsx',
+    './components/**/*.{ts,tsx}',
+    './services/**/*.{ts,tsx}',
+  ],
   // El tema no se elige por preferencia del sistema a secas: hay un ajuste de
   // tres estados y lo que manda es el atributo que escribe el script de arranque.
   darkMode: ['class', '[data-theme="dark"]'],

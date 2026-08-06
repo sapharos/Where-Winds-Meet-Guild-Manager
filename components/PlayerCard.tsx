@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { Player, PlayerBuild, Role, MembershipStatus, GuildRank, WeaponSet, WarSide, WAR_SIDE_LABELS } from '../types';
-import { ROLE_COLORS, ROLE_ICONS, PLATFORM_ICONS, STATUS_COLORS } from '../constants';
+import { ROLE_COLORS, ROLE_ICONS, PLATFORM_ICONS } from '../constants';
 import Sheet from './Sheet';
 
 export const ROLE_NAMES: Record<Role, string> = {
@@ -48,7 +48,6 @@ interface PlayerCardProps {
   onCycleSide?: (p: Player) => void;
   onToggleActive?: (p: Player) => void;
   className?: string;
-  compact?: boolean;
   ranks?: GuildRank[];
 }
 
@@ -63,11 +62,12 @@ const PlayerCard: React.FC<PlayerCardProps> = ({
   onCycleSide,
   onToggleActive,
   className = '',
-  compact = false,
   ranks = [],
 }) => {
   const rank = ranks.find((r) => r.id === player.rankId);
-  const { from, to, orphaned } = buildColours(build, weaponSets);
+  const { from, orphaned } = buildColours(build, weaponSets);
+  const colorDeArma = (arma: string) =>
+    weaponSets.find((s) => s.weapons.includes(arma))?.color ?? UNSET;
   const gone = player.isActive === false;
   const [menu, setMenu] = useState(false);
 
@@ -156,47 +156,43 @@ const PlayerCard: React.FC<PlayerCardProps> = ({
       // dibujar, así que el navegador lo aplastaba y las esquinas asomaban por
       // fuera del borde redondeado de la tarjeta. Recortadas por el padre
       // siguen exactamente la curva que tenga la tarjeta, ahora y después.
-      className={`relative min-w-0 overflow-hidden p-3 rounded-lg border transition-all ${
+      //
+      // Superficie sólida, no el lavado `${color}66` de antes: un tinte al 40%
+      // deja el texto sin fondo estable -- costoso de leer para bastante gente
+      // e invisible en tema claro. El color de las armas vive ahora en la barra
+      // y en los chips de la tercera fila, sólidos y con el nombre del arma al
+      // lado, para que el color nunca sea el único portador del dato.
+      //
+      // h-full: las tres filas son fijas, así que todas las tarjetas miden lo
+      // mismo por construcción; esto sólo remata la fila del grid cuando el
+      // vecino de al lado crece.
+      className={`relative min-w-0 h-full overflow-hidden p-3 rounded-lg border bg-slate-900 transition-all ${
         gone
           ? 'border-slate-800 opacity-50 grayscale'
           : player.isStarter
             ? 'border-staple shadow-[0_0_0_1px_rgb(var(--w-500)/0.35)]'
             : 'border-slate-800'
       } ${className}`}
-      style={{
-        // Each colour holds its own third before the blend starts. A plain
-        // 0%-to-100% ramp reaches the second weapon's colour only at the last
-        // column of pixels, so a card read as its first weapon and little else.
-        // Over an opaque base so it looks the same wherever the card sits. The
-        // base is the theme's raised surface rather than a fixed near-black:
-        // pinned to one colour, every card stayed dark when the light theme
-        // arrived and the wash lost the contrast it is drawn for.
-        background: `linear-gradient(90deg, ${from}66 0%, ${from}66 22%, ${to}66 78%, ${to}66 100%), rgb(var(--n-900))`,
-      }}
     >
-      {/* Solid edges as well as the wash: a tint alone is easy to miss against
-          a dark card. Left is the primary weapon, right the secondary, so the
-          card reads left to right -- and the right edge only appears when there
-          is a second colour to report. */}
+      {/* La barra izquierda: el arma principal, en sólido. La secundaria ya no
+          necesita borde propio: tiene su chip con nombre en la tercera fila. */}
       <span
         aria-hidden
         className="absolute left-0 top-0 bottom-0 w-1"
         style={{ backgroundColor: from }}
       />
-      {to !== from && (
-        <span
-          aria-hidden
-          className="absolute right-0 top-0 bottom-0 w-1"
-          style={{ backgroundColor: to }}
-        />
-      )}
 
-      <div className="flex justify-between items-start pl-2">
-        <div className="flex items-center gap-3 min-w-0">
-          <div className={`w-8 h-8 rounded flex items-center justify-center border shrink-0 ${ROLE_COLORS[player.role]}`}>
+      {/* Tres filas fijas: quién / sus datos / sus armas y bando. Antes había
+          una pila de hasta siete insignias que envolvía en uno, dos o tres
+          renglones según el miembro, y cada tarjeta medía una cosa. Ahora toda
+          tarjeta dibuja las mismas filas -- vacías si hace falta -- y la
+          cuadrícula queda pareja. */}
+      <div className="pl-2 flex flex-col gap-1.5">
+        <div className="flex items-center gap-3">
+          <div className={`w-8 h-8 rounded flex items-center justify-center shrink-0 ${ROLE_COLORS[player.role]}`}>
             {ROLE_ICONS[player.role]}
           </div>
-          <div className="min-w-0">
+          <div className="min-w-0 grow">
             {/* min-w-0 en la fila y no un tope fijo en el nombre: con
                 `max-w-[140px]` el nombre se recortaba siempre a 140 px aunque
                 sobrara sitio, y aun así la fila no encogía por debajo de su
@@ -204,97 +200,97 @@ const PlayerCard: React.FC<PlayerCardProps> = ({
                 fuera de la pantalla. Ahora el nombre ocupa lo que hay. */}
             <div className="flex items-center gap-2 min-w-0">
               <h4 className="font-bold text-slate-100 leading-tight truncate">{player.name}</h4>
-              {player.martialMastery !== undefined && (
-                <span
-                  className="text-[11px] text-amber-400/90 tabular-nums shrink-0"
-                  title="Maestría marcial, del último escaneo"
-                >
-                  ({player.martialMastery.toLocaleString('es')})
-                </span>
-              )}
               {player.platform && (
-                <span className="text-slate-500 text-[10px]" title={player.platform}>
+                <span className="text-slate-500 text-[10px] shrink-0" title={player.platform}>
                   {PLATFORM_ICONS[player.platform]}
                 </span>
               )}
             </div>
 
-            {!compact ? (
-              <div className="flex flex-wrap items-center gap-2 mt-0.5">
-                <p className="text-[10px] text-slate-400">
-                  {player.sect} · Nv.{player.level}
-                </p>
-                <span
-                  className={`text-[11px] px-1.5 py-0.5 rounded border uppercase font-bold tracking-tighter ${
-                    STATUS_COLORS[player.status || MembershipStatus.FULL_MEMBER]
-                  }`}
-                >
-                  {player.status === MembershipStatus.APPRENTICE ? 'Aprendiz' : 'Miembro'}
+            {/* Una sola línea de metadatos que se corta, no una pila de chips
+                que envuelve. El rango conserva su color, pero como punto al
+                lado del nombre: texto en color de usuario sobre la tarjeta no
+                garantiza contraste; el punto no carga con la lectura. */}
+            <p className="text-meta text-slate-400 truncate">
+              {player.sect} · Nv.{player.level}
+              {player.martialMastery !== undefined && (
+                <span className="text-amber-400/90 tabular-nums" title="Maestría marcial, del último escaneo">
+                  {' '}
+                  · {player.martialMastery.toLocaleString('es')}
                 </span>
-                {rank && (
+              )}{' '}
+              · {player.status === MembershipStatus.APPRENTICE ? 'Aprendiz' : 'Miembro'}
+              {rank && (
+                <span className="text-slate-300" title={`Rango: ${rank.name}`}>
+                  {' '}
+                  ·{' '}
                   <span
-                    className="text-[11px] px-1.5 py-0.5 rounded border uppercase font-bold tracking-tighter"
-                    style={{ borderColor: rank.color, color: rank.color, backgroundColor: `${rank.color}15` }}
-                  >
-                    {rank.name}
-                  </span>
-                )}
-                {build && (
-                  <span className="text-[11px] text-slate-400 truncate max-w-[140px]" title={build.weapons.join(' · ')}>
-                    {build.name}
-                  </span>
-                )}
-                {gone && (
-                  <span className="text-[11px] px-1.5 py-0.5 rounded border border-slate-600 text-slate-400 uppercase font-bold tracking-tighter">
-                    fuera del gremio
-                  </span>
-                )}
-                {player.warSide && (
-                  <span
-                    className={`text-[11px] px-1.5 py-0.5 rounded border uppercase font-bold tracking-tighter ${
-                      player.warSide === 'attack'
-                        ? 'border-red-600 text-red-300 bg-red-600/15'
-                        : 'border-sky-600 text-sky-300 bg-sky-600/15'
-                    }`}
-                  >
-                    {WAR_SIDE_LABELS[player.warSide as WarSide]}
-                  </span>
-                )}
-                {orphaned && (
-                  <span
-                    className="text-[11px] text-amber-500"
-                    title={`Estas armas ya no existen en ningún conjunto: ${build?.weapons.join(', ')}`}
-                  >
-                    <i className="fa-solid fa-triangle-exclamation mr-1"></i>
-                    armas sin conjunto
-                  </span>
-                )}
-              </div>
-            ) : (
-              <div className="flex items-center gap-1">
-                <span
-                  className={`text-[11px] uppercase font-bold tracking-tighter ${
-                    player.status === MembershipStatus.APPRENTICE ? 'text-slate-500' : 'text-amber-600'
-                  }`}
-                >
-                  {player.status === MembershipStatus.APPRENTICE ? 'Aprz' : 'Miem'}
+                    aria-hidden
+                    className="inline-block w-2 h-2 rounded-full"
+                    style={{ backgroundColor: rank.color }}
+                  />{' '}
+                  {rank.name}
                 </span>
-                {rank && <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: rank.color }} title={rank.name} />}
-              </div>
-            )}
+              )}
+            </p>
           </div>
+
+          {(acciones.length > 0 || onToggleActive) && (
+            <button
+              onClick={() => setMenu(true)}
+              aria-label={`Acciones de ${player.name}`}
+              aria-haspopup="dialog"
+              className="shrink-0 -mr-1 min-h-tap min-w-tap flex items-center justify-center rounded-md text-slate-400 hover:text-amber-500 transition-colors duration-micro"
+            >
+              <i className="fa-solid fa-ellipsis-vertical"></i>
+            </button>
+          )}
         </div>
 
-        {(acciones.length > 0 || onToggleActive) && (
-          <button
-            onClick={() => setMenu(true)}
-            aria-label={`Acciones de ${player.name}`}
-            aria-haspopup="dialog"
-            className="shrink-0 -mr-1 -mt-1 min-h-tap min-w-tap flex items-center justify-center rounded-md text-slate-400 hover:text-amber-500 transition-colors duration-micro"
-          >
-            <i className="fa-solid fa-ellipsis-vertical"></i>
-          </button>
-        )}
+        {/* Las armas, con su color en un chip sólido y su nombre escrito al
+            lado: quien no distingue los colores lee el arma igual. */}
+        <div className="flex items-center gap-3 min-h-[20px]" title={build?.name}>
+          {orphaned ? (
+            <span
+              className="text-meta text-amber-500 truncate"
+              title={`Estas armas ya no existen en ningún conjunto: ${build?.weapons.join(', ')}`}
+            >
+              <i className="fa-solid fa-triangle-exclamation mr-1"></i>
+              armas sin conjunto
+            </span>
+          ) : build && build.weapons.length > 0 ? (
+            build.weapons.slice(0, 2).map((arma) => (
+              <span key={arma} className="inline-flex items-center gap-1.5 min-w-0 text-meta text-slate-300">
+                <span
+                  aria-hidden
+                  className="w-2.5 h-2.5 rounded-sm shrink-0"
+                  style={{ backgroundColor: colorDeArma(arma) }}
+                />
+                <span className="truncate">{arma}</span>
+              </span>
+            ))
+          ) : (
+            <span className="text-meta text-slate-500">Sin build</span>
+          )}
+
+          {gone ? (
+            // py de 3 y no 4: el borde ya pone sus 2px, y con 4 la etiqueta
+            // medía 21 y las bajas eran 1px más altas que el resto.
+            <span className="ml-auto shrink-0 text-[11px] leading-none px-1.5 py-[3px] rounded border border-slate-600 text-slate-400 uppercase font-bold tracking-tighter">
+              fuera del gremio
+            </span>
+          ) : player.warSide ? (
+            // Relleno sólido con texto blanco, no un tinte al 15%: los rellenos
+            // 700 de las dos rampas pasan AA con blanco en los dos temas.
+            <span
+              className={`ml-auto shrink-0 text-[11px] leading-none px-1.5 py-1 rounded text-white uppercase font-bold tracking-tighter ${
+                player.warSide === 'attack' ? 'bg-red-700' : 'bg-sky-700'
+              }`}
+            >
+              {WAR_SIDE_LABELS[player.warSide as WarSide]}
+            </span>
+          ) : null}
+        </div>
       </div>
     </div>
 
