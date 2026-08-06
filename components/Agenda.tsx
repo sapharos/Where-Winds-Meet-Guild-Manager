@@ -24,6 +24,15 @@ import Sheet from './Sheet';
  * para saber con quién se cuenta de verdad, que no siempre es quien dijo que sí.
  */
 
+/**
+ * Las fechas, en el huso de quien mira.
+ *
+ * `toLocaleString` ya lo hacía -- el instante se guarda absoluto y el navegador
+ * lo compone con la zona del sistema -- pero no lo decía, y una hora sin zona no
+ * se puede comprobar: quien esté en España ve las dos y media de la madrugada y
+ * no tiene forma de saber si es su hora o si el sitio está equivocado. Con
+ * `timeZoneName` cada fecha lleva de dónde es, y deja de haber nada que suponer.
+ */
 const fechaLarga = (iso: string) =>
   new Date(iso).toLocaleString('es', {
     weekday: 'long',
@@ -31,10 +40,20 @@ const fechaLarga = (iso: string) =>
     month: 'long',
     hour: '2-digit',
     minute: '2-digit',
+    timeZoneName: 'short',
   });
 
 const fechaCorta = (iso: string) =>
-  new Date(iso).toLocaleString('es', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+  new Date(iso).toLocaleString('es', {
+    day: '2-digit',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZoneName: 'short',
+  });
+
+/** Cómo se llama el huso de quien mira, para decirlo donde se escribe una hora. */
+const miHuso = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
 
 /** Para el `datetime-local`, que quiere hora local sin zona ni segundos. */
 function paraCampo(iso?: string | null) {
@@ -134,7 +153,7 @@ const Agenda: React.FC<Props> = ({ players, myPlayerId, canManage }) => {
         <div className="min-w-0">
           <h2 className="cinzel text-2xl font-bold text-amber-500">Agenda</h2>
           <p className="text-meta text-slate-500">
-            Lo que viene y quién ha dicho que va. Las horas van en la tuya.
+            Lo que viene y quién ha dicho que va. Las horas están en la tuya ({miHuso()}).
           </p>
         </div>
         <div className="flex gap-2">
@@ -536,6 +555,10 @@ const FormularioEvento: React.FC<{
               value={datos.startsAt}
               onChange={(e) => setDatos({ ...datos, startsAt: e.target.value })}
             />
+            {/* Quien programa escribe en su hora y a cada miembro se le enseña en
+                la suya. Decirlo aquí es lo que evita el error de un oficial que
+                está de viaje y cree estar escribiendo la hora del gremio. */}
+            <p className="text-meta text-slate-500 mt-1">Tu hora ({miHuso()})</p>
           </div>
           <div>
             <label className="block text-xs uppercase tracking-wider text-slate-500 mb-1">Dura (min)</label>
