@@ -165,9 +165,10 @@ Looking at someone else is the same act as opening the roster on the web, so it
 asks for the same permission — *Ver el roster*, which members have by default —
 rather than inventing a Discord-only rule. Your own profile never needs it.
 
-`/guerra` shows the board one card per side and lane — the three attack lanes
-first, then the three defence ones, each keeping its line's colour — with
-everyone grouped by role and the lane leader crowned. Each person is named
+`/guerra` shows the board one card per side and lane. Each side opens with a
+brass header — ⚔ ATAQUE, 🛡 DEFENSA, with its own count and whether it is
+settled — and its three lanes follow in their own colours, everyone grouped by
+role and the lane leader crowned. Each person is named
 twice: their roster name and their Discord, so you can see who is deployed and
 write to them without looking anyone up. Whoever has no Discord linked appears
 with their name alone, which is worth seeing — they are the ones who will not

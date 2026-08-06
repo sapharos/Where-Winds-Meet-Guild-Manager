@@ -535,35 +535,43 @@ export function tableroDeGuerra({
       )}:R>`
     : 'Sin guerra en curso. Así está el tablero:';
 
-  // El recuento del bando entero aunque se mire una sola línea: son los treinta
-  // que caben en el frente, y saber cuántos faltan es la mitad de la pregunta.
-  // Filtrado por bando se calla el otro, que ya no se está enseñando.
-  const recuento = bandos.map(
-    (side) => `${WAR_SIDES[side]} ${cuantos(side)}/${WAR_CAPACITY}${locked[side] ? ' 🔒' : ''}`,
-  );
-
   // Cuándo se miró esto. Discord lo cuenta solo en el cliente -- «hace unos
   // segundos», «hace 4 minutos» -- así que un tablero viejo se delata sin que
   // nadie tenga que refrescarlo para descubrirlo.
-  recuento.push(`actualizado <t:${Math.floor(ahora / 1000)}:R>`);
+  const actualizado = `actualizado <t:${Math.floor(ahora / 1000)}:R>`;
 
-  // Bando por fuera y línea por dentro: así las tres de ataque salen juntas y
-  // después las tres de defensa, en vez de alternarse.
-  const embeds = bandos.flatMap((side) =>
-    lineas.map((l) => {
+  // Bando por fuera y línea por dentro, con un rótulo abriendo cada bando.
+  //
+  // Seis tarjetas seguidas se leían como una sola columna: la última de ataque
+  // y la primera de defensa se tocaban, y el corte entre los dos frentes --
+  // que es la división más importante que hay aquí -- no se veía. El rótulo es
+  // una tarjeta sin cuerpo, en el latón de la grapa y no en el color de
+  // ninguna línea, para que se lea como lo que es: el encabezado de un bloque
+  // y no una línea más.
+  //
+  // Y por eso las tarjetas de línea ya no repiten el bando en su título: lo
+  // acaba de decir el rótulo de encima, dos veces sería ruido.
+  const embeds = bandos.flatMap((side) => [
+    {
+      title: `${side === 'attack' ? '⚔' : '🛡'}  ${WAR_SIDES[side].toUpperCase()}  ·  ${cuantos(
+        side,
+      )}/${WAR_CAPACITY}${locked[side] ? '  🔒 cerrado' : ''}`,
+      color: LATON,
+    },
+    ...lineas.map((l) => {
       const gente = despliegues.filter((d) => d.lane === l.id && d.side === side);
       const suyas = leyenda(gente, porBando[side]);
       return {
-        title: `${WAR_SIDES[side]} · ${l.label} — ${gente.length}/${LANE_CAPACITY}`,
+        title: `${l.label} — ${gente.length}/${LANE_CAPACITY}`,
         color: l.colour,
         description: porRoles(gente, porBando[side]),
         ...(suyas ? { fields: [{ name: 'Unidades tácticas', value: suyas, inline: false }] } : {}),
       };
     }),
-  );
+  ]);
 
   return {
-    content: `${cabecera}\n${recuento.join('  ·  ')}`,
+    content: `${cabecera}\n${actualizado}`,
     embeds,
     // El botón se lleva puesto el filtro con el que se pintó, así que
     // actualizar devuelve lo mismo que se estaba mirando y no el tablero
