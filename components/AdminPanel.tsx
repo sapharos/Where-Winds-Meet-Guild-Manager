@@ -4,6 +4,7 @@ import WeaponSets from './WeaponSets';
 import TablaAncha from './TablaAncha';
 import ScanImport from './ScanImport';
 import BuscadorDiscord from './BuscadorDiscord';
+import CuentaFicha from './CuentaFicha';
 import { Filas } from './Esqueleto';
 import {
   AuthUser,
@@ -753,6 +754,38 @@ const AdminPanel: React.FC<Props> = ({
             </div>
           )}
 
+          {/*
+            En el teléfono, una ficha por cuenta con sus acciones en una hoja.
+
+            La tabla mide 820 px y se desplaza de lado: llegar a los botones de
+            una fila era arrastrar hasta el final, y allí esperaban tres iconos
+            sin etiqueta. A partir de `md` la tabla se queda, porque comparar
+            diez cuentas de un vistazo es justo lo que se viene a hacer aquí y
+            una fila cabe entera.
+          */}
+          <div className="md:hidden space-y-2">
+            {users.map((user) => (
+              <CuentaFicha
+                key={user.id}
+                user={user}
+                currentUser={currentUser}
+                players={players}
+                users={users}
+                roles={catalog.roles}
+                holderOf={holderOf}
+                botDiscord={botDiscord}
+                onRole={(role) => patchUser(user.id, { role })}
+                onPlayer={(playerId) => asignarJugador(user, playerId)}
+                onLink={() => setEnlazando(user)}
+                onUnlink={() => desvincularDiscord(user)}
+                onPassword={() => resetPassword(user)}
+                onToggle={() => patchUser(user.id, { disabled: !user.disabled })}
+                onRemove={() => removeUser(user)}
+              />
+            ))}
+          </div>
+
+          <div className="hidden md:block">
           <TablaAncha aviso="Desliza para ver miembro, rol, Discord, estado y acciones">
             <table className="w-full text-sm min-w-[820px]">
               <thead>
@@ -885,6 +918,7 @@ const AdminPanel: React.FC<Props> = ({
               </tbody>
             </table>
           </TablaAncha>
+          </div>
         </section>
       )}
 
