@@ -35,10 +35,11 @@ import {
   myEvents,
   respond,
   respuestasDe,
+  puedeContestar,
   getAgendaChannel,
   setDiscordMessage,
 } from './events.js';
-import { botEnabled, postMessage, editMessage, deleteMessage } from './discordBot.js';
+import { botEnabled, postMessage, editMessage, deleteMessage, memberRoles } from './discordBot.js';
 import {
   asegurarEventos,
   pendientesDePublicar,
@@ -756,8 +757,32 @@ export function eventoMensaje(evento) {
   return { embeds: [embed], components };
 }
 
-/** Lo que se manda a Discord, con las menciones desactivadas siempre. */
-const cuerpoDe = (evento) => ({ ...eventoMensaje(evento), allowed_mentions: { parse: [] } });
+/**
+ * Lo que se manda a Discord.
+ *
+ * Una convocatoria acotada avisa a los roles a los que va, y sólo a ellos: la
+ * mención va en el `content` porque dentro de un embed no notifica a nadie, y
+ * `allowed_mentions.roles` es la lista blanca -- lo que no esté ahí se pinta
+ * pero no suena, así que un `@` escrito en el título de un evento no puede
+ * convertirse en un aviso a todo el servidor.
+ *
+ * Sin acotar no avisa a nadie, como hasta ahora. Convocar al gremio entero es
+ * lo normal y hacerlo sonar en el teléfono de cincuenta personas cada lunes es
+ * exactamente el ruido que se quería quitar; para eso está el recordatorio, que
+ * llega cuando queda poco y sólo a quien no ha contestado.
+ *
+ * Editar un mensaje no notifica aunque lleve menciones, así que refrescar el
+ * recuento no vuelve a sonar. Volver a publicar sí, y está bien que sí: es un
+ * mensaje nuevo que alguien mandó a propósito.
+ */
+const cuerpoDe = (evento) => {
+  const roles = evento.allowedRoles ?? [];
+  return {
+    ...eventoMensaje(evento),
+    ...(roles.length ? { content: roles.map((r) => `<@&${r}>`).join(' ') } : {}),
+    allowed_mentions: { parse: [], roles: roles.slice(0, 100) },
+  };
+};
 
 /**
  * Publica la encuesta de un evento, o la vuelve a publicar.
@@ -837,10 +862,20 @@ export async function refrescarEvento(id) {
 /**
  * El recordatorio a quien no ha contestado.
  *
- * Es el único mensaje del bot que menciona de verdad. Todo lo demás lleva las
- * menciones apagadas porque avisar a alguien de algo que no preguntó es ruido;
- * aquí avisar **es** lo que se pide, y una lista de nombres sin notificación no
- * la lee justo quien tenía que leerla.
+ * Es el mensaje del bot que menciona a personas una por una. La encuesta avisa
+ * a los roles y esto avisa a los nombres, y por eso este es el que hay que
+ * apuntar bien: una lista de nombres sin notificación no la lee justo quien
+ * tenía que leerla, y una notificación a quien no podía contestar es la clase
+ * de ruido que hace que se dejen de leer todas.
+ *
+ * De ahí el filtro: si la convocatoria está acotada, no se persigue a quien no
+ * lleva ninguno de sus roles. Ni siquiera para nombrarlo -- no ha contestado
+ * porque no puede, y decirle a quien organiza que le pregunte por voz sería
+ * mandarle a pedir algo que el propio sitio no acepta.
+ *
+ * Los roles se preguntan de uno en uno y sólo cuando hay lista. Es una ráfaga
+ * de peticiones a Discord, pero pasa una vez por evento y no una vez por voto,
+ * y `memberRoles` guarda un minuto lo que va leyendo.
  *
  * Devuelve a cuántos avisó, o null si no había a quién.
  */
@@ -849,8 +884,18 @@ export async function avisarPendientes(id) {
   const evento = await getEvent(id);
   if (!evento.discordChannelId) return null;
 
-  const faltan = await sinContestar(id);
+  let faltan = await sinContestar(id);
   if (!faltan.length) return null;
+
+  if (evento.allowedRoles?.length) {
+    const invitados = [];
+    for (const p of faltan) {
+      if (!p.discordId) continue;
+      if (puedeContestar(evento.allowedRoles, await memberRoles(p.discordId))) invitados.push(p);
+    }
+    faltan = invitados;
+    if (!faltan.length) return null;
+  }
 
   const conDiscord = faltan.filter((p) => p.discordId);
   const sinDiscord = faltan.filter((p) => !p.discordId);

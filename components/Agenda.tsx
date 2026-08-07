@@ -867,11 +867,16 @@ const DetalleEvento: React.FC<{
           <button
             onClick={onPublicar}
             disabled={Boolean(event.cancelledAt)}
-            title={
+            title={[
               event.discordMessageId
                 ? 'Manda un mensaje nuevo al canal actual y retira el anterior. Las respuestas no se tocan.'
-                : undefined
-            }
+                : null,
+              event.allowedRoles?.length
+                ? 'Les suena a los roles convocados, y sólo a ellos.'
+                : 'No avisa a nadie: la encuesta queda en el canal para quien lo mire.',
+            ]
+              .filter(Boolean)
+              .join(' ')}
             className={`min-h-tap px-4 rounded-md border transition-colors duration-micro disabled:opacity-40 ${
               event.discordStale
                 ? 'border-amber-600 text-amber-400'
@@ -1015,8 +1020,8 @@ const RolesQuePueden: React.FC<{
         </div>
         <p className="text-meta text-slate-500 mt-1">
           {seleccionados.length === 0
-            ? 'Sin marcar nada, la encuesta es para todo el gremio.'
-            : `Sólo contestan quienes tengan ${listaDeRoles(seleccionados, roles)} en Discord. Los demás la ven, pero no votan.`}
+            ? 'Sin marcar nada, la encuesta es para todo el gremio y al publicarla no se avisa a nadie.'
+            : `Sólo contestan quienes tengan ${listaDeRoles(seleccionados, roles)} en Discord. Los demás la ven, pero no votan, y al publicarla les suena sólo a ellos.`}
         </p>
       </>
     )}
