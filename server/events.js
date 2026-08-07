@@ -182,6 +182,9 @@ const CAMPOS = `e.id, e.kind, e.title, e.starts_at AS "startsAt", e.minutes, e.n
  * Discord, que vive en el entorno del servidor. Sin él -- bot sin configurar --
  * queda null y la interfaz enseña que está publicada sin ofrecer un enlace roto.
  */
+/** El canal que le toca a un tipo, sacado del mapa que devuelve getAgendaChannels. */
+const canalPara = (mapa, kind) => mapa?.byKind?.[kind] || mapa?.channel || null;
+
 const conEnlace = (fila, canalActual = null) => {
   if (!fila) return fila;
   const servidor = process.env.DISCORD_GUILD_ID;
@@ -200,22 +203,75 @@ const conEnlace = (fila, canalActual = null) => {
   };
 };
 
-/** El canal donde se publican las encuestas. Vacío: no se publica nada. */
-export async function getAgendaChannel() {
-  const { rows } = await pool.query(`SELECT value FROM app_settings WHERE key = 'agenda_channel'`);
-  return rows[0]?.value || null;
+/**
+ * Dónde se publica cada cosa.
+ *
+ * Un canal general y, si se quiere, uno por tipo de evento: las guerras a
+ * #guerras y el PvE a #pve, que es gente distinta mirando cosas distintas. Sin
+ * decidir nada por tipo se usa el general, que es como funcionó siempre y lo
+ * que sigue valiendo para un gremio con un solo canal.
+ *
+ * Se guardan en `app_settings` y no en una tabla nueva porque son cinco filas
+ * de texto: `agenda_channel` el general y `agenda_channel:pve` los de cada tipo.
+ */
+const CLAVE_CANAL = (kind) => (kind ? `agenda_channel:${kind}` : 'agenda_channel');
+
+const ID_CANAL = (valor) => (/^\d{5,25}$/.test(String(valor ?? '')) ? String(valor) : null);
+
+/**
+ * El canal donde se publica un evento de este tipo. Vacío: no se publica nada.
+ *
+ * Sin tipo devuelve el general, que es lo que preguntan las pantallas que no
+ * hablan de un evento concreto.
+ */
+export async function getAgendaChannel(kind = null) {
+  const claves = kind ? [CLAVE_CANAL(kind), CLAVE_CANAL(null)] : [CLAVE_CANAL(null)];
+  const { rows } = await pool.query(
+    `SELECT key, value FROM app_settings WHERE key = ANY($1)`,
+    [claves],
+  );
+  const porClave = Object.fromEntries(rows.map((r) => [r.key, r.value]));
+  // El del tipo manda; el general es la reserva.
+  for (const clave of claves) if (porClave[clave]) return porClave[clave];
+  return null;
 }
 
-export async function setAgendaChannel(channelId) {
-  const limpio = /^\d{5,25}$/.test(String(channelId ?? '')) ? String(channelId) : null;
+/** Todos, para la pantalla que los configura: el general y los de cada tipo. */
+export async function getAgendaChannels() {
+  const { rows } = await pool.query(
+    `SELECT key, value FROM app_settings WHERE key = ANY($1)`,
+    [[CLAVE_CANAL(null), ...EVENT_KINDS.map(CLAVE_CANAL)]],
+  );
+  const porClave = Object.fromEntries(rows.map((r) => [r.key, r.value]));
+  return {
+    channel: porClave[CLAVE_CANAL(null)] || null,
+    byKind: Object.fromEntries(
+      EVENT_KINDS.map((k) => [k, porClave[CLAVE_CANAL(k)] || null]),
+    ),
+  };
+}
+
+/**
+ * Elige el canal de un tipo, o el general si no se dice tipo.
+ *
+ * Vacío borra la fila en vez de guardar un vacío: un tipo sin fila cae al
+ * general, y es la única forma de volver a «como el general» después de
+ * haberle puesto uno propio.
+ */
+export async function setAgendaChannel(channelId, kind = null) {
+  if (kind && !EVENT_KINDS.includes(kind)) {
+    throw Object.assign(new Error('ese tipo de evento no existe'), { status: 400 });
+  }
+  const clave = CLAVE_CANAL(kind);
+  const limpio = ID_CANAL(channelId);
   if (!limpio) {
-    await pool.query(`DELETE FROM app_settings WHERE key = 'agenda_channel'`);
+    await pool.query(`DELETE FROM app_settings WHERE key = $1`, [clave]);
     return null;
   }
   await pool.query(
-    `INSERT INTO app_settings (key, value) VALUES ('agenda_channel', $1)
+    `INSERT INTO app_settings (key, value) VALUES ($1, $2)
        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
-    [limpio],
+    [clave, limpio],
   );
   return limpio;
 }
@@ -256,8 +312,10 @@ export async function listEvents({ past = false, from = null, to = null } = {}) 
       ORDER BY e.starts_at`,
     [GUILD_ID, past, tramo ? fecha(from) : null, tramo ? fecha(to) : null],
   );
-  const canal = await getAgendaChannel();
-  return rows.map((r) => conEnlace(r, canal));
+  // Un solo viaje para los cinco: la lista puede traer eventos de varios tipos
+  // y cada uno se compara con el canal que le toca.
+  const canales = await getAgendaChannels();
+  return rows.map((r) => conEnlace(r, canalPara(canales, r.kind)));
 }
 
 /** Un evento con todo lo que se ha contestado, con nombres. */
@@ -277,7 +335,10 @@ export async function getEvent(id) {
       ORDER BY p.name`,
     [GUILD_ID, id],
   );
-  return { ...conEnlace(rows[0], await getAgendaChannel()), responses: respuestas.rows };
+  return {
+    ...conEnlace(rows[0], await getAgendaChannel(rows[0].kind)),
+    responses: respuestas.rows,
+  };
 }
 
 /**
@@ -314,9 +375,9 @@ export async function myEvents(playerId, { conCancelados = false } = {}) {
     [GUILD_ID, playerId, conCancelados],
   );
 
-  const canal = await getAgendaChannel();
+  const canales = await getAgendaChannels();
   return rows.map(({ myAnswer, ...evento }) => ({
-    ...conEnlace(evento, canal),
+    ...conEnlace(evento, canalPara(canales, evento.kind)),
     mine: myAnswer ? { answer: myAnswer } : null,
   }));
 }
@@ -347,7 +408,10 @@ export async function nextWar() {
        FROM event_responses WHERE guild_id = $1 AND event_id = $2`,
     [GUILD_ID, rows[0].id],
   );
-  return { ...conEnlace(rows[0], await getAgendaChannel()), responses: respuestas.rows };
+  return {
+    ...conEnlace(rows[0], await getAgendaChannel(rows[0].kind)),
+    responses: respuestas.rows,
+  };
 }
 
 export async function saveEvent(body, createdBy) {

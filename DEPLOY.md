@@ -218,8 +218,12 @@ told, privately, to link theirs first.
 
 ### The agenda
 
-**Administración → Agenda** picks the text channel the event polls are posted
-to. From an event in the **Agenda** tab, *Publicar en Discord* posts it there;
+**Administración → Agenda** picks the text channels the event polls are posted
+to: a general one, plus an optional channel per event kind, so guild wars and
+practices can go to one channel and PvE to another — different people watching
+different things. A kind with no channel of its own falls back to the general
+one, which is how a guild with a single channel keeps working without touching
+anything. Clearing a kind's channel is what returns it to the general one. From an event in the **Agenda** tab, *Publicar en Discord* posts it there;
 the bot then rewrites that same message every time anyone answers, from either
 side. Publishing is a deliberate act rather than a side effect of saving, so
 fixing a typo does not summon the guild twice. Whether an event has gone out

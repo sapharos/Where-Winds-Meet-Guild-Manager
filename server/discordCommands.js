@@ -810,10 +810,12 @@ const cuerpoDe = (evento) => {
  */
 export async function publicarEvento(id) {
   if (!botEnabled()) return null;
-  const canal = await getAgendaChannel();
-  if (!canal) return null;
 
+  // El evento primero: el canal depende de su tipo, que es lo que permite que
+  // las guerras vayan a #guerras y el PvE a #pve.
   const evento = await getEvent(id);
+  const canal = await getAgendaChannel(evento.kind);
+  if (!canal) return null;
   const mensaje = await postMessage(canal, cuerpoDe(evento));
   await setDiscordMessage(id, mensaje.channelId, mensaje.id);
 

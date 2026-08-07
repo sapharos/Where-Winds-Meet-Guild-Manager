@@ -302,6 +302,8 @@ const respuestas: Record<string, RespuestaFalsa[]> = {
 
 /** Dónde publica la agenda. Empieza sin elegir, como un gremio recién montado. */
 let canalAgenda: string | null = null;
+/** Y el canal propio de cada tipo, para poder mirar las dos configuraciones. */
+let canalPorTipo: Record<string, string | null> = {};
 
 /** Las dos series que siembra el servidor de verdad al arrancar. */
 const seriesFalsas: Record<string, unknown>[] = [
@@ -388,6 +390,7 @@ const GET: [RegExp, Ruta][] = [
   [/^\/events\/config\/channel$/, () => ({
     bot: true,
     channel: canalAgenda,
+    byKind: canalPorTipo,
     channels: [
       { id: '300000000000000001', name: 'anuncios' },
       { id: '300000000000000002', name: 'guerras' },
@@ -506,16 +509,20 @@ const ESCRITURAS: [string, RegExp, Ruta][] = [
     return { ok: true };
   }],
   ['PUT', /^\/events\/config\/channel$/, (_m, _req, body) => {
-    canalAgenda = body?.channel ?? null;
-    return { channel: canalAgenda };
+    // Con `kind` se toca el de ese tipo; sin él, el general.
+    if (body?.kind) canalPorTipo = { ...canalPorTipo, [String(body.kind)]: body?.channel ?? null };
+    else canalAgenda = body?.channel ?? null;
+    return { channel: canalAgenda, byKind: canalPorTipo };
   }],
   ['POST', /^\/events\/([^/]+)\/publish$/, (m) => {
-    if (!canalAgenda) return { error: 'falta elegir el canal de la agenda en Administración' };
     const e = eventos.find((x) => x.id === m[1]);
+    // El del tipo, con el general de reserva: igual que el servidor.
+    const canal = canalPorTipo[String(e?.kind)] || canalAgenda;
+    if (!canal) return { error: 'falta elegir el canal de la agenda en Administración' };
     if (e) {
-      e.discordChannelId = canalAgenda;
+      e.discordChannelId = canal;
       e.discordMessageId = `${Date.now()}`;
-      e.discordUrl = `https://discord.com/channels/700000000000000000/${canalAgenda}/${e.discordMessageId}`;
+      e.discordUrl = `https://discord.com/channels/700000000000000000/${canal}/${e.discordMessageId}`;
     }
     return conRespuestas(m[1]);
   }],

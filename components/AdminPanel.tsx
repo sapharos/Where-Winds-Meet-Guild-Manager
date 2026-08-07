@@ -11,6 +11,9 @@ import {
   DiscordMember,
   DiscordRole,
   DiscordVoiceChannel,
+  EVENT_KINDS,
+  EVENT_KIND_LABELS,
+  EventKind,
   REMINDER_MODES,
   REMINDER_MODE_LABELS,
   ReminderMode,
@@ -90,6 +93,8 @@ const AdminPanel: React.FC<Props> = ({
   const [agenda, setAgenda] = useState<{
     bot: boolean;
     channel: string | null;
+    /** El canal propio de cada tipo, o null cuando usa el general. */
+    byKind: Partial<Record<EventKind, string | null>>;
     channels: { id: string; name: string }[];
   } | null>(null);
   /** Lo que se repite cada semana. */
@@ -162,9 +167,17 @@ const AdminPanel: React.FC<Props> = ({
       // permisos distintos, y un oficial puede tener el primero sin el segundo.
       if (canManageEvents) {
         setAgenda(
-          await api<{ bot: boolean; channel: string | null; channels: { id: string; name: string }[] }>(
-            '/events/config/channel',
-          ).catch(() => ({ bot: false, channel: null, channels: [] })),
+          await api<{
+            bot: boolean;
+            channel: string | null;
+            byKind: Partial<Record<EventKind, string | null>>;
+            channels: { id: string; name: string }[];
+          }>('/events/config/channel').catch(() => ({
+            bot: false,
+            channel: null,
+            byKind: {},
+            channels: [],
+          })),
         );
         setSeries(await api<EventSeries[]>('/events/series').catch(() => []));
         setRolesDiscord(
@@ -938,6 +951,8 @@ const AdminPanel: React.FC<Props> = ({
           <p className="text-xs text-slate-500 mb-5">
             En qué canal se publican las encuestas de los eventos. El bot escribe ahí y reescribe ese
             mismo mensaje cada vez que alguien contesta, venga la respuesta de Discord o de la web.
+            Cada tipo puede ir a su canal — las guerras a uno, el PvE a otro — y lo que no tenga
+            canal propio va al general.
           </p>
 
           {agenda && !agenda.bot ? (
@@ -953,15 +968,14 @@ const AdminPanel: React.FC<Props> = ({
               escriba.
             </p>
           ) : (
-            <label className="block max-w-md">
-              <span className="block text-[11px] uppercase tracking-wider text-slate-500 mb-1">
-                Canal de difusión
-              </span>
-              <select
-                className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
-                value={agenda?.channel ?? ''}
-                onChange={async (e) => {
-                  const channel = e.target.value || null;
+            <div className="space-y-4 max-w-md">
+              <CanalDeAgenda
+                etiqueta="Canal general"
+                pie="Donde va lo que no tenga canal propio."
+                valor={agenda?.channel ?? ''}
+                canales={agenda?.channels ?? []}
+                vacio="No publicar en Discord"
+                onElegir={async (channel) => {
                   setAgenda((prev) => (prev ? { ...prev, channel } : prev));
                   await api('/events/config/channel', {
                     method: 'PUT',
@@ -969,15 +983,32 @@ const AdminPanel: React.FC<Props> = ({
                   }).catch(() => report('No se pudo guardar el canal', false));
                   report(channel ? 'Canal de la agenda guardado' : 'La agenda ya no publica en Discord');
                 }}
-              >
-                <option value="">No publicar en Discord</option>
-                {(agenda?.channels ?? []).map((c) => (
-                  <option key={c.id} value={c.id}>
-                    #{c.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+              />
+
+              {EVENT_KINDS.map((kind) => (
+                <CanalDeAgenda
+                  key={kind}
+                  etiqueta={EVENT_KIND_LABELS[kind]}
+                  valor={agenda?.byKind?.[kind] ?? ''}
+                  canales={agenda?.channels ?? []}
+                  vacio="El mismo que el general"
+                  onElegir={async (channel) => {
+                    setAgenda((prev) =>
+                      prev ? { ...prev, byKind: { ...prev.byKind, [kind]: channel } } : prev,
+                    );
+                    await api('/events/config/channel', {
+                      method: 'PUT',
+                      body: JSON.stringify({ channel, kind }),
+                    }).catch(() => report('No se pudo guardar el canal', false));
+                    report(
+                      channel
+                        ? `${EVENT_KIND_LABELS[kind]}: canal guardado`
+                        : `${EVENT_KIND_LABELS[kind]}: vuelve al canal general`,
+                    );
+                  }}
+                />
+              ))}
+            </div>
           )}
 
           <div className="mt-8 pt-6 border-t border-slate-800">
@@ -1186,6 +1217,39 @@ const AdminPanel: React.FC<Props> = ({
  * subir el estado de siete campos por cada serie al panel entero sería que
  * escribir en una redibujara todas.
  */
+/**
+ * Un canal de la agenda, para el general o para un tipo de evento.
+ *
+ * La opción vacía no quiere decir lo mismo en los dos sitios y por eso se pasa:
+ * en el general es «no publicar en Discord» y en un tipo es «el mismo que el
+ * general», que son cosas distintas y se confunden con facilidad.
+ */
+const CanalDeAgenda: React.FC<{
+  etiqueta: string;
+  pie?: string;
+  valor: string;
+  vacio: string;
+  canales: { id: string; name: string }[];
+  onElegir: (channel: string | null) => void;
+}> = ({ etiqueta, pie, valor, vacio, canales, onElegir }) => (
+  <label className="block">
+    <span className="block text-[11px] uppercase tracking-wider text-slate-500 mb-1">{etiqueta}</span>
+    <select
+      className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
+      value={valor}
+      onChange={(e) => onElegir(e.target.value || null)}
+    >
+      <option value="">{vacio}</option>
+      {canales.map((c) => (
+        <option key={c.id} value={c.id}>
+          #{c.name}
+        </option>
+      ))}
+    </select>
+    {pie && <span className="block text-meta text-slate-500 mt-1">{pie}</span>}
+  </label>
+);
+
 const SerieFila: React.FC<{
   serie: EventSeries;
   rolesDiscord: DiscordRole[];

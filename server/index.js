@@ -91,6 +91,7 @@ import {
   resetResponses,
   puedeContestar,
   getAgendaChannel,
+  getAgendaChannels,
   setAgendaChannel,
   nextWar,
   myEvents,
@@ -452,15 +453,19 @@ app.get('/api/events/config/roles', requireAuth, asHandler(async (_req, res) => 
 // El canal donde se publican las encuestas, elegido de una lista y no copiado a
 // mano. Leerlo pide gestionar eventos, que es quien va a publicar en él.
 app.get('/api/events/config/channel', requireAuth, requirePermission('events.manage'), asHandler(async (_req, res) => {
+  const elegidos = await getAgendaChannels();
   res.json({
     bot: botEnabled(),
-    channel: await getAgendaChannel(),
+    ...elegidos,
     channels: botEnabled() ? await listTextChannels().catch(() => []) : [],
   });
 }));
 
+// Sin `kind` se toca el general; con `kind`, el de ese tipo. Vacío lo borra, que
+// es como se vuelve a «el mismo que el general».
 app.put('/api/events/config/channel', requireAuth, requirePermission('events.manage'), asHandler(async (req, res) => {
-  res.json({ channel: await setAgendaChannel(req.body?.channel) });
+  await setAgendaChannel(req.body?.channel, req.body?.kind ?? null);
+  res.json(await getAgendaChannels());
 }));
 
 /* --- lo que se repite cada semana --- */
@@ -541,7 +546,10 @@ app.post('/api/events/:id/reset', requireAuth, requirePermission('events.reset')
 // se crea, se corrige y se mira antes de convocar a nadie, y publicar dos veces
 // por haber arreglado una errata sería avisar dos veces al gremio.
 app.post('/api/events/:id/publish', requireAuth, requirePermission('events.manage'), asHandler(async (req, res) => {
-  if (!(await getAgendaChannel())) {
+  // El del tipo del evento, con el general de reserva: publicar una guerra no
+  // puede fallar porque nadie haya elegido aún dónde va el PvE.
+  const suyo = await getEvent(req.params.id).catch(() => null);
+  if (!(await getAgendaChannel(suyo?.kind))) {
     return res.status(409).json({ error: 'falta elegir el canal de la agenda en Administración' });
   }
   let mensaje;
