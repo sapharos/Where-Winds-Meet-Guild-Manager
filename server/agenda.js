@@ -16,7 +16,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { pool, GUILD_ID } from './db.js';
-import { ROLES } from './permissions.js';
+import { limpiarRolesDiscord } from './events.js';
 
 /* --------------------------------------------------------------- husos */
 
@@ -114,7 +114,7 @@ function relativo(zona, evento, diasAntes, horaTexto) {
 /* --------------------------------------------------------------- series */
 
 const CAMPOS = `id, kind, title, weekday, time_local AS "timeLocal", timezone,
-                minutes, allowed_roles AS "allowedRoles", notes,
+                minutes, allowed_discord_roles AS "allowedRoles", notes,
                 opens_days_before AS "opensDaysBefore", opens_time AS "opensTime",
                 closes_days_before AS "closesDaysBefore", closes_time AS "closesTime",
                 auto_publish AS "autoPublish", active`;
@@ -147,13 +147,13 @@ export async function saveSeries(body) {
 
   await pool.query(
     `INSERT INTO event_series
-       (id, guild_id, kind, title, weekday, time_local, timezone, minutes, allowed_roles, notes,
+       (id, guild_id, kind, title, weekday, time_local, timezone, minutes, allowed_discord_roles, notes,
         opens_days_before, opens_time, closes_days_before, closes_time, auto_publish, active)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
      ON CONFLICT (guild_id, id) DO UPDATE
        SET kind = EXCLUDED.kind, title = EXCLUDED.title, weekday = EXCLUDED.weekday,
            time_local = EXCLUDED.time_local, timezone = EXCLUDED.timezone,
-           minutes = EXCLUDED.minutes, allowed_roles = EXCLUDED.allowed_roles, notes = EXCLUDED.notes,
+           minutes = EXCLUDED.minutes, allowed_discord_roles = EXCLUDED.allowed_discord_roles, notes = EXCLUDED.notes,
            opens_days_before = EXCLUDED.opens_days_before, opens_time = EXCLUDED.opens_time,
            closes_days_before = EXCLUDED.closes_days_before, closes_time = EXCLUDED.closes_time,
            auto_publish = EXCLUDED.auto_publish, active = EXCLUDED.active`,
@@ -166,7 +166,7 @@ export async function saveSeries(body) {
       HHMM(body?.timeLocal, '19:30'),
       zona,
       entero(body?.minutes, 1, 720, 150),
-      JSON.stringify(Array.isArray(body?.allowedRoles) ? body.allowedRoles.filter((r) => ROLES.includes(r)) : []),
+      JSON.stringify(limpiarRolesDiscord(body?.allowedRoles)),
       String(body?.notes ?? '').trim().slice(0, 1000) || null,
       entero(body?.opensDaysBefore, 0, 60, 5),
       HHMM(body?.opensTime, '00:00'),
@@ -242,7 +242,7 @@ export async function asegurarEventos({ semanas = 3, ahora = new Date() } = {}) 
     for (const cuando of proximas(s.timezone, s.weekday, s.timeLocal, ahora, semanas)) {
       const { rows } = await pool.query(
         `INSERT INTO guild_events
-           (id, guild_id, series_id, kind, title, starts_at, minutes, allowed_roles, notes, opens_at, closes_at)
+           (id, guild_id, series_id, kind, title, starts_at, minutes, allowed_discord_roles, notes, opens_at, closes_at)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
          ON CONFLICT (guild_id, series_id, starts_at) WHERE series_id IS NOT NULL DO NOTHING
          RETURNING id`,

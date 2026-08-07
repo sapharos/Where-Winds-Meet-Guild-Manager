@@ -9,6 +9,7 @@ import { Filas } from './Esqueleto';
 import {
   AuthUser,
   DiscordMember,
+  DiscordRole,
   DiscordVoiceChannel,
   ManagedUser,
   PERMISSION_LABELS,
@@ -16,7 +17,6 @@ import {
   Player,
   UserRole,
   ROLE_LABELS,
-  USER_ROLES,
   DiscordSoundboardSound,
   VOICE_SLOT_LABELS,
   VoiceChannelMap,
@@ -91,6 +91,8 @@ const AdminPanel: React.FC<Props> = ({
   } | null>(null);
   /** Lo que se repite cada semana. */
   const [series, setSeries] = useState<EventSeries[]>([]);
+  /** Los roles del servidor de Discord, para elegir quién contesta cada serie. */
+  const [rolesDiscord, setRolesDiscord] = useState<DiscordRole[]>([]);
   const [mapaVoz, setMapaVoz] = useState<VoiceChannelMap>({});
   const [vozSucia, setVozSucia] = useState(false);
   /** El panel de sonidos del servidor y qué sonido toca en cada aviso de guerra. */
@@ -162,6 +164,10 @@ const AdminPanel: React.FC<Props> = ({
           ).catch(() => ({ bot: false, channel: null, channels: [] })),
         );
         setSeries(await api<EventSeries[]>('/events/series').catch(() => []));
+        setRolesDiscord(
+          (await api<{ roles: DiscordRole[] }>('/events/config/roles').catch(() => ({ roles: [] })))
+            .roles ?? [],
+        );
       }
     } catch (err) {
       report(err instanceof Error ? err.message : 'No se pudo cargar la configuración', false);
@@ -1001,6 +1007,7 @@ const AdminPanel: React.FC<Props> = ({
                   <SerieFila
                     key={s.id}
                     serie={s}
+                    rolesDiscord={rolesDiscord}
                     onGuardar={async (cambios) => {
                       const guardada = await api<EventSeries>(`/events/series/${s.id}`, {
                         method: 'PUT',
@@ -1178,9 +1185,10 @@ const AdminPanel: React.FC<Props> = ({
  */
 const SerieFila: React.FC<{
   serie: EventSeries;
+  rolesDiscord: DiscordRole[];
   onGuardar: (cambios: Partial<EventSeries>) => void;
   onBorrar: () => void;
-}> = ({ serie, onGuardar, onBorrar }) => {
+}> = ({ serie, rolesDiscord, onGuardar, onBorrar }) => {
   const [b, setB] = useState(serie);
   const sucia = JSON.stringify(b) !== JSON.stringify(serie);
   const campo = 'w-full bg-slate-950 border border-slate-800 rounded p-2 text-sm outline-none focus:ring-1 focus:ring-amber-500';
@@ -1208,38 +1216,52 @@ const SerieFila: React.FC<{
           <input className={campo} value={b.timeLocal} onChange={(e) => setB({ ...b, timeLocal: e.target.value })} />
         </label>
 
-        {/* A qué rangos se les pregunta en cada convocatoria que salga de esta
-            serie. Sin marcar nada, a todo el gremio. */}
+        {/* A qué roles de Discord se les pregunta en cada convocatoria que
+            salga de esta serie. Sin marcar nada, a todo el gremio. */}
         <div className="sm:col-span-2 lg:col-span-4">
           <span className={etiqueta}>Quién puede votar</span>
+          {rolesDiscord.length === 0 ? (
+            <p className="text-xs text-slate-500">
+              No puedo leer los roles del servidor de Discord. Con el bot sin configurar, las
+              encuestas de esta serie quedan abiertas a todo el gremio.
+            </p>
+          ) : (
           <div className="flex flex-wrap gap-2">
-            {USER_ROLES.map((role) => {
-              const marcado = (b.allowedRoles ?? []).includes(role);
+            {rolesDiscord.map((rol) => {
+              const marcado = (b.allowedRoles ?? []).includes(rol.id);
               return (
                 <button
-                  key={role}
+                  key={rol.id}
                   type="button"
                   aria-pressed={marcado}
                   onClick={() =>
                     setB({
                       ...b,
+                      // En el orden del servidor y no en el de las pulsaciones:
+                      // la lista se lee tal cual donde se enseña.
                       allowedRoles: marcado
-                        ? (b.allowedRoles ?? []).filter((r) => r !== role)
-                        : [...(b.allowedRoles ?? []), role],
+                        ? (b.allowedRoles ?? []).filter((r) => r !== rol.id)
+                        : rolesDiscord
+                            .filter((r) => r.id === rol.id || (b.allowedRoles ?? []).includes(r.id))
+                            .map((r) => r.id),
                     })
                   }
                   className={`min-h-tap px-3 rounded-md border text-sm font-bold transition-colors duration-micro ${
-                    marcado
-                      ? 'bg-amber-600 border-amber-500 text-white'
-                      : 'bg-slate-950 border-slate-700 text-slate-300'
+                    marcado ? 'bg-slate-800 border-slate-600' : 'bg-slate-950 border-slate-800'
                   }`}
+                  style={
+                    rol.color
+                      ? { color: rol.color, borderColor: marcado ? rol.color : undefined }
+                      : undefined
+                  }
                 >
                   <i className={`fa-solid ${marcado ? 'fa-check' : 'fa-minus'} mr-2 text-[10px]`}></i>
-                  {ROLE_LABELS[role] ?? role}
+                  @{rol.name}
                 </button>
               );
             })}
           </div>
+          )}
         </div>
         <label>
           <span className={etiqueta}>Abre (días antes)</span>

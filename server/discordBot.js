@@ -107,6 +107,85 @@ export async function listTextChannels() {
 }
 
 /**
+ * Los roles del servidor, en el orden en que Discord los pinta.
+ *
+ * Se caen dos clases: @everyone, que lo tiene todo el mundo y por tanto no
+ * restringe nada, y los `managed`, que son los que crea una integración para
+ * sus propios bots y que ninguna persona lleva puesto.
+ *
+ * El color viene como entero; 0 quiere decir «sin color», que Discord pinta
+ * gris. Se devuelve en hexadecimal porque es lo que va a acabar en un estilo.
+ */
+let rolesCache = null;
+const ROLES_LISTA_TTL = 60_000;
+
+export async function listGuildRoles(ahora = Date.now()) {
+  if (rolesCache && ahora - rolesCache.cuando < ROLES_LISTA_TTL) return rolesCache.roles;
+  const roles = await botFetch(`/guilds/${process.env.DISCORD_GUILD_ID}/roles`);
+  const limpios = roles
+    .filter((r) => r.id !== process.env.DISCORD_GUILD_ID && !r.managed)
+    .sort((a, b) => b.position - a.position)
+    .map((r) => ({
+      id: r.id,
+      name: r.name,
+      color: r.color ? `#${r.color.toString(16).padStart(6, '0')}` : null,
+    }));
+  // La pide toda la agenda para leer los nombres, así que la piden todos a la
+  // vez cuando sale el aviso. Un minuto de memoria convierte esa ráfaga en una
+  // sola petición y no envejece nada que importe: un rol renombrado tarda un
+  // minuto en leerse renombrado.
+  rolesCache = { roles: limpios, cuando: ahora };
+  return limpios;
+}
+
+/**
+ * Qué roles lleva puestos alguien en el servidor.
+ *
+ * Hace falta cuando se vota desde la web: desde Discord los roles vienen en la
+ * propia interacción y esto no se llama. Se guarda un momento la respuesta
+ * porque una encuesta se contesta a ráfagas -- treinta personas en el minuto
+ * siguiente al aviso -- y son treinta peticiones idénticas a Discord por algo
+ * que no cambia entre una y otra.
+ *
+ * Devuelve null si esa persona ya no está en el servidor, que no es lo mismo
+ * que no tener ningún rol y se responde distinto. También si Discord no
+ * contesta: no se puede afirmar que lleve el rol, y en una encuesta restringida
+ * eso vale como no llevarlo. Nadie se queda sin votar por esto -- desde Discord
+ * los roles vienen en la propia interacción y esto ni se llama.
+ *
+ * Es «Get Guild Member», que va por id y no exige el intent privilegiado de
+ * miembros, igual que la búsqueda de más arriba: el bot recién invitado sirve.
+ */
+const ROLES_CACHE = new Map();
+const ROLES_TTL = 60_000;
+
+export async function memberRoles(discordId, ahora = Date.now()) {
+  if (!discordId) return null;
+  const guardado = ROLES_CACHE.get(discordId);
+  if (guardado && ahora - guardado.cuando < ROLES_TTL) return guardado.roles;
+
+  let roles = null;
+  try {
+    const miembro = await botFetch(
+      `/guilds/${process.env.DISCORD_GUILD_ID}/members/${discordId}`,
+    );
+    roles = Array.isArray(miembro?.roles) ? miembro.roles : [];
+  } catch {
+    // Se fue del servidor, o Discord no contesta. En los dos casos no se puede
+    // afirmar que tenga el rol, que es lo que se estaba preguntando.
+    roles = null;
+  }
+  ROLES_CACHE.set(discordId, { roles, cuando: ahora });
+  return roles;
+}
+
+/** Para las pruebas y para cuando alguien cambia de roles y no quiere esperar. */
+export function olvidarRoles(discordId) {
+  if (discordId) ROLES_CACHE.delete(discordId);
+  else ROLES_CACHE.clear();
+}
+
+/**
  * Reescribe la respuesta de una interacción que se dejó «pensando…».
  *
  * Discord da tres segundos para acusar recibo, pero quince minutos para

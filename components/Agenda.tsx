@@ -7,11 +7,9 @@ import {
   EVENT_KIND_LABELS,
   EventAnswer,
   EventKind,
+  DiscordRole,
   GuildEvent,
   Player,
-  ROLE_LABELS,
-  USER_ROLES,
-  UserRole,
   respuestasDe,
 } from '../types';
 import Sheet from './Sheet';
@@ -116,31 +114,30 @@ interface Props {
   players: Player[];
   /** La ficha de quien está mirando, si tiene una. Sin ella no puede contestar. */
   myPlayerId?: string | null;
-  /** Su rango. Decide si una convocatoria acotada le deja contestar. */
-  myRole?: UserRole;
   canManage: boolean;
 }
 
 /**
- * Si a este rango se le pide que conteste.
+ * Los roles del servidor de Discord, para leerlos por su nombre.
  *
- * Sin lista, el gremio entero: no restringir es lo normal y es lo que había
- * antes de que esto existiera, así que las convocatorias ya guardadas siguen
- * abiertas a todos sin tocarlas. Gemelo de `puedeContestar` en server/events.js
- * -- aquí decide qué botones se enseñan, allí decide qué se guarda.
+ * Un evento guarda ids, que es lo único que no envejece; el nombre y el color
+ * se traen del servidor cada vez, así que un rol renombrado en Discord se lee
+ * renombrado aquí sin tocar ninguna convocatoria.
+ *
+ * Un id que ya no está en la lista se enseña tal cual: es un rol borrado, y
+ * decirlo con su número es más honesto que callarlo.
  */
-const puedeContestar = (event: GuildEvent, rol?: UserRole) =>
-  !event.allowedRoles?.length || (rol ? event.allowedRoles.includes(rol) : false);
+const nombreDeRol = (id: string, roles: DiscordRole[]) =>
+  roles.find((r) => r.id === id)?.name ?? `rol ${id}`;
 
-// De más mando a menos, como el servidor los guarda: ordenar también aquí es
-// lo que hace que la frase del formulario no cambie al guardar.
-const listaDeRangos = (roles: UserRole[]) =>
-  [...roles]
-    .sort((a, b) => USER_ROLES.indexOf(a) - USER_ROLES.indexOf(b))
-    .map((r) => ROLE_LABELS[r] ?? r)
-    .join(', ');
+const listaDeRoles = (ids: string[], roles: DiscordRole[]) =>
+  ids.map((id) => nombreDeRol(id, roles)).join(', ');
 
-const Agenda: React.FC<Props> = ({ players, myPlayerId, myRole, canManage }) => {
+const Agenda: React.FC<Props> = ({ players, myPlayerId, canManage }) => {
+  // Los roles del servidor de Discord: quien programa los elige y todo el mundo
+  // los lee, porque una convocatoria guarda ids y el nombre hay que ir a
+  // buscarlo. Sin bot llega vacío y todo lo demás sigue igual.
+  const [rolesDiscord, setRolesDiscord] = useState<DiscordRole[]>([]);
   const [events, setEvents] = useState<GuildEvent[] | null>(null);
   const [past, setPast] = useState(false);
   /** Lista de lo que viene, o el mes entero. */
@@ -176,6 +173,14 @@ const Agenda: React.FC<Props> = ({ players, myPlayerId, myRole, canManage }) => 
   useEffect(() => {
     void cargar();
   }, [cargar]);
+
+  useEffect(() => {
+    void api<{ roles: DiscordRole[] }>('/events/config/roles')
+      .then((r) => setRolesDiscord(r.roles ?? []))
+      // Sin bot no hay roles que ofrecer, y no es un error que enseñar: el
+      // formulario lo dice en su sitio y todo lo demás sigue funcionando.
+      .catch(() => setRolesDiscord([]));
+  }, []);
 
   /** Refresca la lista y, si hay una hoja abierta, también lo que enseña. */
   const tras = async (actualizado?: GuildEvent) => {
@@ -347,7 +352,13 @@ const Agenda: React.FC<Props> = ({ players, myPlayerId, myRole, canManage }) => 
               ) : (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                   {delDiaElegido.map((event) => (
-                    <TarjetaEvento key={event.id} event={event} onAbrir={() => abrir(event.id)} canManage={canManage} />
+                    <TarjetaEvento
+                      key={event.id}
+                      event={event}
+                      onAbrir={() => abrir(event.id)}
+                      canManage={canManage}
+                      rolesDiscord={rolesDiscord}
+                    />
                   ))}
                 </div>
               )}
@@ -367,7 +378,12 @@ const Agenda: React.FC<Props> = ({ players, myPlayerId, myRole, canManage }) => 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
           {events.map((event, at) => (
             <div key={event.id} className="entra" style={{ '--paso': Math.min(at, 6) } as React.CSSProperties}>
-              <TarjetaEvento event={event} onAbrir={() => abrir(event.id)} canManage={canManage} />
+              <TarjetaEvento
+                event={event}
+                onAbrir={() => abrir(event.id)}
+                canManage={canManage}
+                rolesDiscord={rolesDiscord}
+              />
             </div>
           ))}
         </div>
@@ -386,7 +402,7 @@ const Agenda: React.FC<Props> = ({ players, myPlayerId, myRole, canManage }) => 
             myPlayerId={myPlayerId}
             canManage={canManage}
             miRespuesta={miRespuesta(abierto)?.answer}
-            myRole={myRole}
+            rolesDiscord={rolesDiscord}
             onContestar={(answer) => contestar(abierto, answer)}
             onContestarPor={async (playerId, answer) => {
               const actualizado = await api<GuildEvent>(
@@ -414,6 +430,7 @@ const Agenda: React.FC<Props> = ({ players, myPlayerId, myRole, canManage }) => 
       {editando && (
         <FormularioEvento
           borrador={editando}
+          rolesDiscord={rolesDiscord}
           onGuardar={guardar}
           onCerrar={() => setEditando(null)}
         />
@@ -432,7 +449,8 @@ const TarjetaEvento: React.FC<{
   onAbrir: () => void;
   /** Enseña «sin publicar», que sólo le sirve a quien puede publicarlo. */
   canManage?: boolean;
-}> = ({ event, onAbrir, canManage = false }) => (
+  rolesDiscord: DiscordRole[];
+}> = ({ event, onAbrir, canManage = false, rolesDiscord }) => (
   <button
     onClick={onAbrir}
     className={`w-full text-left h-full p-3 rounded-lg border bg-slate-900 transition-colors duration-micro hover:border-slate-700 ${
@@ -456,7 +474,7 @@ const TarjetaEvento: React.FC<{
         </div>
         <p className="text-meta text-slate-400 truncate">
           {EVENT_KIND_LABELS[event.kind]} · {fechaLarga(event.startsAt)}
-          {event.allowedRoles?.length ? ` · sólo ${listaDeRangos(event.allowedRoles)}` : ''}
+          {event.allowedRoles?.length ? ` · sólo ${listaDeRoles(event.allowedRoles, rolesDiscord)}` : ''}
         </p>
       </div>
     </div>
@@ -615,7 +633,7 @@ const DetalleEvento: React.FC<{
   myPlayerId?: string | null;
   canManage: boolean;
   miRespuesta?: EventAnswer;
-  myRole?: UserRole;
+  rolesDiscord: DiscordRole[];
   onContestar: (answer: EventAnswer) => void;
   onContestarPor: (playerId: string, answer: EventAnswer) => void;
   onEditar: () => void;
@@ -627,14 +645,17 @@ const DetalleEvento: React.FC<{
   myPlayerId,
   canManage,
   miRespuesta,
-  myRole,
+  rolesDiscord,
   onContestar,
   onContestarPor,
   onEditar,
   onCancelar,
   onPublicar,
 }) => {
-  const invitado = puedeContestar(event, myRole);
+  // Lo decide el servidor, que es quien sabe qué roles lleva cada uno en
+  // Discord. Sin campo -- un detalle traído antes de que esto existiera -- se
+  // supone que sí, que es como se comportaba hasta ahora.
+  const invitado = event.mayAnswer !== false;
 
   const porRespuesta = (answer: EventAnswer) =>
     (event.responses ?? []).filter((r) => r.answer === answer);
@@ -697,9 +718,12 @@ const DetalleEvento: React.FC<{
       {/* A quién se le pregunta. Sólo se dice cuando hay a quién dejar fuera:
           lo normal es que no haya lista y entonces no hay nada que advertir. */}
       {event.allowedRoles?.length > 0 && (
-        <p className="text-meta text-slate-500">
-          <i className="fa-solid fa-user-shield mr-1.5"></i>
-          Abierta a {listaDeRangos(event.allowedRoles)}.
+        <p className="text-meta text-slate-500 flex items-center gap-1.5 flex-wrap">
+          <i className="fa-brands fa-discord"></i>
+          Abierta a
+          {event.allowedRoles.map((id) => (
+            <ChapaRol key={id} id={id} roles={rolesDiscord} />
+          ))}
         </p>
       )}
 
@@ -723,9 +747,12 @@ const DetalleEvento: React.FC<{
             </div>
           ) : (
             // Los botones no se enseñan apagados: no es que no se pueda ahora,
-            // es que la pregunta no es para este rango.
+            // es que la pregunta no es para estos roles. Los dos motivos se
+            // arreglan de formas distintas, y por eso se dicen distintos.
             <p className="text-meta text-slate-500">
-              Esta convocatoria no está abierta a tu rango. Puedes verla, pero no votar.
+              {event.discordLinked === false
+                ? 'No encuentro tu cuenta en el servidor de Discord, así que no puedo comprobar tus roles. Vincúlala desde tu perfil y vuelve a entrar.'
+                : 'Esta convocatoria no está abierta a tus roles de Discord. Puedes verla, pero no votar.'}
             </p>
           )}
         </div>
@@ -835,49 +862,91 @@ const DetalleEvento: React.FC<{
 /* ---------------------------------------------------------- quién contesta */
 
 /**
- * A qué rangos se les pregunta.
+ * Un rol de Discord como se lee: con su nombre y su color.
+ *
+ * Discord tiñe el nombre con el color del rol, no el fondo, y aquí se hace lo
+ * mismo para que un rol se reconozca de un vistazo por lo mismo por lo que se
+ * reconoce allí. Sin color -- que en Discord es gris -- se queda con el gris de
+ * la interfaz.
+ */
+const ChapaRol: React.FC<{ id: string; roles: DiscordRole[] }> = ({ id, roles }) => {
+  const rol = roles.find((r) => r.id === id);
+  return (
+    <span
+      className="inline-flex items-center text-[11px] leading-none px-1.5 py-[3px] rounded border border-slate-700 bg-slate-950 font-bold"
+      style={rol?.color ? { color: rol.color, borderColor: rol.color } : undefined}
+    >
+      @{rol?.name ?? id}
+    </span>
+  );
+};
+
+/**
+ * A qué roles de Discord se les pregunta.
  *
  * Ninguno marcado es «a todo el gremio», que es lo que quiere casi siempre y
- * por eso es lo que sale de fábrica. Marcarlos todos es lo mismo dicho de otra
- * forma, y el servidor lo guarda igual -- así una lista no se queda restringida
- * a cinco rangos que mañana podrían ser seis.
+ * por eso es lo que sale de fábrica.
+ *
+ * No hay atajo de «marcarlos todos»: la lista de roles de un servidor cambia
+ * sola -- alguien crea uno el martes -- y una convocatoria que los tuviera
+ * todos escritos se quedaría cerrada al nuevo sin que nadie lo decidiera. Para
+ * eso está el vacío.
  */
-const RangosQuePueden: React.FC<{
-  roles: UserRole[];
-  onCambiar: (roles: UserRole[]) => void;
-}> = ({ roles, onCambiar }) => (
+const RolesQuePueden: React.FC<{
+  seleccionados: string[];
+  roles: DiscordRole[];
+  onCambiar: (roles: string[]) => void;
+}> = ({ seleccionados, roles, onCambiar }) => (
   <div>
     <label className="block text-xs uppercase tracking-wider text-slate-500 mb-1">
       Quién puede votar
     </label>
-    <div className="flex flex-wrap gap-2">
-      {USER_ROLES.map((role) => {
-        const marcado = roles.includes(role);
-        return (
-          <button
-            key={role}
-            type="button"
-            aria-pressed={marcado}
-            onClick={() =>
-              onCambiar(marcado ? roles.filter((r) => r !== role) : [...roles, role])
-            }
-            className={`min-h-tap px-3 rounded-md border text-sm font-bold transition-colors duration-micro ${
-              marcado
-                ? 'bg-amber-600 border-amber-500 text-white'
-                : 'bg-slate-950 border-slate-700 text-slate-300'
-            }`}
-          >
-            <i className={`fa-solid ${marcado ? 'fa-check' : 'fa-minus'} mr-2 text-[10px]`}></i>
-            {ROLE_LABELS[role] ?? role}
-          </button>
-        );
-      })}
-    </div>
-    <p className="text-meta text-slate-500 mt-1">
-      {roles.length === 0 || roles.length === USER_ROLES.length
-        ? 'Sin marcar nada, la encuesta es para todo el gremio.'
-        : `Sólo contestan ${listaDeRangos(roles)}. Los demás la ven, pero no votan.`}
-    </p>
+    {roles.length === 0 ? (
+      <p className="text-meta text-slate-500">
+        No puedo leer los roles del servidor de Discord. Comprueba en Administración que el bot está
+        configurado; mientras tanto la encuesta queda abierta a todo el gremio.
+      </p>
+    ) : (
+      <>
+        <div className="flex flex-wrap gap-2">
+          {roles.map((rol) => {
+            const marcado = seleccionados.includes(rol.id);
+            return (
+              <button
+                key={rol.id}
+                type="button"
+                aria-pressed={marcado}
+                onClick={() =>
+                  onCambiar(
+                    marcado
+                      ? seleccionados.filter((r) => r !== rol.id)
+                      // Se guardan en el orden del servidor y no en el de las
+                      // pulsaciones: la lista se lee tal cual en la agenda.
+                      : roles.filter((r) => r.id === rol.id || seleccionados.includes(r.id)).map((r) => r.id),
+                  )
+                }
+                className={`min-h-tap px-3 rounded-md border text-sm font-bold transition-colors duration-micro ${
+                  marcado ? 'bg-slate-800 border-slate-600' : 'bg-slate-950 border-slate-800'
+                }`}
+                style={
+                  rol.color
+                    ? { color: rol.color, borderColor: marcado ? rol.color : undefined }
+                    : undefined
+                }
+              >
+                <i className={`fa-solid ${marcado ? 'fa-check' : 'fa-minus'} mr-2 text-[10px]`}></i>
+                @{rol.name}
+              </button>
+            );
+          })}
+        </div>
+        <p className="text-meta text-slate-500 mt-1">
+          {seleccionados.length === 0
+            ? 'Sin marcar nada, la encuesta es para todo el gremio.'
+            : `Sólo contestan quienes tengan ${listaDeRoles(seleccionados, roles)} en Discord. Los demás la ven, pero no votan.`}
+        </p>
+      </>
+    )}
   </div>
 );
 
@@ -885,9 +954,10 @@ const RangosQuePueden: React.FC<{
 
 const FormularioEvento: React.FC<{
   borrador: Partial<GuildEvent>;
+  rolesDiscord: DiscordRole[];
   onGuardar: (borrador: Partial<GuildEvent>) => void;
   onCerrar: () => void;
-}> = ({ borrador, onGuardar, onCerrar }) => {
+}> = ({ borrador, rolesDiscord, onGuardar, onCerrar }) => {
   const [datos, setDatos] = useState({
     id: borrador.id,
     kind: (borrador.kind ?? 'war') as EventKind,
@@ -981,8 +1051,9 @@ const FormularioEvento: React.FC<{
           </div>
         </div>
 
-        <RangosQuePueden
-          roles={datos.allowedRoles}
+        <RolesQuePueden
+          seleccionados={datos.allowedRoles}
+          roles={rolesDiscord}
           onCambiar={(allowedRoles) => setDatos({ ...datos, allowedRoles })}
         />
 

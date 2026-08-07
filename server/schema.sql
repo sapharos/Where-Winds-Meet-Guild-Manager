@@ -670,3 +670,18 @@ ALTER TABLE event_series ADD COLUMN IF NOT EXISTS allowed_roles JSONB NOT NULL D
 -- cuántas partidas se llega. Las columnas se quedan y no se borran -- una
 -- columna borrada no se puede recuperar, y ahí están las respuestas de las
 -- semanas que sí lo preguntaron. Dejan de leerse y de escribirse, nada más.
+
+-- Quién puede contestar, tomado dos: los roles del servidor de Discord.
+--
+-- Es lo que el gremio ya usa a diario para decir quién es qué -- «Guerra A»,
+-- «Veterano» -- y tiene el grano que hace falta para una convocatoria, que los
+-- cinco rangos del sistema de usuarios no dan. Se guardan los ids y no los
+-- nombres: un rol renombrado en Discord sigue siendo el mismo rol, y quien lo
+-- lea escribe `<@&id>` y deja que Discord ponga el nombre y el color de ahora.
+--
+-- `allowed_roles` (los rangos) queda sin usar por el mismo motivo que `rounds`:
+-- las columnas no se borran. Vacía en todas las filas desde el día que se
+-- cambió, y las convocatorias que la tuvieran puesta pasan a estar abiertas a
+-- todo el gremio, que es lo que dice una lista vacía.
+ALTER TABLE guild_events ADD COLUMN IF NOT EXISTS allowed_discord_roles JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE event_series ADD COLUMN IF NOT EXISTS allowed_discord_roles JSONB NOT NULL DEFAULT '[]'::jsonb;

@@ -29,7 +29,6 @@ import { SCAN_FIELDS } from './scans.js';
 import { listBuilds } from './builds.js';
 import { listWeaponSets } from './weapons.js';
 import { permissionsFor } from './auth.js';
-import { ROLE_LABELS } from './permissions.js';
 import { LANE_INFO, LANE_CAPACITY, WAR_CAPACITY, SIDES, getBoard, listStrategies } from './war.js';
 import {
   getEvent,
@@ -698,8 +697,11 @@ export function eventoMensaje(evento) {
 
   const cabecera = [
     `${marca(evento.startsAt, 'F')}  ·  ${marca(evento.startsAt, 'R')}`,
+    // `<@&id>` lo pinta Discord con el nombre y el color de ahora, así que un
+    // rol renombrado no deja atrás una encuesta que dice otra cosa. No avisa a
+    // nadie: el mensaje va con allowed_mentions vacío.
     evento.allowedRoles?.length
-      ? `Abierta a: **${evento.allowedRoles.map((r) => ROLE_LABELS[r] ?? r).join(', ')}**`
+      ? `Abierta a: ${evento.allowedRoles.map((r) => `<@&${r}>`).join(' ')}`
       : null,
     evento.notes ? literal(evento.notes) : null,
     evento.cancelledAt
@@ -938,9 +940,11 @@ async function botonEvento(interaction) {
   const [answer] = String(elegido).split(':');
 
   try {
+    // Los roles vienen en la propia interacción, ya puestos por Discord: aquí
+    // no hace falta ir a preguntárselos.
     await respond(eventId, quien.playerId, { answer }, {
       source: 'discord',
-      rol: quien.cuentaRol,
+      misRoles: interaction.member?.roles ?? [],
     });
   } catch (err) {
     return aviso(err.message);

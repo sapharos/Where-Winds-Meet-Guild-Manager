@@ -18,7 +18,6 @@
 
 import { randomUUID } from 'node:crypto';
 import { pool, GUILD_ID } from './db.js';
-import { ROLES } from './permissions.js';
 
 export const EVENT_KINDS = ['war', 'practice', 'pve', 'casual'];
 export const EVENT_ANSWERS = ['yes', 'no', 'maybe'];
@@ -42,27 +41,36 @@ export const respuestasDe = (kind) =>
 const MAX_MINUTES = 60 * 12;
 
 /**
- * Quién puede contestar una encuesta: una lista de roles del sistema de
- * usuarios, y vacía quiere decir todo el gremio.
+ * Quién puede contestar una encuesta: una lista de roles del servidor de
+ * Discord, y vacía quiere decir todo el gremio.
  *
- * Vacía y no «todos los roles» escritos a mano a propósito: un evento sin
- * restringir tiene que seguir abierto a un rol que se añada después, y una
- * lista completa envejece en cuanto el catálogo cambia.
+ * Se guardan los ids, que son lo único estable: un rol renombrado sigue siendo
+ * el mismo rol, y quien tenga que escribirlo pone `<@&id>` y deja que Discord
+ * ponga el nombre y el color de ahora.
+ *
+ * No se comprueba contra la lista real del servidor a propósito. Haría falta
+ * una llamada a Discord para guardar un evento, y un rol borrado no rompe
+ * nada: no lo lleva nadie, así que deja de dejar entrar a nadie por él.
  */
-const limpiarRoles = (valor) => {
+export const limpiarRolesDiscord = (valor) => {
   if (!Array.isArray(valor)) return [];
-  const vistos = [...new Set(valor.filter((r) => ROLES.includes(r)))];
-  // Tenerlos todos es no restringir nada, y guardarlo así evita que la
-  // interfaz tenga que distinguir dos formas de decir lo mismo.
-  if (vistos.length === ROLES.length) return [];
-  // De más mando a menos, y no en el orden en que los marcaron: la lista se
-  // lee tal cual en la web y en Discord, y «Oficial, Líder» se lee mal.
-  return vistos.sort((a, b) => ROLES.indexOf(a) - ROLES.indexOf(b));
+  // Los ids de Discord son snowflakes: sólo dígitos, y de diecisiete o
+  // dieciocho cifras. Con exigir que sean números largos se cae la basura sin
+  // atarse a un tamaño que Discord puede cambiar.
+  const ids = valor.filter((r) => typeof r === 'string' && /^\d{5,25}$/.test(r));
+  return [...new Set(ids)];
 };
 
-/** Si un rol puede contestar este evento. */
-export const puedeContestar = (allowedRoles, rol) =>
-  !allowedRoles?.length || (rol ? allowedRoles.includes(rol) : false);
+/**
+ * Si alguien puede contestar este evento, según los roles que lleve puestos.
+ *
+ * `misRoles` en null es «no se sabe»: no está vinculado, o se fue del
+ * servidor, o Discord no contestó. No es lo mismo que no tener ninguno, pero
+ * se responde igual cuando hay restricción -- no se puede afirmar que tenga el
+ * rol, que es justo lo que se estaba preguntando.
+ */
+export const puedeContestar = (allowedRoles, misRoles) =>
+  !allowedRoles?.length || (misRoles ?? []).some((r) => allowedRoles.includes(r));
 
 const texto = (valor, tope) => {
   const limpio = String(valor ?? '').trim();
@@ -111,7 +119,7 @@ function limpiar(body) {
     title,
     startsAt,
     minutes: entero(body?.minutes, MAX_MINUTES, 60),
-    allowedRoles: limpiarRoles(body?.allowedRoles),
+    allowedRoles: limpiarRolesDiscord(body?.allowedRoles),
     notes: texto(body?.notes, 1000),
     opensAt,
     closesAt,
@@ -122,7 +130,8 @@ function limpiar(body) {
 // `notes` existe también en `event_responses`, y en cuanto una de
 // ellas se une con las respuestas, sin el prefijo Postgres no sabe cuál se le
 // está pidiendo.
-const CAMPOS = `e.id, e.kind, e.title, e.starts_at AS "startsAt", e.minutes, e.notes, e.allowed_roles AS "allowedRoles",
+const CAMPOS = `e.id, e.kind, e.title, e.starts_at AS "startsAt", e.minutes, e.notes,
+                e.allowed_discord_roles AS "allowedRoles",
                 e.opens_at AS "opensAt", e.closes_at AS "closesAt",
                 e.cancelled_at AS "cancelledAt", e.created_by AS "createdBy",
                 e.discord_channel_id AS "discordChannelId",
@@ -309,11 +318,11 @@ export async function saveEvent(body, createdBy) {
 
   await pool.query(
     `INSERT INTO guild_events
-       (id, guild_id, kind, title, starts_at, minutes, allowed_roles, notes, opens_at, closes_at, created_by)
+       (id, guild_id, kind, title, starts_at, minutes, allowed_discord_roles, notes, opens_at, closes_at, created_by)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
      ON CONFLICT (guild_id, id) DO UPDATE
        SET kind = EXCLUDED.kind, title = EXCLUDED.title, starts_at = EXCLUDED.starts_at,
-           minutes = EXCLUDED.minutes, allowed_roles = EXCLUDED.allowed_roles, notes = EXCLUDED.notes,
+           minutes = EXCLUDED.minutes, allowed_discord_roles = EXCLUDED.allowed_discord_roles, notes = EXCLUDED.notes,
            opens_at = EXCLUDED.opens_at, closes_at = EXCLUDED.closes_at`,
     [
       id,
@@ -367,13 +376,13 @@ export async function respond(
   eventId,
   playerId,
   body,
-  { source = 'web', porOtro = null, rol = null } = {},
+  { source = 'web', porOtro = null, misRoles = null } = {},
 ) {
   const answer = EVENT_ANSWERS.includes(body?.answer) ? body.answer : null;
   if (!answer) throw Object.assign(new Error('respuesta desconocida'), { status: 400 });
 
   const { rows } = await pool.query(
-    `SELECT kind, allowed_roles AS "allowedRoles", cancelled_at AS "cancelledAt",
+    `SELECT kind, allowed_discord_roles AS "allowedRoles", cancelled_at AS "cancelledAt",
             opens_at AS "opensAt", closes_at AS "closesAt"
        FROM guild_events WHERE guild_id = $1 AND id = $2`,
     [GUILD_ID, eventId],
@@ -395,11 +404,22 @@ export async function respond(
   // ventana: son tres los que preguntan, y una restricción que cada uno decide
   // si respeta no restringe nada. Quien organiza queda fuera de la regla --
   // anotar lo que alguien dijo por voz no es votar en su lugar.
-  if (!porOtro && !puedeContestar(evento.allowedRoles, rol)) {
-    throw Object.assign(
-      new Error('esta convocatoria no está abierta a tu rango'),
-      { status: 403 },
-    );
+  //
+  // Los roles se piden aquí dentro y no antes: cuestan una llamada a Discord
+  // cuando se vota desde la web, y la inmensa mayoría de las convocatorias no
+  // restringen nada. Sin lista no se pregunta.
+  if (!porOtro && evento.allowedRoles?.length) {
+    const suyos = typeof misRoles === 'function' ? await misRoles() : misRoles;
+    if (!puedeContestar(evento.allowedRoles, suyos)) {
+      throw Object.assign(
+        new Error(
+          suyos === null
+            ? 'esta convocatoria es sólo para ciertos roles de Discord, y no encuentro tu cuenta en el servidor'
+            : 'esta convocatoria no está abierta a tus roles de Discord',
+        ),
+        { status: 403 },
+      );
+    }
   }
 
   // La ventana no la comprueba quien pregunta sino esto, porque son tres los

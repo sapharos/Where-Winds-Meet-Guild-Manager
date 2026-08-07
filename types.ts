@@ -399,6 +399,21 @@ export const ROLE_LABELS: Record<UserRole, string> = {
 // server/permissions.js, del que sale el orden de la matriz de permisos.
 export const USER_ROLES: UserRole[] = ['admin', 'leader', 'subleader', 'officer', 'member'];
 
+/**
+ * Un rol del servidor de Discord, como lo devuelve el bot.
+ *
+ * No son los rangos de arriba: son los que el gremio ya usa a diario en su
+ * servidor -- «Guerra A», «Veterano» -- y tienen el grano que hace falta para
+ * decidir a quién se le pregunta en una convocatoria.
+ *
+ * `color` es null cuando el rol no tiene ninguno, que Discord pinta gris.
+ */
+export interface DiscordRole {
+  id: string;
+  name: string;
+  color: string | null;
+}
+
 export const PERMISSION_LABELS: Record<string, string> = {
   'roster.view': 'Ver el roster',
   'roster.edit': 'Editar miembros',
@@ -529,12 +544,12 @@ export interface GuildEvent {
   minutes: number;
   notes: string | null;
   /**
-   * Qué rangos pueden contestar la encuesta. Vacío: el gremio entero.
+   * Qué roles de Discord pueden contestar la encuesta. Vacío: el gremio entero.
    *
-   * Son los roles del sistema de usuarios, que es como este gremio nombra sus
-   * rangos desde que el rango del roster dejó de editarse.
+   * Son ids de roles del servidor de Discord. Se guardan los ids y no los
+   * nombres: un rol renombrado sigue siendo el mismo rol.
    */
-  allowedRoles: UserRole[];
+  allowedRoles: string[];
   opensAt: string | null;
   closesAt: string | null;
   cancelledAt: string | null;
@@ -552,6 +567,16 @@ export interface GuildEvent {
   no?: number;
   /** Sólo al pedir uno concreto. */
   responses?: EventResponse[];
+  /**
+   * Sólo al pedir uno concreto: si quien lo pidió puede contestarlo, y si su
+   * cuenta está vinculada a Discord.
+   *
+   * Lo decide el servidor porque los roles de Discord de cada uno los sabe él;
+   * `discordLinked` separa los dos motivos de un `mayAnswer` en false, que se
+   * arreglan de formas distintas.
+   */
+  mayAnswer?: boolean;
+  discordLinked?: boolean;
   /** Sólo en «lo mío»: lo que contestó quien pregunta, o null si no contestó. */
   mine?: { answer: EventAnswer } | null;
 }
@@ -567,7 +592,7 @@ export interface EventSeries {
   timezone: string;
   minutes: number;
   notes: string | null;
-  allowedRoles: UserRole[];
+  allowedRoles: string[];
   opensDaysBefore: number;
   opensTime: string;
   closesDaysBefore: number;

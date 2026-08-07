@@ -194,6 +194,7 @@ export async function requireAuth(req, res, next) {
     const claims = jwt.verify(token, secret);
     const { rows } = await pool.query(
       `SELECT u.id, u.username, u.role, u.disabled, u.player_id AS "playerId",
+              u.discord_id AS "discordId",
               COALESCE(p.is_active, true) AS "memberActive"
          FROM users u
          LEFT JOIN players p ON p.guild_id = u.guild_id AND p.id = u.player_id
@@ -210,7 +211,15 @@ export async function requireAuth(req, res, next) {
 
     // The roster entry this account belongs to, which is what makes a personal
     // page possible and what lets a member edit their own builds.
-    req.user = { id: user.id, username: user.username, role: user.role, playerId: user.playerId };
+    // `discordId` viaja porque es lo que permite preguntarle a Discord qué
+    // roles lleva puesto quien contesta una encuesta restringida.
+    req.user = {
+      id: user.id,
+      username: user.username,
+      role: user.role,
+      playerId: user.playerId,
+      discordId: user.discordId,
+    };
     req.permissions = await permissionsFor(user.role);
     next();
   } catch {

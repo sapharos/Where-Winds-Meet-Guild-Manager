@@ -73,7 +73,13 @@ import {
   startAgendaScheduler,
 } from './discordCommands.js';
 import { listSeries, saveSeries, deleteSeries, seedSeries, asegurarEventos } from './agenda.js';
-import { listTextChannels, editOriginalInteraction, followUpInteraction } from './discordBot.js';
+import {
+  listTextChannels,
+  listGuildRoles,
+  memberRoles,
+  editOriginalInteraction,
+  followUpInteraction,
+} from './discordBot.js';
 import { VOICE_SLOTS, getVoiceChannels, setVoiceChannels, deployVoice } from './voice.js';
 import {
   listEvents,
@@ -82,6 +88,7 @@ import {
   cancelEvent,
   deleteEvent,
   respond,
+  puedeContestar,
   getAgendaChannel,
   setAgendaChannel,
   nextWar,
@@ -425,6 +432,22 @@ app.get('/api/events/mine', requireAuth, asHandler(async (req, res) => {
   res.json(req.user.playerId ? await myEvents(req.user.playerId) : []);
 }));
 
+// Los roles del servidor de Discord: los elige quien programa, y los lee todo
+// el mundo -- una convocatoria restringida tiene que poder decir a qué roles
+// está abierta, y quien la mira no siempre es quien la creó. No pide permiso
+// porque no hay nada que guardar: son los mismos nombres que cualquiera del
+// gremio ve en la lista de miembros de Discord.
+//
+// Sin bot devuelve la lista vacía y no un error: la pantalla tiene que poder
+// dibujarse igual y decir que falta configurar el bot, que es distinto de
+// haberse roto.
+app.get('/api/events/config/roles', requireAuth, asHandler(async (_req, res) => {
+  res.json({
+    bot: botEnabled(),
+    roles: botEnabled() ? await listGuildRoles().catch(() => []) : [],
+  });
+}));
+
 // El canal donde se publican las encuestas, elegido de una lista y no copiado a
 // mano. Leerlo pide gestionar eventos, que es quien va a publicar en él.
 app.get('/api/events/config/channel', requireAuth, requirePermission('events.manage'), asHandler(async (_req, res) => {
@@ -458,8 +481,29 @@ app.delete('/api/events/series/:id', requireAuth, requirePermission('events.mana
   res.json({ ok: true });
 }));
 
+/**
+ * El detalle de un evento, con si quien lo pide puede contestarlo.
+ *
+ * `mayAnswer` se calcula aquí y no en la pantalla porque los roles de Discord
+ * de cada uno los sabe el servidor, no el navegador. Enseñar los botones y que
+ * el servidor los rechace luego también funcionaría, pero es peor: quien no
+ * está invitado merece saberlo antes de pulsar, no después.
+ *
+ * `discordLinked` distingue los dos motivos por los que puede salir en false, y
+ * son motivos con arreglos distintos: uno se resuelve vinculando la cuenta y el
+ * otro pidiéndole el rol a un oficial.
+ */
 app.get('/api/events/:id', requireAuth, asHandler(async (req, res) => {
-  res.json(await getEvent(req.params.id));
+  const evento = await getEvent(req.params.id);
+  if (!evento.allowedRoles?.length) {
+    return res.json({ ...evento, mayAnswer: true, discordLinked: true });
+  }
+  const suyos = await memberRoles(req.user.discordId);
+  res.json({
+    ...evento,
+    mayAnswer: puedeContestar(evento.allowedRoles, suyos),
+    discordLinked: suyos !== null,
+  });
 }));
 
 app.post('/api/events', requireAuth, requirePermission('events.manage'), asHandler(async (req, res) => {
@@ -516,10 +560,12 @@ app.put('/api/events/:id/response', requireAuth, asHandler(async (req, res) => {
   if (!req.user.playerId) {
     return res.status(403).json({ error: 'tu cuenta no está unida a una ficha del roster' });
   }
-  // El rol de la cuenta es lo que decide si esta convocatoria está abierta a
-  // ella; lo comprueba el modelo, aquí sólo se le dice cuál es.
+  // Los roles de Discord de quien contesta son lo que decide si la convocatoria
+  // está abierta a él. Va como función y no como lista porque cuesta una
+  // llamada a Discord: el modelo sólo la invoca si el evento restringe algo,
+  // que es lo raro.
   const actualizado = await respond(req.params.id, req.user.playerId, req.body, {
-    rol: req.user.role,
+    misRoles: () => memberRoles(req.user.discordId),
   });
   // El mensaje de Discord se pone al día aunque la respuesta se diera aquí: es
   // la misma lista, y una encuesta que no cuenta lo contestado en la web es una

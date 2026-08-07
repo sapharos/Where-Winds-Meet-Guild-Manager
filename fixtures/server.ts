@@ -108,6 +108,29 @@ const MIEMBROS_DISCORD: DiscordMember[] = [
   { id: '100000000000000006', username: 'forastero', globalName: 'Un Forastero', nick: null },
 ];
 
+/**
+ * Los roles del servidor de Discord, de mentira.
+ *
+ * En el orden en que Discord los pinta -- de más arriba a más abajo -- porque
+ * es el orden en que se guardan y se leen. Uno sin color, que los hay.
+ */
+const ROLES_DISCORD = [
+  { id: '200000000000000001', name: 'Mando', color: '#eab308' },
+  { id: '200000000000000002', name: 'Guerra A', color: '#ef4444' },
+  { id: '200000000000000003', name: 'Guerra B', color: '#3b82f6' },
+  { id: '200000000000000004', name: 'Veterano', color: '#22c55e' },
+  { id: '200000000000000005', name: 'Recluta', color: null },
+];
+
+/**
+ * Los roles que lleva puestos quien mira el banco.
+ *
+ * Está en «Mando» y en «Guerra A», y no en «Guerra B»: así hay una convocatoria
+ * a la que puede contestar y otra a la que no, que son los dos estados que hay
+ * que poder mirar.
+ */
+const MIS_ROLES_DISCORD = ['200000000000000001', '200000000000000002'];
+
 const store: Store = {
   players: structuredClone(fake.players),
   ranks: structuredClone(fake.ranks),
@@ -213,7 +236,7 @@ const eventos: Record<string, unknown>[] = [
     startsAt: enDias(3),
     minutes: 150,
     notes: null,
-    allowedRoles: ['admin', 'leader', 'subleader', 'officer'],
+    allowedRoles: ['200000000000000001', '200000000000000002'],
     opensAt: enDias(-3),
     closesAt: enDias(2, 12, 0),
     cancelledAt: null,
@@ -226,7 +249,7 @@ const eventos: Record<string, unknown>[] = [
     startsAt: enDias(4, 21, 0),
     minutes: 90,
     notes: null,
-    allowedRoles: ['officer', 'member'],
+    allowedRoles: ['200000000000000003', '200000000000000005'],
     opensAt: null,
     closesAt: null,
     cancelledAt: null,
@@ -298,7 +321,14 @@ const conRecuento = (e: Record<string, unknown>) => ({
 
 const conRespuestas = (id: string) => {
   const e = eventos.find((x) => x.id === id);
-  return e ? { ...e, responses: respuestas[id] ?? [] } : null;
+  if (!e) return null;
+  const abierta = (e.allowedRoles ?? []) as string[];
+  return {
+    ...e,
+    responses: respuestas[id] ?? [],
+    mayAnswer: !abierta.length || abierta.some((r) => MIS_ROLES_DISCORD.includes(r)),
+    discordLinked: true,
+  };
 };
 
 const anotar = (id: string, playerId: string, body: Record<string, unknown>, porOtro: string | null) => {
@@ -308,8 +338,8 @@ const anotar = (id: string, playerId: string, body: Record<string, unknown>, por
   // apuntar lo que alguien dijo por voz no es votar en su lugar.
   const evento = eventos.find((x) => x.id === id);
   const abierta = (evento?.allowedRoles ?? []) as string[];
-  if (!porOtro && abierta.length && !abierta.includes(fake.session.user.role)) {
-    return { error: 'esta convocatoria no está abierta a tu rango' };
+  if (!porOtro && abierta.length && !abierta.some((r) => MIS_ROLES_DISCORD.includes(r))) {
+    return { error: 'esta convocatoria no está abierta a tus roles de Discord' };
   }
   // En una guerra no hay «tal vez». Como el servidor, por si alguien llega por
   // otro camino que no sean los botones.
@@ -400,6 +430,7 @@ const GET: [RegExp, Ruta][] = [
   [/^\/users$/, () => store.usuarios],
   [/^\/discord\/status$/, () => ({ bot: true })],
   [/^\/discord\/voice-channels$/, () => CANALES_VOZ],
+  [/^\/events\/config\/roles$/, () => ({ bot: true, roles: ROLES_DISCORD })],
   [/^\/discord\/soundboard$/, () => SONIDOS],
   [/^\/war\/voice-channels$/, () => ({ bot: true, channels: mapaVoz })],
   [/^\/war\/horn$/, () => cuerno],
