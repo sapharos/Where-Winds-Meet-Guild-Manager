@@ -685,3 +685,13 @@ ALTER TABLE event_series ADD COLUMN IF NOT EXISTS allowed_roles JSONB NOT NULL D
 -- todo el gremio, que es lo que dice una lista vacía.
 ALTER TABLE guild_events ADD COLUMN IF NOT EXISTS allowed_discord_roles JSONB NOT NULL DEFAULT '[]'::jsonb;
 ALTER TABLE event_series ADD COLUMN IF NOT EXISTS allowed_discord_roles JSONB NOT NULL DEFAULT '[]'::jsonb;
+
+-- `events.reset` -- reiniciar una encuesta -- no se siembra aquí a mano: le vale
+-- el mecanismo general de `ensurePermissions`, que a cada permiso nuevo del
+-- catálogo le aplica una vez lo que diga DEFAULT_PERMISSIONS. Ahí ya está en
+-- admin, líder y sublíder, y fuera de oficial.
+--
+-- `roster.uid` sí necesitó siembra propia porque era un matiz de `roster.edit`
+-- y había que dárselo a quien ya lo tuviera aunque hubiera cambiado la matriz.
+-- Este es al revés: un oficial programa la guerra del sábado y no por eso puede
+-- tirar las cincuenta respuestas que ya lleva.

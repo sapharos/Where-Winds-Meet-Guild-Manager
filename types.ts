@@ -423,6 +423,7 @@ export const PERMISSION_LABELS: Record<string, string> = {
   'war.edit': 'Editar despliegues y unidades',
   'war.voice': 'Mover a canales de voz',
   'events.manage': 'Programar eventos',
+  'events.reset': 'Reiniciar una encuesta',
   'data.export': 'Exportar datos',
   'data.import': 'Importar datos',
   'builds.manage': 'Editar builds de cualquiera',

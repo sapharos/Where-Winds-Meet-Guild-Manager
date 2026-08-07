@@ -24,6 +24,10 @@ export const PERMISSIONS = [
   'war.edit',
   'war.voice',
   'events.manage',
+  // Borrar todo lo contestado de una encuesta y empezarla de cero. Aparte de
+  // programar porque no se deshace: quien organiza corrige la hora a diario,
+  // pero tirar cincuenta respuestas es otra cosa.
+  'events.reset',
   'data.export',
   'data.import',
   'builds.manage',
@@ -44,6 +48,7 @@ export const DEFAULT_PERMISSIONS = {
     'war.edit',
     'war.voice',
     'events.manage',
+    'events.reset',
     'data.export',
   ],
   officer: ['roster.view', 'war.view', 'war.edit', 'war.voice', 'events.manage', 'data.export'],

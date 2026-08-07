@@ -115,6 +115,11 @@ interface Props {
   /** La ficha de quien está mirando, si tiene una. Sin ella no puede contestar. */
   myPlayerId?: string | null;
   canManage: boolean;
+  /**
+   * Si puede reiniciar una encuesta, que es permiso aparte de programar: no se
+   * deshace, y de fábrica llega hasta sublíder.
+   */
+  canReset?: boolean;
 }
 
 /**
@@ -133,7 +138,7 @@ const nombreDeRol = (id: string, roles: DiscordRole[]) =>
 const listaDeRoles = (ids: string[], roles: DiscordRole[]) =>
   ids.map((id) => nombreDeRol(id, roles)).join(', ');
 
-const Agenda: React.FC<Props> = ({ players, myPlayerId, canManage }) => {
+const Agenda: React.FC<Props> = ({ players, myPlayerId, canManage, canReset = false }) => {
   // Los roles del servidor de Discord: quien programa los elige y todo el mundo
   // los lee, porque una convocatoria guarda ids y el nombre hay que ir a
   // buscarlo. Sin bot llega vacío y todo lo demás sigue igual.
@@ -150,6 +155,8 @@ const Agenda: React.FC<Props> = ({ players, myPlayerId, canManage }) => {
   const [abierto, setAbierto] = useState<GuildEvent | null>(null);
   const [editando, setEditando] = useState<Partial<GuildEvent> | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** Lo último que se hizo y salió bien, para decirlo sin gastar un diálogo. */
+  const [aviso, setAviso] = useState<string | null>(null);
 
   const cargar = useCallback(async () => {
     try {
@@ -212,6 +219,25 @@ const Agenda: React.FC<Props> = ({ players, myPlayerId, canManage }) => {
       await tras(abierto ? guardado : undefined);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo guardar el evento');
+    }
+  };
+
+  const reiniciar = async (event: GuildEvent) => {
+    setError(null);
+    setAviso(null);
+    try {
+      const { borradas, ...actualizado } = await api<GuildEvent & { borradas: number }>(
+        `/events/${event.id}/reset`,
+        { method: 'POST' },
+      );
+      await tras(actualizado as GuildEvent);
+      setAviso(
+        borradas === 0
+          ? 'La encuesta ya estaba vacía.'
+          : `Encuesta reiniciada: se borraron ${borradas} ${borradas === 1 ? 'respuesta' : 'respuestas'}.`,
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo reiniciar la encuesta');
     }
   };
 
@@ -295,6 +321,15 @@ const Agenda: React.FC<Props> = ({ players, myPlayerId, canManage }) => {
       {error && (
         <p className="text-sm text-red-400 border border-red-900 bg-red-950/40 rounded-md px-3 py-2">
           {error}
+        </p>
+      )}
+
+      {/* Cuántas respuestas se llevó por delante un reinicio. Se dice el número
+          porque «hecho» no distingue haber tirado cincuenta de no haber tirado
+          nada, y es justo lo que se quiere saber después de pulsar. */}
+      {aviso && (
+        <p className="text-sm text-emerald-400 border border-emerald-900 bg-emerald-950/40 rounded-md px-3 py-2">
+          {aviso}
         </p>
       )}
 
@@ -413,6 +448,8 @@ const Agenda: React.FC<Props> = ({ players, myPlayerId, canManage }) => {
             }}
             onEditar={() => setEditando(abierto)}
             onCancelar={() => cancelar(abierto)}
+            canReset={canReset}
+            onReiniciar={() => reiniciar(abierto)}
             onPublicar={async () => {
               setError(null);
               try {
@@ -639,6 +676,8 @@ const DetalleEvento: React.FC<{
   onEditar: () => void;
   onCancelar: () => void;
   onPublicar: () => void;
+  canReset: boolean;
+  onReiniciar: () => void;
 }> = ({
   event,
   players,
@@ -651,11 +690,18 @@ const DetalleEvento: React.FC<{
   onEditar,
   onCancelar,
   onPublicar,
+  canReset,
+  onReiniciar,
 }) => {
   // Lo decide el servidor, que es quien sabe qué roles lleva cada uno en
   // Discord. Sin campo -- un detalle traído antes de que esto existiera -- se
   // supone que sí, que es como se comportaba hasta ahora.
   const invitado = event.mayAnswer !== false;
+  // Reiniciar no se deshace y borra el trabajo de treinta personas, así que
+  // pide pulsar dos veces. El segundo botón dice lo que va a pasar y cuánto
+  // cuesta -- no «¿seguro?», que no informa de nada.
+  const [confirmando, setConfirmando] = useState(false);
+  const contestadas = (event.responses ?? []).length;
 
   const porRespuesta = (answer: EventAnswer) =>
     (event.responses ?? []).filter((r) => r.answer === answer);
@@ -853,6 +899,33 @@ const DetalleEvento: React.FC<{
             <i className={`fa-solid ${event.cancelledAt ? 'fa-rotate-left' : 'fa-ban'} mr-2`}></i>
             {event.cancelledAt ? 'Reactivar' : 'Cancelar evento'}
           </button>
+
+          {/* Empezar la encuesta de cero. Cuando lo que se preguntó cambia
+              debajo de las respuestas -- otra hora, otros roles -- lo guardado
+              deja de decir lo que parece que dice. */}
+          {canReset && (
+            <button
+              onClick={() => {
+                if (!confirmando) return setConfirmando(true);
+                setConfirmando(false);
+                onReiniciar();
+              }}
+              onBlur={() => setConfirmando(false)}
+              title="Borra todo lo contestado y deja el evento en pie. No se deshace."
+              className={`min-h-tap px-4 rounded-md border transition-colors duration-micro ${
+                confirmando
+                  ? 'border-red-600 bg-red-950 text-red-300 font-bold'
+                  : 'border-slate-700 text-slate-300'
+              }`}
+            >
+              <i className="fa-solid fa-arrow-rotate-left mr-2"></i>
+              {confirmando
+                ? contestadas === 0
+                  ? 'Sí, reiniciar'
+                  : `Sí, borrar ${contestadas} ${contestadas === 1 ? 'respuesta' : 'respuestas'}`
+                : 'Reiniciar encuesta'}
+            </button>
+          )}
         </div>
       )}
     </div>

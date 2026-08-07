@@ -555,6 +555,7 @@ const App: React.FC = () => {
             players={players}
             myPlayerId={session.user.playerId}
             canManage={can('events.manage')}
+            canReset={can('events.reset')}
           />
         ) : activeTab === 'roster' ? (
           <MemberManager

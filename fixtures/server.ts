@@ -507,6 +507,11 @@ const ESCRITURAS: [string, RegExp, Ruta][] = [
     }
     return conRespuestas(m[1]);
   }],
+  ['POST', /^\/events\/([^/]+)\/reset$/, (m) => {
+    const cuantas = (respuestas[m[1]] ?? []).length;
+    respuestas[m[1]] = [];
+    return { ...conRespuestas(m[1]), borradas: cuantas };
+  }],
   ['POST', /^\/events\/([^/]+)\/cancel$/, (m, _req, body) => {
     const e = eventos.find((x) => x.id === m[1]);
     if (e) e.cancelledAt = body?.cancelled === false ? null : new Date().toISOString();

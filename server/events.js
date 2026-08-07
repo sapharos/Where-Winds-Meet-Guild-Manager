@@ -359,6 +359,34 @@ export async function cancelEvent(id, cancelado = true) {
   return getEvent(id);
 }
 
+/**
+ * Reiniciar la encuesta: se borra lo contestado y el evento se queda intacto.
+ *
+ * Sirve cuando lo que se preguntó cambia debajo de las respuestas -- se mueve
+ * la hora, se acota a otros roles, se convoca de nuevo lo que se había caído --
+ * y lo que hay guardado ya no dice lo que dice que dice.
+ *
+ * No se deshace, y por eso no lo puede hacer cualquiera que programe: la ruta
+ * pide `events.reset`, que de fábrica llega hasta sublíder.
+ *
+ * Devuelve cuántas se borraron. Es lo que permite decir «se borraron 23» en vez
+ * de un «hecho» que no distingue reiniciar una encuesta llena de reiniciar dos
+ * veces la misma.
+ */
+export async function resetResponses(id) {
+  const { rows } = await pool.query(
+    `SELECT 1 FROM guild_events WHERE guild_id = $1 AND id = $2`,
+    [GUILD_ID, id],
+  );
+  if (!rows.length) throw Object.assign(new Error('no existe ese evento'), { status: 404 });
+
+  const { rowCount } = await pool.query(
+    `DELETE FROM event_responses WHERE guild_id = $1 AND event_id = $2`,
+    [GUILD_ID, id],
+  );
+  return { borradas: rowCount, evento: await getEvent(id) };
+}
+
 export async function deleteEvent(id) {
   await pool.query(`DELETE FROM event_responses WHERE guild_id = $1 AND event_id = $2`, [GUILD_ID, id]);
   await pool.query(`DELETE FROM guild_events WHERE guild_id = $1 AND id = $2`, [GUILD_ID, id]);

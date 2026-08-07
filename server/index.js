@@ -88,6 +88,7 @@ import {
   cancelEvent,
   deleteEvent,
   respond,
+  resetResponses,
   puedeContestar,
   getAgendaChannel,
   setAgendaChannel,
@@ -520,6 +521,19 @@ app.post('/api/events/:id/cancel', requireAuth, requirePermission('events.manage
   const actualizado = await cancelEvent(req.params.id, req.body?.cancelled !== false);
   void refrescarEvento(actualizado.id);
   res.json(actualizado);
+}));
+
+// Reiniciar la encuesta: borra todo lo contestado y deja el evento en pie.
+//
+// Permiso propio y no `events.manage`: programar es lo de todos los días y esto
+// no se deshace. De fábrica llega hasta sublíder.
+//
+// El mensaje de Discord se reescribe después, que si no se queda enseñando una
+// lista de gente que ya no está guardada en ningún sitio.
+app.post('/api/events/:id/reset', requireAuth, requirePermission('events.reset'), asHandler(async (req, res) => {
+  const { borradas, evento } = await resetResponses(req.params.id);
+  void refrescarEvento(evento.id);
+  res.json({ ...evento, borradas });
 }));
 
 // Lanzar la encuesta al canal. Es un acto y no un efecto de guardar: un evento
