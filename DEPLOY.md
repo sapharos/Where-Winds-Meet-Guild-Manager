@@ -198,9 +198,16 @@ board says so without anyone pressing anything.
 
 `/build` is each member's own primary build: its name, weapons, role, notes, the
 weapon set the game groups those weapons under, and the names of whatever other
-builds they have saved. Two dropdowns underneath change it — which of their
-builds is the primary one, and what role they play with it — and the message
-redraws itself with whatever ended up saved.
+builds they have saved. Three dropdowns underneath change it — which of their
+builds is the primary one, which weapons it carries, and what role they play with
+it — and the message redraws itself with whatever ended up saved.
+
+Weapons are offered one by one rather than as sets, because a build stores loose
+weapons and the set is worked out afterwards from the first one; offering pairs
+would forbid the mixes the model allows. Each option carries its set name as the
+description, which is what groups the list to the eye — Discord has no way to
+group it for real. The first dropdown only appears to someone with more than one
+build saved, since there would be nothing to choose between.
 
 That role is not decoration: the primary build's first role is what the roster
 carries, and the War Room counts it to balance the lanes. A member whose main
@@ -210,10 +217,14 @@ whole reason this is worth a command rather than a trip to the web.
 It asks for no permission at all, matching the web: whoever is linked to their
 own roster entry may always edit their own builds. It never shows anyone else's
 — unlike `/perfil`, this is a place where something gets changed, and mixing the
-two would mean deciding whose dropdown was pressed on every click. Creating the
-first build, changing its weapons, and writing notes stay on the web, where the
-catalogue has colours and icons; `publico: Sí` posts it to the channel as a
-read-only card, with no dropdowns for passers-by to press.
+two would mean deciding whose dropdown was pressed on every click. Creating a
+build, naming it, and writing its notes stay on the web; `publico: Sí` posts it
+to the channel as a read-only card, with no dropdowns for passers-by to press.
+
+If the guild's weapon catalogue ever grows past the 25 options Discord allows in
+one dropdown, the list keeps whatever the member is already carrying — otherwise
+opening it would be a way to lose them — and the card says how many were left
+out rather than trimming quietly.
 
 Discord delivers commands as ordinary HTTPS requests to this app, so there is no
 extra process to run — but it has to be able to prove they are really from

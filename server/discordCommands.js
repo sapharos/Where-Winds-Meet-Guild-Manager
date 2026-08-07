@@ -26,7 +26,7 @@
 import { createPublicKey, verify } from 'node:crypto';
 import { pool, GUILD_ID } from './db.js';
 import { SCAN_FIELDS } from './scans.js';
-import { listBuilds, saveBuilds } from './builds.js';
+import { listBuilds, saveBuilds, MAX_WEAPONS } from './builds.js';
 import { listWeaponSets } from './weapons.js';
 import { permissionsFor } from './auth.js';
 import { LANE_INFO, LANE_CAPACITY, WAR_CAPACITY, SIDES, getBoard, listStrategies } from './war.js';
@@ -469,6 +469,43 @@ const NOMBRE_PAPEL = Object.fromEntries(PAPELES.map((p) => [p.value, p.label]));
 const MAX_OPCIONES = 25;
 
 /**
+ * Las armas que se pueden elegir, sacadas del catálogo de conjuntos.
+ *
+ * Una por opción y no un conjunto entero: una build guarda armas sueltas, no un
+ * conjunto -- el conjunto se deduce después, buscando cuál contiene la primera
+ * --, así que ofrecer pares impediría la mezcla que el modelo sí permite. El
+ * nombre del conjunto va de descripción, que es lo que agrupa la lista a la
+ * vista sin que Discord tenga forma de agruparla de verdad.
+ *
+ * Si el gremio llega a tener más armas de las que caben, las que ya lleva
+ * puestas entran siempre: sin eso, elegir se convertiría en perderlas.
+ */
+function opcionesDeArmas(weaponSets, puestas = []) {
+  const vistas = new Set();
+  const todas = [];
+  for (const conjunto of weaponSets) {
+    for (const arma of conjunto.weapons ?? []) {
+      // Un arma en dos conjuntos sería dos opciones con el mismo valor, y eso
+      // Discord lo rechaza entero. Se queda con el primero que la nombró.
+      if (vistas.has(arma)) continue;
+      vistas.add(arma);
+      todas.push({
+        label: recortar(arma, 100),
+        value: arma,
+        description: recortar(conjunto.name, 100),
+        default: puestas.includes(arma),
+      });
+    }
+  }
+
+  if (todas.length <= MAX_OPCIONES) return { opciones: todas, recortado: 0 };
+
+  const suyas = todas.filter((o) => o.default);
+  const resto = todas.filter((o) => !o.default).slice(0, MAX_OPCIONES - suyas.length);
+  return { opciones: [...suyas, ...resto], recortado: todas.length - suyas.length - resto.length };
+}
+
+/**
  * Tu build principal, y lo que puedes cambiarle desde aquí.
  *
  * Pura y sin Discord delante por la misma razón que `perfilEmbed`: es la parte
@@ -577,6 +614,30 @@ export function buildVista({ player, builds, weaponSets, editable = true, guildN
     }
   }
 
+  const { opciones, recortado } = opcionesDeArmas(weaponSets, principal.weapons ?? []);
+  if (opciones.length) {
+    components.push({
+      type: 1,
+      components: [
+        {
+          type: 3,
+          custom_id: 'build:armas',
+          placeholder: `Con qué juegas (hasta ${MAX_WEAPONS})`,
+          min_values: 1,
+          max_values: Math.min(MAX_WEAPONS, opciones.length),
+          options: opciones,
+        },
+      ],
+    });
+    if (recortado) {
+      embeds[0].fields.push({
+        name: 'Aviso',
+        value: `El catálogo tiene ${recortado} arma(s) más de las que caben en la lista; ésas se ponen en la web.`,
+        inline: false,
+      });
+    }
+  }
+
   components.push({
     type: 1,
     components: [
@@ -593,6 +654,14 @@ export function buildVista({ player, builds, weaponSets, editable = true, guildN
       },
     ],
   });
+
+  // Con una sola build no hay selector de principal, y sin decirlo parece que
+  // el comando no sabe hacer más. Se dice dónde se crean las otras.
+  if (builds.length === 1) {
+    embeds[0].footer = {
+      text: `${embeds[0].footer.text} · Para tener más de una build, créalas en la web`,
+    };
+  }
 
   return { embeds, components };
 }
@@ -1621,6 +1690,16 @@ async function menuBuild(interaction) {
     if (!papeles.length) return aviso('Elige al menos un papel.');
     const principal = builds.find((b) => b.isPrimary) ?? builds[0];
     siguientes = builds.map((b) => (b === principal ? { ...b, roles: papeles } : b));
+  } else if (qué === 'armas') {
+    // Contra el catálogo y no contra lo que llegue: el valor lo manda el
+    // cliente, y un arma inventada quedaría guardada como si existiera.
+    const catalogo = new Set((await listWeaponSets()).flatMap((c) => c.weapons ?? []));
+    const armas = elegido.filter((a) => catalogo.has(a)).slice(0, MAX_WEAPONS);
+    if (!armas.length) {
+      return aviso('No reconozco esas armas. Vuelve a escribir `/build` para ver la lista al día.');
+    }
+    const principal = builds.find((b) => b.isPrimary) ?? builds[0];
+    siguientes = builds.map((b) => (b === principal ? { ...b, weapons: armas } : b));
   } else {
     return aviso('Ese desplegable es de una versión anterior del bot. Vuelve a escribir `/build`.');
   }
