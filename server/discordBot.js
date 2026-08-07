@@ -186,6 +186,35 @@ export function olvidarRoles(discordId) {
 }
 
 /**
+ * Un mensaje privado.
+ *
+ * Son dos pasos: primero se abre el canal directo con esa persona -- Discord lo
+ * devuelve ya abierto si existía -- y luego se escribe en él como en cualquier
+ * otro canal.
+ *
+ * Puede fallar por una razón que no es un error nuestro: quien tiene cerrados
+ * los mensajes de los miembros del servidor no los recibe, y Discord contesta
+ * 403. Se devuelve false en vez de lanzar, porque avisar a veinte y que tres lo
+ * tengan cerrado no puede tumbar el aviso de los otros diecisiete.
+ */
+export async function sendDirectMessage(discordId, payload) {
+  try {
+    const canal = await botFetch('/users/@me/channels', {
+      method: 'POST',
+      body: JSON.stringify({ recipient_id: discordId }),
+    });
+    if (!canal?.id) return false;
+    await botFetch(`/channels/${canal.id}/messages`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Reescribe la respuesta de una interacción que se dejó «pensando…».
  *
  * Discord da tres segundos para acusar recibo, pero quince minutos para

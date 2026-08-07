@@ -11,6 +11,9 @@ import {
   DiscordMember,
   DiscordRole,
   DiscordVoiceChannel,
+  REMINDER_MODES,
+  REMINDER_MODE_LABELS,
+  ReminderMode,
   ManagedUser,
   PERMISSION_LABELS,
   PermissionCatalog,
@@ -1287,6 +1290,55 @@ const SerieFila: React.FC<{
             <input className={campo} value={b.closesTime} onChange={(e) => setB({ ...b, closesTime: e.target.value })} />
           </div>
         </label>
+
+        {/* Cómo se recuerda cada convocatoria que salga de esta serie. Lo
+            heredan al crearse; cambiarlo aquí no toca las ya creadas. */}
+        <label>
+          <span className={etiqueta}>Cómo recordarlo</span>
+          <select
+            className={campo}
+            value={b.reminderMode ?? 'channel'}
+            onChange={(e) => setB({ ...b, reminderMode: e.target.value as ReminderMode })}
+          >
+            {REMINDER_MODES.map((m) => (
+              <option key={m} value={m}>
+                {REMINDER_MODE_LABELS[m]}
+              </option>
+            ))}
+          </select>
+        </label>
+        {b.reminderMode !== 'none' && (
+          <label>
+            <span className={etiqueta}>Repetir cada (días) y hora</span>
+            <div className="flex gap-2">
+              <input
+                type="number"
+                min={0}
+                max={30}
+                className={campo}
+                placeholder="0"
+                value={b.reminderEveryDays ?? ''}
+                onChange={(e) => {
+                  // Cero o vacío es «no repetir», y entonces la hora sobra: el
+                  // servidor descarta una sin la otra, así que se limpian juntas.
+                  const dias = Number(e.target.value) || 0;
+                  setB({
+                    ...b,
+                    reminderEveryDays: dias > 0 ? Math.min(30, dias) : null,
+                    reminderTime: dias > 0 ? b.reminderTime || '19:00' : null,
+                  });
+                }}
+              />
+              <input
+                type="time"
+                className={campo}
+                value={b.reminderTime ?? ''}
+                disabled={!b.reminderEveryDays}
+                onChange={(e) => setB({ ...b, reminderTime: e.target.value || null })}
+              />
+            </div>
+          </label>
+        )}
       </div>
 
       <div className="flex items-center gap-4 flex-wrap mt-3">

@@ -10,6 +10,10 @@ import {
   DiscordRole,
   GuildEvent,
   Player,
+  REMINDER_MODES,
+  REMINDER_MODE_HINTS,
+  REMINDER_MODE_LABELS,
+  ReminderMode,
   respuestasDe,
 } from '../types';
 import Sheet from './Sheet';
@@ -773,6 +777,30 @@ const DetalleEvento: React.FC<{
         </p>
       )}
 
+      {/* Cómo se le va a recordar a quien no conteste. Sólo lo ve quien
+          organiza: para el resto es una promesa de que le van a dar la lata, y
+          quien la programa necesita poder comprobarla sin abrir el formulario. */}
+      {canManage && (
+        <p className="text-meta text-slate-500">
+          <i
+            className={`fa-solid ${
+              event.reminderMode === 'dm'
+                ? 'fa-envelope'
+                : event.reminderMode === 'none'
+                  ? 'fa-bell-slash'
+                  : 'fa-hashtag'
+            } mr-1.5`}
+          ></i>
+          {event.reminderMode === 'none'
+            ? 'Sin recordatorios.'
+            : `Se recuerda ${event.reminderMode === 'dm' ? 'por privado' : 'en el canal'} ${
+                event.reminderEveryDays && event.reminderTime
+                  ? `cada ${event.reminderEveryDays === 1 ? 'día' : `${event.reminderEveryDays} días`} a las ${event.reminderTime}`
+                  : 'una vez, seis horas antes de que cierre'
+              }.`}
+        </p>
+      )}
+
       {myPlayerId && !event.cancelledAt && (
         <div>
           <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-2">Tu respuesta</p>
@@ -1028,6 +1056,117 @@ const RolesQuePueden: React.FC<{
   </div>
 );
 
+/* ------------------------------------------------------------ el recordatorio */
+
+/**
+ * Cómo se le recuerda la encuesta a quien no ha contestado.
+ *
+ * Dos decisiones y no una: por dónde llega, y cada cuánto. La segunda es
+ * opcional a propósito -- lo normal es un solo aviso poco antes de que cierre, y
+ * repetir cada día tiene sentido en una encuesta que lleva la semana abierta.
+ */
+const ComoRecordar: React.FC<{
+  modo: ReminderMode;
+  cada: number | null;
+  hora: string;
+  onCambiar: (cambio: { reminderMode?: ReminderMode; reminderEveryDays?: number | null; reminderTime?: string }) => void;
+}> = ({ modo, cada, hora, onCambiar }) => {
+  const campo = 'w-full bg-slate-950 border border-slate-800 rounded p-2 text-sm outline-none focus:ring-1 focus:ring-amber-500';
+  // Los dos van juntos: el servidor descarta una cadencia sin hora, así que
+  // encender la repetición propone una hora en vez de guardar algo a medias.
+  const repite = Boolean(cada && hora);
+
+  return (
+    <div>
+      <label className="block text-xs uppercase tracking-wider text-slate-500 mb-1">
+        Cómo recordarlo
+      </label>
+      <div className="flex flex-wrap gap-2">
+        {REMINDER_MODES.map((m) => (
+          <button
+            key={m}
+            type="button"
+            aria-pressed={modo === m}
+            onClick={() => onCambiar({ reminderMode: m })}
+            className={`min-h-tap px-3 rounded-md border text-sm font-bold transition-colors duration-micro ${
+              modo === m
+                ? 'bg-amber-600 border-amber-500 text-white'
+                : 'bg-slate-950 border-slate-700 text-slate-300'
+            }`}
+          >
+            <i
+              className={`fa-solid ${
+                m === 'channel' ? 'fa-hashtag' : m === 'dm' ? 'fa-envelope' : 'fa-bell-slash'
+              } mr-2 text-[10px]`}
+            ></i>
+            {REMINDER_MODE_LABELS[m]}
+          </button>
+        ))}
+      </div>
+      <p className="text-meta text-slate-500 mt-1">{REMINDER_MODE_HINTS[modo]}</p>
+
+      {modo !== 'none' && (
+        <div className="mt-3">
+          <label className="flex items-center gap-2 min-h-tap cursor-pointer">
+            <input
+              type="checkbox"
+              checked={repite}
+              onChange={(e) =>
+                onCambiar(
+                  e.target.checked
+                    ? { reminderEveryDays: cada ?? 1, reminderTime: hora || '19:00' }
+                    : { reminderEveryDays: null, reminderTime: '' },
+                )
+              }
+              className="w-4 h-4 accent-amber-600"
+            />
+            <span className="text-sm text-slate-300">Repetirlo cada tantos días</span>
+          </label>
+
+          {repite ? (
+            <div className="grid grid-cols-2 gap-3 mt-2">
+              <div>
+                <label className="block text-xs uppercase tracking-wider text-slate-500 mb-1">
+                  Cada (días)
+                </label>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={1}
+                  max={30}
+                  className={campo}
+                  value={cada ?? 1}
+                  onChange={(e) =>
+                    onCambiar({ reminderEveryDays: Math.min(30, Math.max(1, Number(e.target.value) || 1)) })
+                  }
+                />
+              </div>
+              <div>
+                <label className="block text-xs uppercase tracking-wider text-slate-500 mb-1">
+                  A las
+                </label>
+                <input
+                  type="time"
+                  className={campo}
+                  value={hora}
+                  onChange={(e) => onCambiar({ reminderTime: e.target.value })}
+                />
+                {/* La hora es la del gremio y no la de quien programa: el
+                    recordatorio sale del servidor, no de este navegador. */}
+                <p className="text-meta text-slate-500 mt-1">Hora del gremio</p>
+              </div>
+            </div>
+          ) : (
+            <p className="text-meta text-slate-500 mt-1">
+              Sin repetir, sale uno solo seis horas antes de que cierre la encuesta.
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
 /* -------------------------------------------------------------- formulario */
 
 const FormularioEvento: React.FC<{
@@ -1044,6 +1183,9 @@ const FormularioEvento: React.FC<{
     minutes: borrador.minutes ?? 150,
     notes: borrador.notes ?? '',
     allowedRoles: borrador.allowedRoles ?? [],
+    reminderMode: (borrador.reminderMode ?? 'channel') as ReminderMode,
+    reminderEveryDays: borrador.reminderEveryDays ?? null,
+    reminderTime: borrador.reminderTime ?? '',
     opensAt: borrador.opensAt ? paraCampo(borrador.opensAt) : '',
     closesAt: borrador.closesAt ? paraCampo(borrador.closesAt) : '',
   });
@@ -1133,6 +1275,13 @@ const FormularioEvento: React.FC<{
           seleccionados={datos.allowedRoles}
           roles={rolesDiscord}
           onCambiar={(allowedRoles) => setDatos({ ...datos, allowedRoles })}
+        />
+
+        <ComoRecordar
+          modo={datos.reminderMode}
+          cada={datos.reminderEveryDays}
+          hora={datos.reminderTime}
+          onCambiar={(cambio) => setDatos({ ...datos, ...cambio })}
         />
 
         <div className="grid grid-cols-2 gap-3">

@@ -39,7 +39,14 @@ import {
   getAgendaChannel,
   setDiscordMessage,
 } from './events.js';
-import { botEnabled, postMessage, editMessage, deleteMessage, memberRoles } from './discordBot.js';
+import {
+  botEnabled,
+  postMessage,
+  editMessage,
+  deleteMessage,
+  memberRoles,
+  sendDirectMessage,
+} from './discordBot.js';
 import {
   asegurarEventos,
   pendientesDePublicar,
@@ -900,8 +907,27 @@ export async function avisarPendientes(id) {
   const conDiscord = faltan.filter((p) => p.discordId);
   const sinDiscord = faltan.filter((p) => !p.discordId);
 
+  // Por privado: uno a uno, y con los botones puestos, que es la diferencia
+  // entre avisar y dejar contestar. Quien lo reciba puede resolverlo ahí mismo
+  // sin ir a buscar el canal.
+  if (evento.reminderMode === 'dm') {
+    let llegaron = 0;
+    for (const p of conDiscord) {
+      const ok = await sendDirectMessage(p.discordId, {
+        content: cuandoCierra(evento),
+        ...eventoMensaje(evento),
+        allowed_mentions: { parse: [] },
+      });
+      if (ok) llegaron++;
+    }
+    await marcarAvisado(id);
+    // Quien no tiene Discord no cuenta: por privado no se le puede escribir, y
+    // decir que se avisó a alguien a quien no se avisó es peor que no avisar.
+    return llegaron;
+  }
+
   const lineas = [
-    `⏳  **${literal(evento.title)}** — la encuesta se cierra ${marca(evento.closesAt, 'R')}.`,
+    cuandoCierra(evento),
     conDiscord.length ? conDiscord.map((p) => `<@${p.discordId}>`).join(' ') : null,
     // A quien no tiene Discord vinculado se le nombra igual, para que quien
     // organiza sepa a quién le toca preguntar por voz.
@@ -917,6 +943,18 @@ export async function avisarPendientes(id) {
   await marcarAvisado(id);
   return faltan.length;
 }
+
+/**
+ * La primera línea de un recordatorio: qué es y cuánto queda.
+ *
+ * Sin fecha de cierre se dice cuándo empieza. Es el caso de un recordatorio
+ * repetido, que existe justamente para las encuestas que siguen abiertas hasta
+ * el final: decir «se cierra en null» sería peor que no decir nada.
+ */
+const cuandoCierra = (evento) =>
+  evento.closesAt
+    ? `⏳  **${literal(evento.title)}** — la encuesta se cierra ${marca(evento.closesAt, 'R')}.`
+    : `⏳  **${literal(evento.title)}** — es ${marca(evento.startsAt, 'R')} y no has contestado.`;
 
 /**
  * El reloj de la agenda.
@@ -985,11 +1023,12 @@ async function botonEvento(interaction) {
   const [answer] = String(elegido).split(':');
 
   try {
-    // Los roles vienen en la propia interacción, ya puestos por Discord: aquí
-    // no hace falta ir a preguntárselos.
+    // En un canal los roles vienen en la propia interacción, ya puestos por
+    // Discord. En un privado no hay `member`, así que hay que ir a buscarlos --
+    // y va como función para que sólo se pregunte si la convocatoria acota algo.
     await respond(eventId, quien.playerId, { answer }, {
       source: 'discord',
-      misRoles: interaction.member?.roles ?? [],
+      misRoles: interaction.member?.roles ?? (() => memberRoles(usuario.id)),
     });
   } catch (err) {
     return aviso(err.message);

@@ -20,7 +20,13 @@ DATABASE_SSL=false
 GUILD_ID=default-guild
 GUILD_NAME=My Guild
 WEB_PORT=8085
+AGENDA_TIMEZONE=America/Bogota
 ```
+
+`AGENDA_TIMEZONE` is the guild's own clock: the zone a reminder set for "19:00"
+is read in, and the one a new weekly series starts out on. Any IANA name
+(`Europe/Madrid`, `America/Mexico_City`). Leaving it out means `America/Bogota`,
+which is what it was before it was configurable.
 
 When PostgreSQL runs as another container, the host in `DATABASE_URL` is its
 container name — but only if both stacks share a Docker network. Attach this one
@@ -234,10 +240,47 @@ existing poll standing. An event still published in a channel that is no longer
 the agenda's says so, since its message would otherwise sit somewhere nobody
 reads and never update again.
 
-A guild war is answered with a dropdown — *Voy a todas (5)*, *a 4*, … , *Tal
-vez*, *No puedo* — because the useful answer is not "I'm coming" but "I'm coming
-to three". Everything else gets three buttons. A closed or cancelled poll keeps
-its message and loses its controls.
+A guild war is answered with two buttons — *Voy*, *No puedo*. There is no
+*Tal vez* on a war: the lanes are filled with names, and someone who might come
+occupies a slot that turns out to be empty. Practices, PvE and casual events
+keep the third button, where turning up late really is an answer. Wars answered
+before that change keep their stored *Tal vez* and still show it, so nobody
+silently vanishes from a tally — the message shows what exists and offers what
+it asks. A closed or cancelled poll keeps its message and loses its controls.
+
+**Who may answer** is per event, and it is the guild's own Discord roles —
+*Guerra A*, *Veterano* — not the five app ranks. Marking none means the whole
+guild, which is the normal case. Ids are stored rather than names, so renaming a
+role in Discord never leaves a poll saying something else; the message writes
+`<@&id>` and lets Discord supply the current name and colour. A role deleted in
+Discord simply stops letting anyone in through it. There is deliberately no
+"select all": a server grows roles on its own, and a poll with all of them
+written down would silently exclude whatever gets created on Tuesday.
+
+**Restricted polls notify only the roles they are for.** The mention rides in
+the message content — inside an embed it renders but does not notify — with
+`allowed_mentions.roles` as the allowlist, so an `@everyone` typed into an event
+title is drawn and stays silent. An unrestricted poll notifies nobody, as
+before. Editing never re-notifies, so every vote that rewrites the tally is
+quiet; *Volver a publicar* does, which is the point of pressing it.
+
+**Reminders are per event too**: in the channel (a post naming whoever is
+missing), by DM (one message each, buttons included, answerable from the
+inbox), or off. Either way a restricted poll never chases somebody who does not
+carry one of its roles — not even by name, since telling an officer to go ask
+them in person would be sending them to request something the site refuses. By
+default a reminder goes out once, six hours before the poll closes; an event can
+instead repeat it every N days at a wall-clock hour, which is what a poll that
+stays open all week needs. That hour is read in `AGENDA_TIMEZONE`
+(`America/Bogota` unless set), on the zone's calendar rather than by adding
+milliseconds, so a daylight-saving change does not drag it an hour.
+
+**Reiniciar encuesta** wipes every answer and leaves the event standing — same
+id, same hour, the Discord poll rewritten empty where it already was. It is for
+when what was asked changes underneath the answers. It carries its own
+permission, `events.reset`, which reaches subleader out of the box: scheduling
+is everyday work and this does not undo, so an officer who summons Saturday's
+war does not thereby get to bin the fifty answers it already holds.
 
 `/agenda` lists what is coming with your own answer against each, privately, and
 links each published event straight to its poll — the message gets buried in a
@@ -247,22 +290,19 @@ Answering needs a linked Discord and a roster entry, and the poll's window is
 enforced wherever the answer comes from.
 
 **The weekly wars run themselves.** Two series are seeded on first start —
-Saturday and Sunday at 19:30 `America/Bogota`, five rounds — and the same panel
-edits them: day, hour, rounds, and how far ahead each poll opens and closes
-(out of the box: opens Monday, closes Saturday at noon, for both). Events are
-materialised three weeks ahead, each poll is posted when it opens, and six hours
-before it closes the bot pings whoever has not answered yet — once, and naming
-anyone with no Discord linked so somebody can go ask them in person. That
-reminder is the one message the bot mentions people in; everything else has
-mentions off.
+Saturday and Sunday at 19:30 `AGENDA_TIMEZONE` — and the same panel edits them:
+day, hour, which roles may answer, how the reminder is delivered and repeated,
+and how far ahead each poll opens and closes (out of the box: opens Monday,
+closes Saturday at noon, for both). Events are materialised three weeks ahead,
+inheriting all of that, and each poll is posted when it opens.
 
 A series stores wall-clock time and a timezone, not an instant, so "Saturdays at
 19:30" keeps meaning that across a daylight-saving change. Editing a series
 never rewrites events already created: what is already summoned stays as it is.
 
 **The bench knows who answered.** In the Sala de Guerra, the *Disponibles* list
-carries each member's answer to the next war's poll — confirmed (with how many
-rounds), maybe, declined, or nothing yet — and its header counts them and
+carries each member's answer to the next war's poll — confirmed, maybe,
+declined, or nothing yet — and its header counts them and
 filters down to just the confirmed. Declined and unanswered are drawn
 differently on purpose: deploying someone who already said they would not be
 there is the mistake this is here to prevent. With nothing scheduled the bench

@@ -35,6 +35,36 @@ export const EVENT_ANSWERS = ['yes', 'no', 'maybe'];
  * guardados y se siguen enseñando donde los haya. Lo que cambia es lo que se
  * ofrece de aquí en adelante.
  */
+/**
+ * Cómo se recuerda una convocatoria a quien no ha contestado.
+ *
+ * En el canal, por privado, o nada. El canal es lo que había, y por eso es el
+ * valor de partida: un evento guardado antes de que esto existiera sigue
+ * comportándose igual.
+ */
+export const REMINDER_MODES = ['channel', 'dm', 'none'];
+
+/** Una hora de pared, «HH:MM», o null si no lo es. */
+export const horaDePared = (valor) => {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(valor ?? '').trim());
+  if (!m) return null;
+  const hh = Number(m[1]);
+  const mm = Number(m[2]);
+  if (hh > 23 || mm > 59) return null;
+  return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+};
+
+/**
+ * Cada cuántos días se repite el recordatorio, o null para el de siempre.
+ *
+ * Se acota a treinta: más que eso, en una encuesta que dura una semana, es
+ * escribir «cada 90 días» y creer que se ha programado algo.
+ */
+const cadaDias = (valor) => {
+  const n = Math.trunc(Number(valor));
+  return Number.isFinite(n) && n >= 1 ? Math.min(n, 30) : null;
+};
+
 export const respuestasDe = (kind) =>
   kind === 'war' ? ['yes', 'no'] : ['yes', 'maybe', 'no'];
 
@@ -120,6 +150,11 @@ function limpiar(body) {
     startsAt,
     minutes: entero(body?.minutes, MAX_MINUTES, 60),
     allowedRoles: limpiarRolesDiscord(body?.allowedRoles),
+    reminderMode: REMINDER_MODES.includes(body?.reminderMode) ? body.reminderMode : 'channel',
+    // Los dos van juntos: una cadencia sin hora no sabe cuándo, y una hora sin
+    // cadencia no sabe cada cuánto. Con uno solo se cae al aviso de siempre.
+    reminderEveryDays: horaDePared(body?.reminderTime) ? cadaDias(body?.reminderEveryDays) : null,
+    reminderTime: cadaDias(body?.reminderEveryDays) ? horaDePared(body?.reminderTime) : null,
     notes: texto(body?.notes, 1000),
     opensAt,
     closesAt,
@@ -132,6 +167,9 @@ function limpiar(body) {
 // está pidiendo.
 const CAMPOS = `e.id, e.kind, e.title, e.starts_at AS "startsAt", e.minutes, e.notes,
                 e.allowed_discord_roles AS "allowedRoles",
+                e.reminder_mode AS "reminderMode",
+                e.reminder_every_days AS "reminderEveryDays",
+                e.reminder_time AS "reminderTime",
                 e.opens_at AS "opensAt", e.closes_at AS "closesAt",
                 e.cancelled_at AS "cancelledAt", e.created_by AS "createdBy",
                 e.discord_channel_id AS "discordChannelId",
@@ -318,12 +356,16 @@ export async function saveEvent(body, createdBy) {
 
   await pool.query(
     `INSERT INTO guild_events
-       (id, guild_id, kind, title, starts_at, minutes, allowed_discord_roles, notes, opens_at, closes_at, created_by)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+       (id, guild_id, kind, title, starts_at, minutes, allowed_discord_roles, notes, opens_at, closes_at,
+        reminder_mode, reminder_every_days, reminder_time, created_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
      ON CONFLICT (guild_id, id) DO UPDATE
        SET kind = EXCLUDED.kind, title = EXCLUDED.title, starts_at = EXCLUDED.starts_at,
            minutes = EXCLUDED.minutes, allowed_discord_roles = EXCLUDED.allowed_discord_roles, notes = EXCLUDED.notes,
-           opens_at = EXCLUDED.opens_at, closes_at = EXCLUDED.closes_at`,
+           opens_at = EXCLUDED.opens_at, closes_at = EXCLUDED.closes_at,
+           reminder_mode = EXCLUDED.reminder_mode,
+           reminder_every_days = EXCLUDED.reminder_every_days,
+           reminder_time = EXCLUDED.reminder_time`,
     [
       id,
       GUILD_ID,
@@ -335,6 +377,9 @@ export async function saveEvent(body, createdBy) {
       limpio.notes,
       limpio.opensAt,
       limpio.closesAt,
+      limpio.reminderMode,
+      limpio.reminderEveryDays,
+      limpio.reminderTime,
       createdBy ?? null,
     ],
   );

@@ -46,6 +46,10 @@ services:
       # The address members reach the app at, which is where Discord sends them
       # back. Must match the redirect URI registered with Discord exactly.
       PUBLIC_URL: ${PUBLIC_URL:-}
+      # The guild's own clock: the wall-clock hour an event reminder means, and
+      # what a new weekly series starts out on. Empty is America/Bogota, which
+      # is what it was before this was configurable.
+      AGENDA_TIMEZONE: ${AGENDA_TIMEZONE:-}
     restart: unless-stopped
 
 # The API talks to a PostgreSQL that lives outside this stack. Attach the

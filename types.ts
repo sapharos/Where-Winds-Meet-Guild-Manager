@@ -525,6 +525,29 @@ export const EVENT_ANSWER_LABELS: Record<EventAnswer, string> = {
 export const respuestasDe = (kind: EventKind): EventAnswer[] =>
   kind === 'war' ? ['yes', 'no'] : ['yes', 'maybe', 'no'];
 
+/**
+ * Cómo se recuerda una convocatoria a quien no ha contestado.
+ *
+ * En el canal se escribe una vez y lo ven todos los convocados; por privado le
+ * llega a cada uno el suyo, con los botones puestos, y no ensucia el canal. Lo
+ * segundo llega más y molesta más, que es exactamente el intercambio.
+ */
+export type ReminderMode = 'channel' | 'dm' | 'none';
+
+export const REMINDER_MODES: ReminderMode[] = ['channel', 'dm', 'none'];
+
+export const REMINDER_MODE_LABELS: Record<ReminderMode, string> = {
+  channel: 'En el canal',
+  dm: 'Por privado',
+  none: 'No recordar',
+};
+
+export const REMINDER_MODE_HINTS: Record<ReminderMode, string> = {
+  channel: 'Un mensaje en el canal de la agenda mencionando a quien falta por contestar.',
+  dm: 'Un mensaje privado a cada uno, con los botones puestos para contestar ahí mismo.',
+  none: 'La encuesta se publica y nadie recibe recordatorios.',
+};
+
 export interface EventResponse {
   playerId: string;
   name: string;
@@ -551,6 +574,17 @@ export interface GuildEvent {
    * nombres: un rol renombrado sigue siendo el mismo rol.
    */
   allowedRoles: string[];
+  /** Cómo se recuerda a quien no ha contestado. */
+  reminderMode: ReminderMode;
+  /**
+   * Cada cuántos días se repite el recordatorio, y a qué hora de pared. Nulos,
+   * se manda uno solo seis horas antes de que cierre la encuesta.
+   *
+   * Van los dos o ninguno: una cadencia sin hora no sabe cuándo, y una hora sin
+   * cadencia no sabe cada cuánto.
+   */
+  reminderEveryDays: number | null;
+  reminderTime: string | null;
   opensAt: string | null;
   closesAt: string | null;
   cancelledAt: string | null;
@@ -594,6 +628,9 @@ export interface EventSeries {
   minutes: number;
   notes: string | null;
   allowedRoles: string[];
+  reminderMode: ReminderMode;
+  reminderEveryDays: number | null;
+  reminderTime: string | null;
   opensDaysBefore: number;
   opensTime: string;
   closesDaysBefore: number;

@@ -695,3 +695,21 @@ ALTER TABLE event_series ADD COLUMN IF NOT EXISTS allowed_discord_roles JSONB NO
 -- y había que dárselo a quien ya lo tuviera aunque hubiera cambiado la matriz.
 -- Este es al revés: un oficial programa la guerra del sábado y no por eso puede
 -- tirar las cincuenta respuestas que ya lleva.
+
+-- Cómo se recuerda una convocatoria a quien no ha contestado.
+--
+-- `reminder_mode`: 'channel' escribe en el canal de la agenda mencionando a
+-- quien falta -- es lo que se venía haciendo, y por eso es el valor de partida
+-- de todo lo ya guardado. 'dm' se lo manda por privado a cada uno. 'none' no
+-- recuerda nada.
+--
+-- `reminder_every_days` y `reminder_time`: repetirlo cada tantos días a una
+-- hora de pared. Nulos, se mantiene el aviso de siempre -- uno solo, seis horas
+-- antes de que cierre -- que es lo que sigue queriendo la mayoría de eventos.
+ALTER TABLE guild_events ADD COLUMN IF NOT EXISTS reminder_mode TEXT NOT NULL DEFAULT 'channel';
+ALTER TABLE guild_events ADD COLUMN IF NOT EXISTS reminder_every_days INT;
+ALTER TABLE guild_events ADD COLUMN IF NOT EXISTS reminder_time TEXT;
+
+ALTER TABLE event_series ADD COLUMN IF NOT EXISTS reminder_mode TEXT NOT NULL DEFAULT 'channel';
+ALTER TABLE event_series ADD COLUMN IF NOT EXISTS reminder_every_days INT;
+ALTER TABLE event_series ADD COLUMN IF NOT EXISTS reminder_time TEXT;

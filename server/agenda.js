@@ -16,7 +16,16 @@
 
 import { randomUUID } from 'node:crypto';
 import { pool, GUILD_ID } from './db.js';
-import { limpiarRolesDiscord } from './events.js';
+import { limpiarRolesDiscord, REMINDER_MODES, horaDePared } from './events.js';
+
+/**
+ * La zona del gremio.
+ *
+ * Cada serie lleva la suya porque un gremio puede repartirse entre husos, pero
+ * hace falta una de partida: la de las horas que se escriben sueltas -- la de
+ * un recordatorio «a las 19:00» en un evento que no viene de ninguna serie.
+ */
+export const ZONA = process.env.AGENDA_TIMEZONE || 'America/Bogota';
 
 /* --------------------------------------------------------------- husos */
 
@@ -114,6 +123,9 @@ function relativo(zona, evento, diasAntes, horaTexto) {
 /* --------------------------------------------------------------- series */
 
 const CAMPOS = `id, kind, title, weekday, time_local AS "timeLocal", timezone,
+                reminder_mode AS "reminderMode",
+                reminder_every_days AS "reminderEveryDays",
+                reminder_time AS "reminderTime",
                 minutes, allowed_discord_roles AS "allowedRoles", notes,
                 opens_days_before AS "opensDaysBefore", opens_time AS "opensTime",
                 closes_days_before AS "closesDaysBefore", closes_time AS "closesTime",
@@ -136,7 +148,7 @@ const HHMM = (v, porDefecto) => (/^\d{1,2}:\d{2}$/.test(String(v ?? '')) ? Strin
 
 export async function saveSeries(body) {
   const id = body?.id || randomUUID();
-  const zona = String(body?.timezone ?? '').trim() || 'America/Bogota';
+  const zona = String(body?.timezone ?? '').trim() || ZONA;
   // Una zona inventada haría que la serie no generara nada, en silencio y para
   // siempre. Se comprueba aquí, que es donde se puede decir.
   try {
@@ -148,15 +160,19 @@ export async function saveSeries(body) {
   await pool.query(
     `INSERT INTO event_series
        (id, guild_id, kind, title, weekday, time_local, timezone, minutes, allowed_discord_roles, notes,
-        opens_days_before, opens_time, closes_days_before, closes_time, auto_publish, active)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+        opens_days_before, opens_time, closes_days_before, closes_time, auto_publish, active,
+        reminder_mode, reminder_every_days, reminder_time)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
      ON CONFLICT (guild_id, id) DO UPDATE
        SET kind = EXCLUDED.kind, title = EXCLUDED.title, weekday = EXCLUDED.weekday,
            time_local = EXCLUDED.time_local, timezone = EXCLUDED.timezone,
            minutes = EXCLUDED.minutes, allowed_discord_roles = EXCLUDED.allowed_discord_roles, notes = EXCLUDED.notes,
            opens_days_before = EXCLUDED.opens_days_before, opens_time = EXCLUDED.opens_time,
            closes_days_before = EXCLUDED.closes_days_before, closes_time = EXCLUDED.closes_time,
-           auto_publish = EXCLUDED.auto_publish, active = EXCLUDED.active`,
+           auto_publish = EXCLUDED.auto_publish, active = EXCLUDED.active,
+           reminder_mode = EXCLUDED.reminder_mode,
+           reminder_every_days = EXCLUDED.reminder_every_days,
+           reminder_time = EXCLUDED.reminder_time`,
     [
       id,
       GUILD_ID,
@@ -174,6 +190,10 @@ export async function saveSeries(body) {
       HHMM(body?.closesTime, '12:00'),
       body?.autoPublish !== false,
       body?.active !== false,
+      REMINDER_MODES.includes(body?.reminderMode) ? body.reminderMode : 'channel',
+      // Van juntos, como en un evento suelto: con uno solo no hay cadencia.
+      horaDePared(body?.reminderTime) ? entero(body?.reminderEveryDays, 1, 30, null) : null,
+      entero(body?.reminderEveryDays, 1, 30, null) ? horaDePared(body?.reminderTime) : null,
     ],
   );
   return (await listSeries()).find((s) => s.id === id);
@@ -201,7 +221,7 @@ export async function seedSeries() {
       ...s,
       kind: 'war',
       timeLocal: '19:30',
-      timezone: 'America/Bogota',
+      timezone: ZONA,
       minutes: 150,
       opensTime: '00:00',
       closesTime: '12:00',
@@ -242,8 +262,9 @@ export async function asegurarEventos({ semanas = 3, ahora = new Date() } = {}) 
     for (const cuando of proximas(s.timezone, s.weekday, s.timeLocal, ahora, semanas)) {
       const { rows } = await pool.query(
         `INSERT INTO guild_events
-           (id, guild_id, series_id, kind, title, starts_at, minutes, allowed_discord_roles, notes, opens_at, closes_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+           (id, guild_id, series_id, kind, title, starts_at, minutes, allowed_discord_roles, notes, opens_at, closes_at,
+            reminder_mode, reminder_every_days, reminder_time)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
          ON CONFLICT (guild_id, series_id, starts_at) WHERE series_id IS NOT NULL DO NOTHING
          RETURNING id`,
         [
@@ -258,6 +279,9 @@ export async function asegurarEventos({ semanas = 3, ahora = new Date() } = {}) 
           s.notes,
           relativo(s.timezone, cuando, s.opensDaysBefore, s.opensTime),
           relativo(s.timezone, cuando, s.closesDaysBefore, s.closesTime),
+          s.reminderMode ?? 'channel',
+          s.reminderEveryDays,
+          s.reminderTime,
         ],
       );
       if (rows[0]) creados.push(rows[0].id);
@@ -291,24 +315,72 @@ export async function pendientesDePublicar({ ahora = new Date() } = {}) {
 export const AVISO_HORAS = 6;
 
 /**
- * Los que hay que recordar: la encuesta está a punto de cerrarse, hay gente sin
- * contestar y todavía no se avisó.
+ * Si a un evento con recordatorio repetido le toca ahora.
  *
- * Una sola vez por evento, y por eso queda anotado: un recordatorio que se
- * repite deja de leerse, y el gremio aprende a ignorar al bot.
+ * «Cada X días a las HH:MM» se resuelve sobre el calendario de la zona y no
+ * sumando milisegundos: toca si ya pasó la hora de hoy y desde el último aviso
+ * han pasado X días **de calendario**. Así una semana con cambio de hora no
+ * desplaza el recordatorio, y «cada 7 días a las 19:00» cae siempre el mismo
+ * día de la semana a la misma hora de pared.
+ *
+ * El primero sale en cuanto pasa la hora del día en que se programó, que es lo
+ * que espera quien acaba de guardarlo.
  */
-export async function pendientesDeAviso({ ahora = new Date() } = {}) {
-  const { rows } = await pool.query(
-    `SELECT e.id FROM guild_events e
-      WHERE e.guild_id = $1 AND e.reminded_at IS NULL AND e.cancelled_at IS NULL
-        AND e.discord_message_id IS NOT NULL
-        AND e.closes_at IS NOT NULL
-        AND e.closes_at > $2
-        AND e.closes_at <= $2 + make_interval(hours => $3::int)
-      ORDER BY e.closes_at`,
-    [GUILD_ID, ahora, AVISO_HORAS],
+export function tocaRepetir(evento, ahora = new Date(), zona = ZONA) {
+  if (!evento.reminderEveryDays || !evento.reminderTime) return false;
+
+  const { hh, mm } = HORA(evento.reminderTime);
+  const hoy = fechaLocal(zona, ahora);
+  if (ahora < instante(zona, hoy.y, hoy.m, hoy.d, hh, mm)) return false;
+  if (!evento.remindedAt) return true;
+
+  // Días de calendario entre una fecha local y la otra. `Date.UTC` sobre los
+  // números de la zona es aritmética de calendario pura: aquí no hay instantes,
+  // así que un día siempre dura un día.
+  const ultimo = fechaLocal(zona, new Date(evento.remindedAt));
+  const dias = Math.round(
+    (Date.UTC(hoy.y, hoy.m - 1, hoy.d) - Date.UTC(ultimo.y, ultimo.m - 1, ultimo.d)) / 86400000,
   );
-  return rows.map((r) => r.id);
+  return dias >= evento.reminderEveryDays;
+}
+
+/**
+ * Los que hay que recordar.
+ *
+ * Dos formas, y cada evento elige. Sin cadencia, la de siempre: una sola vez,
+ * seis horas antes de que cierre, anotada para que no se repita -- un
+ * recordatorio que insiste deja de leerse y el gremio aprende a ignorar al bot.
+ * Con cadencia, cada X días a su hora, que es lo que hace falta cuando la
+ * encuesta lleva abierta toda la semana.
+ *
+ * En las dos, sólo mientras la encuesta esté viva: abierta, sin cancelar, sin
+ * cerrar y antes de que empiece el evento. Recordarle a alguien que conteste
+ * una guerra que ya se jugó no es un recordatorio, es una errata.
+ */
+export async function pendientesDeAviso({ ahora = new Date(), zona = ZONA } = {}) {
+  const { rows } = await pool.query(
+    `SELECT e.id, e.reminded_at AS "remindedAt",
+            e.reminder_every_days AS "reminderEveryDays", e.reminder_time AS "reminderTime",
+            e.closes_at AS "closesAt"
+       FROM guild_events e
+      WHERE e.guild_id = $1 AND e.cancelled_at IS NULL
+        AND e.discord_message_id IS NOT NULL
+        AND e.reminder_mode <> 'none'
+        AND (e.opens_at IS NULL OR e.opens_at <= $2)
+        AND COALESCE(e.closes_at, e.starts_at) > $2
+      ORDER BY e.starts_at`,
+    [GUILD_ID, ahora],
+  );
+
+  return rows
+    .filter((e) =>
+      e.reminderEveryDays && e.reminderTime
+        ? tocaRepetir(e, ahora, zona)
+        : !e.remindedAt &&
+          e.closesAt &&
+          new Date(e.closesAt) - ahora <= AVISO_HORAS * 3600000,
+    )
+    .map((e) => e.id);
 }
 
 export async function marcarAvisado(id) {
