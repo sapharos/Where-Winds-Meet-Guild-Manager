@@ -2,6 +2,17 @@
 // wording. Order matters: it is the order shown in the permission matrix.
 export const ROLES = ['admin', 'leader', 'subleader', 'officer', 'member'];
 
+// Cómo se llaman de cara. Gemelo de ROLE_LABELS en types.ts: el bot escribe en
+// Discord y no puede importar TypeScript, y una convocatoria tiene que poder
+// decir a qué rangos está abierta con las mismas palabras que usa la web.
+export const ROLE_LABELS = {
+  admin: 'Administrador',
+  leader: 'Líder',
+  subleader: 'Sublíder',
+  officer: 'Oficial',
+  member: 'Miembro',
+};
+
 export const PERMISSIONS = [
   'roster.view',
   'roster.edit',

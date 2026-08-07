@@ -13,7 +13,6 @@ import {
   EVENT_ANSWER_LABELS,
   EVENT_KIND_ICONS,
   EVENT_KIND_LABELS,
-  cuentaPartidas,
 } from '../types';
 import { ROLE_NAMES, ArmasDeBuild, buildColour } from './PlayerCard';
 import Grapa from './Grapa';
@@ -226,9 +225,6 @@ const MyProfile: React.FC<Props> = ({ player, weaponSets, onEditBuilds }) => {
                     }`}
                   >
                     {EVENT_ANSWER_LABELS[e.mine?.answer ?? 'maybe']}
-                    {e.mine?.answer === 'yes' && cuentaPartidas(e.kind) && e.mine.rounds
-                      ? ` · ${e.mine.rounds}`
-                      : ''}
                   </span>
                 </div>
               ))}

@@ -554,6 +554,7 @@ const App: React.FC = () => {
           <Agenda
             players={players}
             myPlayerId={session.user.playerId}
+            myRole={session.user.role}
             canManage={can('events.manage')}
           />
         ) : activeTab === 'roster' ? (

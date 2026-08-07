@@ -659,3 +659,14 @@ ON CONFLICT DO NOTHING;
 
 INSERT INTO app_settings (key, value) VALUES ('seeded:roster.uid', 'true')
   ON CONFLICT (key) DO NOTHING;
+
+-- Quién puede contestar la encuesta de un evento: una lista de roles del
+-- sistema de usuarios. Vacía significa todo el gremio, que es lo que había
+-- antes y lo que sigue valiendo para lo que no se restrinja.
+ALTER TABLE guild_events ADD COLUMN IF NOT EXISTS allowed_roles JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE event_series ADD COLUMN IF NOT EXISTS allowed_roles JSONB NOT NULL DEFAULT '[]'::jsonb;
+
+-- `rounds` se retira: la guerra se contesta con un sí o un no, sin decir a
+-- cuántas partidas se llega. Las columnas se quedan y no se borran -- una
+-- columna borrada no se puede recuperar, y ahí están las respuestas de las
+-- semanas que sí lo preguntaron. Dejan de leerse y de escribirse, nada más.

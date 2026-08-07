@@ -9,7 +9,9 @@ import {
   EventKind,
   GuildEvent,
   Player,
-  cuentaPartidas,
+  ROLE_LABELS,
+  USER_ROLES,
+  UserRole,
 } from '../types';
 import Sheet from './Sheet';
 
@@ -95,10 +97,31 @@ interface Props {
   players: Player[];
   /** La ficha de quien está mirando, si tiene una. Sin ella no puede contestar. */
   myPlayerId?: string | null;
+  /** Su rango. Decide si una convocatoria acotada le deja contestar. */
+  myRole?: UserRole;
   canManage: boolean;
 }
 
-const Agenda: React.FC<Props> = ({ players, myPlayerId, canManage }) => {
+/**
+ * Si a este rango se le pide que conteste.
+ *
+ * Sin lista, el gremio entero: no restringir es lo normal y es lo que había
+ * antes de que esto existiera, así que las convocatorias ya guardadas siguen
+ * abiertas a todos sin tocarlas. Gemelo de `puedeContestar` en server/events.js
+ * -- aquí decide qué botones se enseñan, allí decide qué se guarda.
+ */
+const puedeContestar = (event: GuildEvent, rol?: UserRole) =>
+  !event.allowedRoles?.length || (rol ? event.allowedRoles.includes(rol) : false);
+
+// De más mando a menos, como el servidor los guarda: ordenar también aquí es
+// lo que hace que la frase del formulario no cambie al guardar.
+const listaDeRangos = (roles: UserRole[]) =>
+  [...roles]
+    .sort((a, b) => USER_ROLES.indexOf(a) - USER_ROLES.indexOf(b))
+    .map((r) => ROLE_LABELS[r] ?? r)
+    .join(', ');
+
+const Agenda: React.FC<Props> = ({ players, myPlayerId, myRole, canManage }) => {
   const [events, setEvents] = useState<GuildEvent[] | null>(null);
   const [past, setPast] = useState(false);
   /** Lista de lo que viene, o el mes entero. */
@@ -141,12 +164,12 @@ const Agenda: React.FC<Props> = ({ players, myPlayerId, canManage }) => {
     await cargar();
   };
 
-  const contestar = async (event: GuildEvent, answer: EventAnswer, rounds?: number) => {
+  const contestar = async (event: GuildEvent, answer: EventAnswer) => {
     setError(null);
     try {
       const actualizado = await api<GuildEvent>(`/events/${event.id}/response`, {
         method: 'PUT',
-        body: JSON.stringify({ answer, rounds }),
+        body: JSON.stringify({ answer }),
       });
       await tras(actualizado);
     } catch (err) {
@@ -234,7 +257,7 @@ const Agenda: React.FC<Props> = ({ players, myPlayerId, canManage }) => {
           {canManage && (
             <button
               onClick={() =>
-                setEditando({ kind: 'war', title: '', minutes: 150, rounds: 5 })
+                setEditando({ kind: 'war', title: '', minutes: 150, allowedRoles: [] })
               }
               className="min-h-tap px-4 rounded-md bg-amber-600 hover:bg-amber-500 text-white font-bold transition-colors duration-micro"
             >
@@ -344,12 +367,12 @@ const Agenda: React.FC<Props> = ({ players, myPlayerId, canManage }) => {
             myPlayerId={myPlayerId}
             canManage={canManage}
             miRespuesta={miRespuesta(abierto)?.answer}
-            misPartidas={miRespuesta(abierto)?.rounds ?? undefined}
-            onContestar={(answer, rounds) => contestar(abierto, answer, rounds)}
-            onContestarPor={async (playerId, answer, rounds) => {
+            myRole={myRole}
+            onContestar={(answer) => contestar(abierto, answer)}
+            onContestarPor={async (playerId, answer) => {
               const actualizado = await api<GuildEvent>(
                 `/events/${abierto.id}/responses/${playerId}`,
-                { method: 'PUT', body: JSON.stringify({ answer, rounds }) },
+                { method: 'PUT', body: JSON.stringify({ answer }) },
               );
               await tras(actualizado);
             }}
@@ -414,7 +437,7 @@ const TarjetaEvento: React.FC<{
         </div>
         <p className="text-meta text-slate-400 truncate">
           {EVENT_KIND_LABELS[event.kind]} · {fechaLarga(event.startsAt)}
-          {cuentaPartidas(event.kind) && event.rounds ? ` · ${event.rounds} partidas` : ''}
+          {event.allowedRoles?.length ? ` · sólo ${listaDeRangos(event.allowedRoles)}` : ''}
         </p>
       </div>
     </div>
@@ -573,9 +596,9 @@ const DetalleEvento: React.FC<{
   myPlayerId?: string | null;
   canManage: boolean;
   miRespuesta?: EventAnswer;
-  misPartidas?: number;
-  onContestar: (answer: EventAnswer, rounds?: number) => void;
-  onContestarPor: (playerId: string, answer: EventAnswer, rounds?: number) => void;
+  myRole?: UserRole;
+  onContestar: (answer: EventAnswer) => void;
+  onContestarPor: (playerId: string, answer: EventAnswer) => void;
   onEditar: () => void;
   onCancelar: () => void;
   onPublicar: () => void;
@@ -585,15 +608,14 @@ const DetalleEvento: React.FC<{
   myPlayerId,
   canManage,
   miRespuesta,
-  misPartidas,
+  myRole,
   onContestar,
   onContestarPor,
   onEditar,
   onCancelar,
   onPublicar,
 }) => {
-  const cuenta = cuentaPartidas(event.kind) && (event.rounds ?? 0) > 1;
-  const [partidas, setPartidas] = useState(misPartidas ?? event.rounds ?? 1);
+  const invitado = puedeContestar(event, myRole);
 
   const porRespuesta = (answer: EventAnswer) =>
     (event.responses ?? []).filter((r) => r.answer === answer);
@@ -653,49 +675,39 @@ const DetalleEvento: React.FC<{
         </p>
       )}
 
+      {/* A quién se le pregunta. Sólo se dice cuando hay a quién dejar fuera:
+          lo normal es que no haya lista y entonces no hay nada que advertir. */}
+      {event.allowedRoles?.length > 0 && (
+        <p className="text-meta text-slate-500">
+          <i className="fa-solid fa-user-shield mr-1.5"></i>
+          Abierta a {listaDeRangos(event.allowedRoles)}.
+        </p>
+      )}
+
       {myPlayerId && !event.cancelledAt && (
         <div>
           <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-2">Tu respuesta</p>
-          <div className="flex gap-2 flex-wrap">
-            {ORDEN.map((answer) => (
-              <button
-                key={answer}
-                disabled={cerrada}
-                onClick={() => onContestar(answer, answer === 'yes' && cuenta ? partidas : undefined)}
-                className={`min-h-tap px-4 rounded-md border font-bold transition-colors duration-micro disabled:opacity-40 ${
-                  miRespuesta === answer ? TONO[answer] : `bg-slate-950 ${TONO_APAGADO[answer]}`
-                }`}
-              >
-                {EVENT_ANSWER_LABELS[answer]}
-              </button>
-            ))}
-          </div>
-
-          {cuenta && (
-            <div className="mt-3">
-              <label className="block text-[10px] uppercase tracking-wider text-slate-500 mb-1">
-                Si vas, ¿a cuántas partidas llegas?
-              </label>
-              <div className="flex gap-2 flex-wrap">
-                {Array.from({ length: event.rounds ?? 1 }, (_, i) => i + 1).map((n) => (
-                  <button
-                    key={n}
-                    disabled={cerrada}
-                    onClick={() => {
-                      setPartidas(n);
-                      if (miRespuesta === 'yes') onContestar('yes', n);
-                    }}
-                    className={`min-h-tap min-w-tap px-3 rounded-md border font-bold tabular-nums transition-colors duration-micro disabled:opacity-40 ${
-                      partidas === n
-                        ? 'bg-amber-600 border-amber-500 text-white'
-                        : 'bg-slate-950 border-slate-700 text-slate-300'
-                    }`}
-                  >
-                    {n === event.rounds ? `${n} (todas)` : n}
-                  </button>
-                ))}
-              </div>
+          {invitado ? (
+            <div className="flex gap-2 flex-wrap">
+              {ORDEN.map((answer) => (
+                <button
+                  key={answer}
+                  disabled={cerrada}
+                  onClick={() => onContestar(answer)}
+                  className={`min-h-tap px-4 rounded-md border font-bold transition-colors duration-micro disabled:opacity-40 ${
+                    miRespuesta === answer ? TONO[answer] : `bg-slate-950 ${TONO_APAGADO[answer]}`
+                  }`}
+                >
+                  {EVENT_ANSWER_LABELS[answer]}
+                </button>
+              ))}
             </div>
+          ) : (
+            // Los botones no se enseñan apagados: no es que no se pueda ahora,
+            // es que la pregunta no es para este rango.
+            <p className="text-meta text-slate-500">
+              Esta convocatoria no está abierta a tu rango. Puedes verla, pero no votar.
+            </p>
           )}
         </div>
       )}
@@ -718,9 +730,6 @@ const DetalleEvento: React.FC<{
                     title={r.answeredBy ? 'Lo anotó un oficial' : undefined}
                   >
                     {r.name}
-                    {answer === 'yes' && r.rounds ? (
-                      <span className="text-slate-400 tabular-nums"> · {r.rounds}</span>
-                    ) : null}
                     {r.answeredBy && <i className="fa-solid fa-pen text-[9px] text-slate-600 ml-1.5"></i>}
                   </span>
                 ))}
@@ -746,7 +755,7 @@ const DetalleEvento: React.FC<{
                   {ORDEN.map((answer) => (
                     <button
                       key={answer}
-                      onClick={() => onContestarPor(p.id, answer, answer === 'yes' ? event.rounds ?? undefined : undefined)}
+                      onClick={() => onContestarPor(p.id, answer)}
                       className={`text-[11px] px-2 py-1 rounded border transition-colors duration-micro tap-suelto ${TONO_APAGADO[answer]}`}
                     >
                       {EVENT_ANSWER_LABELS[answer]}
@@ -804,6 +813,55 @@ const DetalleEvento: React.FC<{
   );
 };
 
+/* ---------------------------------------------------------- quién contesta */
+
+/**
+ * A qué rangos se les pregunta.
+ *
+ * Ninguno marcado es «a todo el gremio», que es lo que quiere casi siempre y
+ * por eso es lo que sale de fábrica. Marcarlos todos es lo mismo dicho de otra
+ * forma, y el servidor lo guarda igual -- así una lista no se queda restringida
+ * a cinco rangos que mañana podrían ser seis.
+ */
+const RangosQuePueden: React.FC<{
+  roles: UserRole[];
+  onCambiar: (roles: UserRole[]) => void;
+}> = ({ roles, onCambiar }) => (
+  <div>
+    <label className="block text-xs uppercase tracking-wider text-slate-500 mb-1">
+      Quién puede votar
+    </label>
+    <div className="flex flex-wrap gap-2">
+      {USER_ROLES.map((role) => {
+        const marcado = roles.includes(role);
+        return (
+          <button
+            key={role}
+            type="button"
+            aria-pressed={marcado}
+            onClick={() =>
+              onCambiar(marcado ? roles.filter((r) => r !== role) : [...roles, role])
+            }
+            className={`min-h-tap px-3 rounded-md border text-sm font-bold transition-colors duration-micro ${
+              marcado
+                ? 'bg-amber-600 border-amber-500 text-white'
+                : 'bg-slate-950 border-slate-700 text-slate-300'
+            }`}
+          >
+            <i className={`fa-solid ${marcado ? 'fa-check' : 'fa-minus'} mr-2 text-[10px]`}></i>
+            {ROLE_LABELS[role] ?? role}
+          </button>
+        );
+      })}
+    </div>
+    <p className="text-meta text-slate-500 mt-1">
+      {roles.length === 0 || roles.length === USER_ROLES.length
+        ? 'Sin marcar nada, la encuesta es para todo el gremio.'
+        : `Sólo contestan ${listaDeRangos(roles)}. Los demás la ven, pero no votan.`}
+    </p>
+  </div>
+);
+
 /* -------------------------------------------------------------- formulario */
 
 const FormularioEvento: React.FC<{
@@ -817,8 +875,8 @@ const FormularioEvento: React.FC<{
     title: borrador.title ?? '',
     startsAt: paraCampo(borrador.startsAt),
     minutes: borrador.minutes ?? 150,
-    rounds: borrador.rounds ?? 5,
     notes: borrador.notes ?? '',
+    allowedRoles: borrador.allowedRoles ?? [],
     opensAt: borrador.opensAt ? paraCampo(borrador.opensAt) : '',
     closesAt: borrador.closesAt ? paraCampo(borrador.closesAt) : '',
   });
@@ -904,23 +962,10 @@ const FormularioEvento: React.FC<{
           </div>
         </div>
 
-        {cuentaPartidas(datos.kind) && (
-          <div>
-            <label className="block text-xs uppercase tracking-wider text-slate-500 mb-1">
-              Partidas esa noche
-            </label>
-            <input
-              type="number"
-              inputMode="numeric"
-              className={campo}
-              value={datos.rounds}
-              onChange={(e) => setDatos({ ...datos, rounds: Number(e.target.value) || 1 })}
-            />
-            <p className="text-meta text-slate-500 mt-1">
-              Es lo que se pregunta: a cuántas de ellas llega cada uno.
-            </p>
-          </div>
-        )}
+        <RangosQuePueden
+          roles={datos.allowedRoles}
+          onCambiar={(allowedRoles) => setDatos({ ...datos, allowedRoles })}
+        />
 
         <div className="grid grid-cols-2 gap-3">
           <div>

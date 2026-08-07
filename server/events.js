@@ -7,25 +7,46 @@
  *    evento y jugador, y da igual que llegue de la web, del bot o de un oficial
  *    contestando por alguien. Sin esto habría dos verdades que reconciliar cada
  *    vez que alguien cambia de idea.
- * 2. **Lo que se pregunta lo decide el tipo de evento.** Sólo la guerra de
- *    gremio cuenta partidas, porque es la única que dura una noche entera y a
- *    la que se puede llegar a medias. Un evento PvE o una quedada se responden
- *    con sí, no o tal vez y ya está.
+ * 2. **Se contesta sí, no o tal vez, y nada más.** La guerra llegó a preguntar
+ *    a cuántas partidas se llegaba; el gremio pidió quitarlo, y con ello se fue
+ *    la única diferencia entre lo que se pregunta de un tipo de evento y de
+ *    otro. Todos se responden igual.
+ * 3. **Se puede acotar quién contesta.** Un evento lleva una lista de roles, y
+ *    vacía quiere decir el gremio entero. Son los roles del sistema de
+ *    usuarios, que es como este gremio nombra sus rangos.
  */
 
 import { randomUUID } from 'node:crypto';
 import { pool, GUILD_ID } from './db.js';
+import { ROLES } from './permissions.js';
 
 export const EVENT_KINDS = ['war', 'practice', 'pve', 'casual'];
 export const EVENT_ANSWERS = ['yes', 'no', 'maybe'];
 
-/** Sólo estos cuentan partidas. */
-const CUENTA_PARTIDAS = new Set(['war']);
-export const cuentaPartidas = (kind) => CUENTA_PARTIDAS.has(kind);
-
-/** Techo de rondas: 7:30 a 10 en partidas de media hora dan cinco. */
-const MAX_ROUNDS = 12;
 const MAX_MINUTES = 60 * 12;
+
+/**
+ * Quién puede contestar una encuesta: una lista de roles del sistema de
+ * usuarios, y vacía quiere decir todo el gremio.
+ *
+ * Vacía y no «todos los roles» escritos a mano a propósito: un evento sin
+ * restringir tiene que seguir abierto a un rol que se añada después, y una
+ * lista completa envejece en cuanto el catálogo cambia.
+ */
+const limpiarRoles = (valor) => {
+  if (!Array.isArray(valor)) return [];
+  const vistos = [...new Set(valor.filter((r) => ROLES.includes(r)))];
+  // Tenerlos todos es no restringir nada, y guardarlo así evita que la
+  // interfaz tenga que distinguir dos formas de decir lo mismo.
+  if (vistos.length === ROLES.length) return [];
+  // De más mando a menos, y no en el orden en que los marcaron: la lista se
+  // lee tal cual en la web y en Discord, y «Oficial, Líder» se lee mal.
+  return vistos.sort((a, b) => ROLES.indexOf(a) - ROLES.indexOf(b));
+};
+
+/** Si un rol puede contestar este evento. */
+export const puedeContestar = (allowedRoles, rol) =>
+  !allowedRoles?.length || (rol ? allowedRoles.includes(rol) : false);
 
 const texto = (valor, tope) => {
   const limpio = String(valor ?? '').trim();
@@ -74,9 +95,7 @@ function limpiar(body) {
     title,
     startsAt,
     minutes: entero(body?.minutes, MAX_MINUTES, 60),
-    // Las partidas sólo significan algo donde se cuentan; guardarlas en una
-    // quedada sería dejar un número que después habría que ignorar al leer.
-    rounds: cuentaPartidas(kind) ? entero(body?.rounds, MAX_ROUNDS, 1) : null,
+    allowedRoles: limpiarRoles(body?.allowedRoles),
     notes: texto(body?.notes, 1000),
     opensAt,
     closesAt,
@@ -84,10 +103,10 @@ function limpiar(body) {
 }
 
 // Cualificados con `e.` -- el alias que usan las cuatro consultas -- porque
-// `rounds` y `notes` existen también en `event_responses`, y en cuanto una de
+// `notes` existe también en `event_responses`, y en cuanto una de
 // ellas se une con las respuestas, sin el prefijo Postgres no sabe cuál se le
 // está pidiendo.
-const CAMPOS = `e.id, e.kind, e.title, e.starts_at AS "startsAt", e.minutes, e.rounds, e.notes,
+const CAMPOS = `e.id, e.kind, e.title, e.starts_at AS "startsAt", e.minutes, e.notes, e.allowed_roles AS "allowedRoles",
                 e.opens_at AS "opensAt", e.closes_at AS "closesAt",
                 e.cancelled_at AS "cancelledAt", e.created_by AS "createdBy",
                 e.discord_channel_id AS "discordChannelId",
@@ -187,7 +206,7 @@ export async function getEvent(id) {
   if (!rows[0]) throw Object.assign(new Error('no existe ese evento'), { status: 404 });
 
   const respuestas = await pool.query(
-    `SELECT r.player_id AS "playerId", p.name, p.role, r.answer, r.rounds, r.note,
+    `SELECT r.player_id AS "playerId", p.name, p.role, r.answer, r.note,
             r.answered_by AS "answeredBy", r.source, r.updated_at AS "updatedAt"
        FROM event_responses r
        JOIN players p ON p.guild_id = r.guild_id AND p.id = r.player_id
@@ -212,7 +231,7 @@ export async function getEvent(id) {
  */
 export async function myEvents(playerId, { conCancelados = false } = {}) {
   const { rows } = await pool.query(
-    `SELECT ${CAMPOS}, r.answer AS "myAnswer", r.rounds AS "myRounds",
+    `SELECT ${CAMPOS}, r.answer AS "myAnswer",
             (SELECT count(*)::int FROM event_responses x
               WHERE x.guild_id = e.guild_id AND x.event_id = e.id AND x.answer = 'yes') AS "yes",
             (SELECT count(*)::int FROM event_responses x
@@ -233,9 +252,9 @@ export async function myEvents(playerId, { conCancelados = false } = {}) {
   );
 
   const canal = await getAgendaChannel();
-  return rows.map(({ myAnswer, myRounds, ...evento }) => ({
+  return rows.map(({ myAnswer, ...evento }) => ({
     ...conEnlace(evento, canal),
-    mine: myAnswer ? { answer: myAnswer, rounds: myRounds } : null,
+    mine: myAnswer ? { answer: myAnswer } : null,
   }));
 }
 
@@ -261,7 +280,7 @@ export async function nextWar() {
   if (!rows[0]) return null;
 
   const respuestas = await pool.query(
-    `SELECT player_id AS "playerId", answer, rounds
+    `SELECT player_id AS "playerId", answer
        FROM event_responses WHERE guild_id = $1 AND event_id = $2`,
     [GUILD_ID, rows[0].id],
   );
@@ -274,11 +293,11 @@ export async function saveEvent(body, createdBy) {
 
   await pool.query(
     `INSERT INTO guild_events
-       (id, guild_id, kind, title, starts_at, minutes, rounds, notes, opens_at, closes_at, created_by)
+       (id, guild_id, kind, title, starts_at, minutes, allowed_roles, notes, opens_at, closes_at, created_by)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
      ON CONFLICT (guild_id, id) DO UPDATE
        SET kind = EXCLUDED.kind, title = EXCLUDED.title, starts_at = EXCLUDED.starts_at,
-           minutes = EXCLUDED.minutes, rounds = EXCLUDED.rounds, notes = EXCLUDED.notes,
+           minutes = EXCLUDED.minutes, allowed_roles = EXCLUDED.allowed_roles, notes = EXCLUDED.notes,
            opens_at = EXCLUDED.opens_at, closes_at = EXCLUDED.closes_at`,
     [
       id,
@@ -287,7 +306,7 @@ export async function saveEvent(body, createdBy) {
       limpio.title,
       limpio.startsAt,
       limpio.minutes,
-      limpio.rounds,
+      JSON.stringify(limpio.allowedRoles),
       limpio.notes,
       limpio.opensAt,
       limpio.closesAt,
@@ -295,16 +314,6 @@ export async function saveEvent(body, createdBy) {
     ],
   );
 
-  // Bajar el número de partidas deja respuestas prometiendo más de las que hay.
-  // Se recortan aquí y no al leer: una respuesta que dice «a las cinco» en un
-  // evento de tres es un dato equivocado, no una forma de pintarlo.
-  if (limpio.rounds) {
-    await pool.query(
-      `UPDATE event_responses SET rounds = $3
-        WHERE guild_id = $1 AND event_id = $2 AND rounds > $3`,
-      [GUILD_ID, id, limpio.rounds],
-    );
-  }
 
   return getEvent(id);
 }
@@ -338,12 +347,18 @@ export async function deleteEvent(id) {
  * segunda es necesaria -- hay gente que no entra ni a la web ni a Discord -- y
  * por eso mismo tiene que quedar dicho quién la puso.
  */
-export async function respond(eventId, playerId, body, { source = 'web', porOtro = null } = {}) {
+export async function respond(
+  eventId,
+  playerId,
+  body,
+  { source = 'web', porOtro = null, rol = null } = {},
+) {
   const answer = EVENT_ANSWERS.includes(body?.answer) ? body.answer : null;
   if (!answer) throw Object.assign(new Error('respuesta desconocida'), { status: 400 });
 
   const { rows } = await pool.query(
-    `SELECT kind, rounds, cancelled_at AS "cancelledAt", opens_at AS "opensAt", closes_at AS "closesAt"
+    `SELECT kind, allowed_roles AS "allowedRoles", cancelled_at AS "cancelledAt",
+            opens_at AS "opensAt", closes_at AS "closesAt"
        FROM guild_events WHERE guild_id = $1 AND id = $2`,
     [GUILD_ID, eventId],
   );
@@ -351,6 +366,17 @@ export async function respond(eventId, playerId, body, { source = 'web', porOtro
   if (!evento) throw Object.assign(new Error('no existe ese evento'), { status: 404 });
   if (evento.cancelledAt) {
     throw Object.assign(new Error('ese evento está cancelado'), { status: 409 });
+  }
+
+  // Quién puede contestar, en el mismo sitio y por la misma razón que la
+  // ventana: son tres los que preguntan, y una restricción que cada uno decide
+  // si respeta no restringe nada. Quien organiza queda fuera de la regla --
+  // anotar lo que alguien dijo por voz no es votar en su lugar.
+  if (!porOtro && !puedeContestar(evento.allowedRoles, rol)) {
+    throw Object.assign(
+      new Error('esta convocatoria no está abierta a tu rango'),
+      { status: 403 },
+    );
   }
 
   // La ventana no la comprueba quien pregunta sino esto, porque son tres los
@@ -373,21 +399,14 @@ export async function respond(eventId, playerId, body, { source = 'web', porOtro
   ]);
   if (!jugador.rows.length) throw Object.assign(new Error('no existe ese miembro'), { status: 404 });
 
-  // Las partidas sólo se guardan cuando se viene y cuando el evento las cuenta:
-  // «no puedo, a tres» no significa nada.
-  const rounds =
-    answer === 'yes' && cuentaPartidas(evento.kind)
-      ? Math.min(entero(body?.rounds, MAX_ROUNDS, evento.rounds ?? 1), evento.rounds ?? 1)
-      : null;
-
   await pool.query(
     `INSERT INTO event_responses
-       (guild_id, event_id, player_id, answer, rounds, note, answered_by, source, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
+       (guild_id, event_id, player_id, answer, note, answered_by, source, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, now())
      ON CONFLICT (guild_id, event_id, player_id) DO UPDATE
-       SET answer = EXCLUDED.answer, rounds = EXCLUDED.rounds, note = EXCLUDED.note,
+       SET answer = EXCLUDED.answer, note = EXCLUDED.note,
            answered_by = EXCLUDED.answered_by, source = EXCLUDED.source, updated_at = now()`,
-    [GUILD_ID, eventId, playerId, answer, rounds, texto(body?.note, 300), porOtro, source],
+    [GUILD_ID, eventId, playerId, answer, texto(body?.note, 300), porOtro, source],
   );
 
   return getEvent(eventId);

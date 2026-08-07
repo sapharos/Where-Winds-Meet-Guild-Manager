@@ -16,6 +16,7 @@ import {
   Player,
   UserRole,
   ROLE_LABELS,
+  USER_ROLES,
   DiscordSoundboardSound,
   VOICE_SLOT_LABELS,
   VoiceChannelMap,
@@ -1207,17 +1208,39 @@ const SerieFila: React.FC<{
           <input className={campo} value={b.timeLocal} onChange={(e) => setB({ ...b, timeLocal: e.target.value })} />
         </label>
 
-        {b.kind === 'war' && (
-          <label>
-            <span className={etiqueta}>Partidas</span>
-            <input
-              type="number"
-              className={campo}
-              value={b.rounds ?? 5}
-              onChange={(e) => setB({ ...b, rounds: Number(e.target.value) || 1 })}
-            />
-          </label>
-        )}
+        {/* A qué rangos se les pregunta en cada convocatoria que salga de esta
+            serie. Sin marcar nada, a todo el gremio. */}
+        <div className="sm:col-span-2 lg:col-span-4">
+          <span className={etiqueta}>Quién puede votar</span>
+          <div className="flex flex-wrap gap-2">
+            {USER_ROLES.map((role) => {
+              const marcado = (b.allowedRoles ?? []).includes(role);
+              return (
+                <button
+                  key={role}
+                  type="button"
+                  aria-pressed={marcado}
+                  onClick={() =>
+                    setB({
+                      ...b,
+                      allowedRoles: marcado
+                        ? (b.allowedRoles ?? []).filter((r) => r !== role)
+                        : [...(b.allowedRoles ?? []), role],
+                    })
+                  }
+                  className={`min-h-tap px-3 rounded-md border text-sm font-bold transition-colors duration-micro ${
+                    marcado
+                      ? 'bg-amber-600 border-amber-500 text-white'
+                      : 'bg-slate-950 border-slate-700 text-slate-300'
+                  }`}
+                >
+                  <i className={`fa-solid ${marcado ? 'fa-check' : 'fa-minus'} mr-2 text-[10px]`}></i>
+                  {ROLE_LABELS[role] ?? role}
+                </button>
+              );
+            })}
+          </div>
+        </div>
         <label>
           <span className={etiqueta}>Abre (días antes)</span>
           <div className="flex gap-2">

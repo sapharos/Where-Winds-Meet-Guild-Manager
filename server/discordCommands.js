@@ -29,12 +29,12 @@ import { SCAN_FIELDS } from './scans.js';
 import { listBuilds } from './builds.js';
 import { listWeaponSets } from './weapons.js';
 import { permissionsFor } from './auth.js';
+import { ROLE_LABELS } from './permissions.js';
 import { LANE_INFO, LANE_CAPACITY, WAR_CAPACITY, SIDES, getBoard, listStrategies } from './war.js';
 import {
   getEvent,
   myEvents,
   respond,
-  cuentaPartidas,
   getAgendaChannel,
   setDiscordMessage,
 } from './events.js';
@@ -662,8 +662,8 @@ export function eventoMensaje(evento) {
 
   const cabecera = [
     `${marca(evento.startsAt, 'F')}  ·  ${marca(evento.startsAt, 'R')}`,
-    cuentaPartidas(evento.kind) && evento.rounds > 1
-      ? `**${evento.rounds} partidas** esa noche. Di a cuántas llegas.`
+    evento.allowedRoles?.length
+      ? `Abierta a: **${evento.allowedRoles.map((r) => ROLE_LABELS[r] ?? r).join(', ')}**`
       : null,
     evento.notes ? literal(evento.notes) : null,
     evento.cancelledAt
@@ -680,13 +680,7 @@ export function eventoMensaje(evento) {
     return {
       name: `${emoji} ${label} · ${suyos.length}`,
       value: suyos.length
-        ? suyos
-            .map(
-              (r) =>
-                `${literal(r.name)}${answer === 'yes' && r.rounds ? ` (${r.rounds})` : ''}`,
-            )
-            .join(' · ')
-            .slice(0, 1024)
+        ? suyos.map((r) => literal(r.name)).join(' · ').slice(0, 1024)
         : '—',
       inline: false,
     };
@@ -708,40 +702,18 @@ export function eventoMensaje(evento) {
   // Una guerra con varias partidas no se responde con tres botones, porque la
   // respuesta útil no es «voy» sino «voy a tres». Un desplegable dice las dos
   // cosas en un toque, y encima no gasta cinco botones en una fila.
-  const components = cuentaPartidas(evento.kind) && evento.rounds > 1
-    ? [
-        {
-          type: 1,
-          components: [
-            {
-              type: 3,
-              custom_id: `evento:${evento.id}`,
-              placeholder: '¿Vas? ¿A cuántas?',
-              options: [
-                ...Array.from({ length: evento.rounds }, (_, i) => evento.rounds - i).map((n) => ({
-                  label: n === evento.rounds ? `Voy a todas (${n})` : `Voy a ${n}`,
-                  value: `yes:${n}`,
-                  emoji: { name: '✅' },
-                })),
-                { label: 'Tal vez', value: 'maybe', emoji: { name: '❔' } },
-                { label: 'No puedo', value: 'no', emoji: { name: '✖' } },
-              ].slice(0, 25),
-            },
-          ],
-        },
-      ]
-    : [
-        {
-          type: 1,
-          components: RESPUESTAS.map(({ answer, label, emoji }) => ({
-            type: 2,
-            style: answer === 'yes' ? 3 : answer === 'no' ? 4 : 2,
-            label,
-            emoji: { name: emoji },
-            custom_id: `evento:${evento.id}:${answer}`,
-          })),
-        },
-      ];
+  const components = [
+    {
+      type: 1,
+      components: RESPUESTAS.map(({ answer, label, emoji }) => ({
+        type: 2,
+        style: answer === 'yes' ? 3 : answer === 'no' ? 4 : 2,
+        label,
+        emoji: { name: emoji },
+        custom_id: `evento:${evento.id}:${answer}`,
+      })),
+    },
+  ];
 
   return { embeds: [embed], components };
 }
@@ -922,12 +894,18 @@ async function botonEvento(interaction) {
     return aviso('Tu cuenta todavía no está unida a una ficha del roster. Avisa a un líder.');
   }
 
-  // Del desplegable llega «yes:3»; de un botón, la respuesta en el propio id.
+  // La respuesta viene en el id del botón. Los mensajes publicados antes de
+  // quitar las partidas traían un desplegable con valores «yes:3»: se acepta
+  // igual, quedándose con lo de delante, para que una encuesta ya publicada
+  // siga contestándose en vez de romperse.
   const elegido = interaction.data?.values?.[0] ?? respuestaDelBoton ?? '';
-  const [answer, rounds] = String(elegido).split(':');
+  const [answer] = String(elegido).split(':');
 
   try {
-    await respond(eventId, quien.playerId, { answer, rounds }, { source: 'discord' });
+    await respond(eventId, quien.playerId, { answer }, {
+      source: 'discord',
+      rol: quien.cuentaRol,
+    });
   } catch (err) {
     return aviso(err.message);
   }
@@ -965,9 +943,7 @@ async function comandoAgenda(interaction) {
     fields: eventos.slice(0, 10).map((e) => {
       const tipo = EVENTO_TIPOS[e.kind] ?? EVENTO_TIPOS.casual;
       const tuya = e.mine
-        ? `**${RESPUESTAS.find((r) => r.answer === e.mine.answer)?.label ?? e.mine.answer}**${
-            e.mine.rounds ? ` (${e.mine.rounds})` : ''
-          }`
+        ? `**${RESPUESTAS.find((r) => r.answer === e.mine.answer)?.label ?? e.mine.answer}**`
         : '*sin contestar*';
       // El enlace a la encuesta, cuando está publicada: es lo que convierte
       // esta lista en un sitio desde el que se puede contestar, y no sólo

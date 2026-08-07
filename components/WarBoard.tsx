@@ -105,7 +105,7 @@ const MarcaConvocatoria: React.FC<{ respuesta?: EventResponse }> = ({ respuesta 
     return (
       <i
         className="fa-solid fa-circle-check text-emerald-400 text-[10px] shrink-0"
-        title={`Confirmado${respuesta.rounds ? ` · a ${respuesta.rounds} partidas` : ''}`}
+        title="Confirmado"
       ></i>
     );
   }

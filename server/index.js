@@ -516,7 +516,11 @@ app.put('/api/events/:id/response', requireAuth, asHandler(async (req, res) => {
   if (!req.user.playerId) {
     return res.status(403).json({ error: 'tu cuenta no está unida a una ficha del roster' });
   }
-  const actualizado = await respond(req.params.id, req.user.playerId, req.body);
+  // El rol de la cuenta es lo que decide si esta convocatoria está abierta a
+  // ella; lo comprueba el modelo, aquí sólo se le dice cuál es.
+  const actualizado = await respond(req.params.id, req.user.playerId, req.body, {
+    rol: req.user.role,
+  });
   // El mensaje de Discord se pone al día aunque la respuesta se diera aquí: es
   // la misma lista, y una encuesta que no cuenta lo contestado en la web es una
   // segunda verdad de las que este modelo existe para no tener.

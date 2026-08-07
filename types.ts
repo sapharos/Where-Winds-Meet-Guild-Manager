@@ -395,6 +395,10 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   member: 'Miembro',
 };
 
+// De más mando a menos, que es como se leen. Gemelo de ROLES en
+// server/permissions.js, del que sale el orden de la matriz de permisos.
+export const USER_ROLES: UserRole[] = ['admin', 'leader', 'subleader', 'officer', 'member'];
+
 export const PERMISSION_LABELS: Record<string, string> = {
   'roster.view': 'Ver el roster',
   'roster.edit': 'Editar miembros',
@@ -484,9 +488,6 @@ export const EVENT_KIND_ICONS: Record<EventKind, string> = {
   casual: 'fa-mug-hot',
 };
 
-/** Sólo la guerra de gremio pregunta a cuántas partidas se llega. */
-export const cuentaPartidas = (kind: EventKind) => kind === 'war';
-
 export type EventAnswer = 'yes' | 'no' | 'maybe';
 
 export const EVENT_ANSWER_LABELS: Record<EventAnswer, string> = {
@@ -500,7 +501,6 @@ export interface EventResponse {
   name: string;
   role: Role;
   answer: EventAnswer;
-  rounds: number | null;
   note: string | null;
   /** El id del usuario que la escribió, cuando no fue el propio miembro. */
   answeredBy: string | null;
@@ -514,9 +514,14 @@ export interface GuildEvent {
   title: string;
   startsAt: string;
   minutes: number;
-  /** Cuántas partidas caben. Sólo en las guerras. */
-  rounds: number | null;
   notes: string | null;
+  /**
+   * Qué rangos pueden contestar la encuesta. Vacío: el gremio entero.
+   *
+   * Son los roles del sistema de usuarios, que es como este gremio nombra sus
+   * rangos desde que el rango del roster dejó de editarse.
+   */
+  allowedRoles: UserRole[];
   opensAt: string | null;
   closesAt: string | null;
   cancelledAt: string | null;
@@ -535,7 +540,7 @@ export interface GuildEvent {
   /** Sólo al pedir uno concreto. */
   responses?: EventResponse[];
   /** Sólo en «lo mío»: lo que contestó quien pregunta, o null si no contestó. */
-  mine?: { answer: EventAnswer; rounds: number | null } | null;
+  mine?: { answer: EventAnswer } | null;
 }
 
 /** Lo que se repite cada semana y de lo que salen los eventos concretos. */
@@ -548,8 +553,8 @@ export interface EventSeries {
   timeLocal: string;
   timezone: string;
   minutes: number;
-  rounds: number | null;
   notes: string | null;
+  allowedRoles: UserRole[];
   opensDaysBefore: number;
   opensTime: string;
   closesDaysBefore: number;

@@ -179,7 +179,6 @@ interface RespuestaFalsa {
   name: string;
   role: string;
   answer: string;
-  rounds: number | null;
   note: string | null;
   answeredBy: string | null;
   source: string;
@@ -200,8 +199,8 @@ const eventos: Record<string, unknown>[] = [
     title: 'Guerra del sábado',
     startsAt: enDias(2),
     minutes: 150,
-    rounds: 5,
     notes: 'Nos conectamos a las 7:15 para repartir líneas.',
+    allowedRoles: [],
     opensAt: enDias(-3),
     closesAt: enDias(2, 12, 0),
     cancelledAt: null,
@@ -213,8 +212,8 @@ const eventos: Record<string, unknown>[] = [
     title: 'Guerra del domingo',
     startsAt: enDias(3),
     minutes: 150,
-    rounds: 5,
     notes: null,
+    allowedRoles: ['admin', 'leader', 'subleader', 'officer'],
     opensAt: enDias(-3),
     closesAt: enDias(2, 12, 0),
     cancelledAt: null,
@@ -226,8 +225,8 @@ const eventos: Record<string, unknown>[] = [
     title: 'Reino del Héroe',
     startsAt: enDias(4, 21, 0),
     minutes: 90,
-    rounds: null,
     notes: null,
+    allowedRoles: ['officer', 'member'],
     opensAt: null,
     closesAt: null,
     cancelledAt: null,
@@ -244,15 +243,15 @@ const respuestas: Record<string, RespuestaFalsa[]> = {
 // Unos cuantos ya contestados, para que el recuento no salga en cero y se vea
 // cómo queda una lista con gente dentro.
 {
-  const inicial: [string, string, number | null][] = [
-    ['An Ning', 'yes', 5],
-    ['Bai Hu', 'yes', 3],
-    ['Bao Zhu', 'yes', 5],
-    ['Cang Ming', 'maybe', null],
-    ['Chen Xi', 'no', null],
-    ['Edve', 'yes', 2],
+  const inicial: [string, string][] = [
+    ['An Ning', 'yes'],
+    ['Bai Hu', 'yes'],
+    ['Bao Zhu', 'yes'],
+    ['Cang Ming', 'maybe'],
+    ['Chen Xi', 'no'],
+    ['Edve', 'yes'],
   ];
-  for (const [nombre, answer, rounds] of inicial) {
+  for (const [nombre, answer] of inicial) {
     const p = fake.players.find((x) => x.name === nombre);
     if (!p) continue;
     respuestas['ev-sabado'].push({
@@ -260,7 +259,6 @@ const respuestas: Record<string, RespuestaFalsa[]> = {
       name: p.name,
       role: p.role,
       answer,
-      rounds,
       note: null,
       answeredBy: null,
       source: 'web',
@@ -276,13 +274,13 @@ let canalAgenda: string | null = null;
 const seriesFalsas: Record<string, unknown>[] = [
   {
     id: 'serie-guerra-domingo', kind: 'war', title: 'Guerra del domingo', weekday: 0,
-    timeLocal: '19:30', timezone: 'America/Bogota', minutes: 150, rounds: 5, notes: null,
+    timeLocal: '19:30', timezone: 'America/Bogota', minutes: 150, notes: null, allowedRoles: [],
     opensDaysBefore: 6, opensTime: '00:00', closesDaysBefore: 1, closesTime: '12:00',
     autoPublish: true, active: true,
   },
   {
     id: 'serie-guerra-sabado', kind: 'war', title: 'Guerra del sábado', weekday: 6,
-    timeLocal: '19:30', timezone: 'America/Bogota', minutes: 150, rounds: 5, notes: null,
+    timeLocal: '19:30', timezone: 'America/Bogota', minutes: 150, notes: null, allowedRoles: [],
     opensDaysBefore: 5, opensTime: '00:00', closesDaysBefore: 0, closesTime: '12:00',
     autoPublish: true, active: true,
   },
@@ -306,18 +304,18 @@ const conRespuestas = (id: string) => {
 const anotar = (id: string, playerId: string, body: Record<string, unknown>, porOtro: string | null) => {
   const p = fake.players.find((x) => x.id === playerId);
   if (!p) return conRespuestas(id);
+  // Como el servidor: quien anota por otro queda fuera de la regla, porque
+  // apuntar lo que alguien dijo por voz no es votar en su lugar.
+  const abierta = (eventos.find((x) => x.id === id)?.allowedRoles ?? []) as string[];
+  if (!porOtro && abierta.length && !abierta.includes(fake.session.user.role)) {
+    return { error: 'esta convocatoria no está abierta a tu rango' };
+  }
   const lista = (respuestas[id] ??= []);
-  const evento = eventos.find((x) => x.id === id);
-  const cuentaPartidas = evento?.kind === 'war';
   const fila: RespuestaFalsa = {
     playerId,
     name: p.name,
     role: p.role,
     answer: String(body?.answer ?? 'yes'),
-    rounds:
-      body?.answer === 'yes' && cuentaPartidas
-        ? Number(body?.rounds ?? evento?.rounds ?? 1)
-        : null,
     note: null,
     answeredBy: porOtro,
     source: porOtro ? 'web' : 'web',
@@ -356,7 +354,7 @@ const GET: [RegExp, Ruta][] = [
       .filter((e) => !e.cancelledAt || (respuestas[e.id as string] ?? []).some((r) => r.playerId === yo && r.answer === 'yes'))
       .map((e) => {
         const mia = (respuestas[e.id as string] ?? []).find((r) => r.playerId === yo);
-        return { ...e, mine: mia ? { answer: mia.answer, rounds: mia.rounds } : null };
+        return { ...e, mine: mia ? { answer: mia.answer } : null };
       });
   }],
   // La guerra que viene, para que el banquillo enseñe quién confirmó.
