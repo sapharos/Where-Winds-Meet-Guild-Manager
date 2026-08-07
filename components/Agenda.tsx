@@ -245,6 +245,19 @@ const Agenda: React.FC<Props> = ({ players, myPlayerId, canManage, canReset = fa
     }
   };
 
+  const borrar = async (event: GuildEvent) => {
+    setError(null);
+    setAviso(null);
+    try {
+      await api(`/events/${event.id}`, { method: 'DELETE' });
+      setAbierto(null);
+      await cargar();
+      setAviso(`«${event.title}» se borró, con sus respuestas y su encuesta.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo borrar el evento');
+    }
+  };
+
   const cancelar = async (event: GuildEvent) => {
     const actualizado = await api<GuildEvent>(`/events/${event.id}/cancel`, {
       method: 'POST',
@@ -454,6 +467,7 @@ const Agenda: React.FC<Props> = ({ players, myPlayerId, canManage, canReset = fa
             onCancelar={() => cancelar(abierto)}
             canReset={canReset}
             onReiniciar={() => reiniciar(abierto)}
+            onBorrar={() => borrar(abierto)}
             onPublicar={async () => {
               setError(null);
               try {
@@ -682,6 +696,7 @@ const DetalleEvento: React.FC<{
   onPublicar: () => void;
   canReset: boolean;
   onReiniciar: () => void;
+  onBorrar: () => void;
 }> = ({
   event,
   players,
@@ -696,6 +711,7 @@ const DetalleEvento: React.FC<{
   onPublicar,
   canReset,
   onReiniciar,
+  onBorrar,
 }) => {
   // Lo decide el servidor, que es quien sabe qué roles lleva cada uno en
   // Discord. Sin campo -- un detalle traído antes de que esto existiera -- se
@@ -705,7 +721,12 @@ const DetalleEvento: React.FC<{
   // pide pulsar dos veces. El segundo botón dice lo que va a pasar y cuánto
   // cuesta -- no «¿seguro?», que no informa de nada.
   const [confirmando, setConfirmando] = useState(false);
+  const [borrando, setBorrando] = useState(false);
   const contestadas = (event.responses ?? []).length;
+  // Programar basta para borrar lo que no ha contestado nadie; en cuanto hay
+  // respuestas hace falta el permiso de reiniciar, que es el mismo que hace
+  // falta para tirarlas. Se comprueba igual en el servidor.
+  const puedeBorrar = canManage && (contestadas === 0 || canReset);
 
   const porRespuesta = (answer: EventAnswer) =>
     (event.responses ?? []).filter((r) => r.answer === answer);
@@ -958,6 +979,41 @@ const DetalleEvento: React.FC<{
                   : `Sí, borrar ${contestadas} ${contestadas === 1 ? 'respuesta' : 'respuestas'}`
                 : 'Reiniciar encuesta'}
             </button>
+          )}
+
+          {/* Borrar el evento entero. Es lo contrario de cancelar y por eso
+              están los dos: cancelar deja constancia de que se convocó y no se
+              jugó; borrar es para lo que no debería haber existido nunca. */}
+          {puedeBorrar && (
+            <button
+              onClick={() => {
+                if (!borrando) return setBorrando(true);
+                setBorrando(false);
+                onBorrar();
+              }}
+              onBlur={() => setBorrando(false)}
+              title="Se lleva el evento, sus respuestas y su encuesta de Discord. No se deshace."
+              className={`min-h-tap px-4 rounded-md border transition-colors duration-micro ${
+                borrando
+                  ? 'border-red-600 bg-red-950 text-red-300 font-bold'
+                  : 'border-slate-700 text-slate-400'
+              }`}
+            >
+              <i className="fa-solid fa-trash mr-2"></i>
+              {borrando
+                ? contestadas === 0
+                  ? 'Sí, borrar el evento'
+                  : `Sí, borrarlo con sus ${contestadas} respuestas`
+                : 'Borrar evento'}
+            </button>
+          )}
+
+          {/* Lo tiene contestado y no alcanza el permiso: se dice, porque si no
+              es un botón que falta sin motivo aparente. */}
+          {canManage && !puedeBorrar && (
+            <p className="text-meta text-slate-500 self-center">
+              Borrarlo con respuestas puestas pide el permiso de reiniciar encuestas.
+            </p>
           )}
         </div>
       )}

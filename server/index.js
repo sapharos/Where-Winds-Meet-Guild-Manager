@@ -566,11 +566,29 @@ app.post('/api/events/:id/publish', requireAuth, requirePermission('events.manag
   res.json(await getEvent(req.params.id));
 }));
 
+/**
+ * Borrar un evento, con sus respuestas y su encuesta.
+ *
+ * Programar basta para borrar lo que aún no ha contestado nadie -- un evento
+ * creado con una errata es de quien lo creó y no tiene por qué sobrevivir
+ * tachado. En cuanto hay respuestas se pide además `events.reset`, que es el
+ * mismo permiso que hace falta para tirarlas sin borrar el evento: la
+ * diferencia entre las dos cosas no puede ser la forma de saltarse el permiso.
+ *
+ * Cancelar sigue existiendo y es lo contrario a propósito: el evento y sus
+ * respuestas se quedan, tachados, porque hubo gente que organizó una noche
+ * alrededor.
+ */
 app.delete('/api/events/:id', requireAuth, requirePermission('events.manage'), asHandler(async (req, res) => {
   // Se lee antes de borrar: después ya no hay de dónde sacar dónde quedó
   // publicada su encuesta, y dejarla en el canal es dejar botones que
   // contestan «no existe ese evento».
   const evento = await getEvent(req.params.id).catch(() => null);
+  if (evento?.responses?.length && !req.permissions.includes('events.reset')) {
+    return res.status(403).json({
+      error: `este evento ya tiene ${evento.responses.length} respuestas; borrarlo pide el permiso de reiniciar encuestas`,
+    });
+  }
   await deleteEvent(req.params.id);
   if (evento) void retirarEvento(evento);
   res.json({ ok: true });

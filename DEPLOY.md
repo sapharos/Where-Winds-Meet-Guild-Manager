@@ -230,10 +230,18 @@ fixing a typo does not summon the guild twice. Whether an event has gone out
 shows on its card — *publicada*, or *sin publicar* for whoever can publish it —
 and opening it links straight to the message.
 
-Deleting an event takes its answers and its poll message with it, so a trial run
-— create something, publish it, vote on it from both sides, delete it — leaves
-nothing behind. Cancelling is the opposite and deliberate: the event and its
-answers stay, struck through, because people arranged an evening around it.
+**Cancelling and deleting are different on purpose.** *Cancelar evento* keeps
+the event and every answer, struck through, and the Discord poll loses its
+buttons and says so — there was a night arranged around it and that is worth a
+record. *Borrar evento* takes the answers and the poll message with it, so a
+trial run — create something, publish it, vote on it from both sides, delete it
+— leaves nothing behind.
+
+Scheduling is enough to delete an event nobody has answered: one created with a
+typo belongs to whoever created it. Once there are answers it also needs
+`events.reset`, the same permission that binning them without deleting the event
+needs — the difference between the two cannot be the way around the permission.
+Both buttons ask twice, and the second press names the cost.
 
 **Republishing never costs a vote.** Answers live in the database against the
 member, never in Discord, so *Volver a publicar* can be pressed as often as

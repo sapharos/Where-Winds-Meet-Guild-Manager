@@ -548,8 +548,17 @@ const ESCRITURAS: [string, RegExp, Ruta][] = [
     return conRespuestas(m[1]);
   }],
   ['DELETE', /^\/events\/([^/]+)$/, (m) => {
+    // Como el servidor: con respuestas puestas hace falta el permiso de
+    // reiniciar, que es el mismo que se pide para tirarlas sin borrar el evento.
+    const puestas = (respuestas[m[1]] ?? []).length;
+    if (puestas && !fake.session.permissions.includes('events.reset')) {
+      return {
+        error: `este evento ya tiene ${puestas} respuestas; borrarlo pide el permiso de reiniciar encuestas`,
+      };
+    }
     const at = eventos.findIndex((x) => x.id === m[1]);
     if (at >= 0) eventos.splice(at, 1);
+    delete respuestas[m[1]];
     return { ok: true };
   }],
   ['PUT', /^\/war\/voice-channels$/, (_m, _req, body) => {
