@@ -496,6 +496,19 @@ export const EVENT_ANSWER_LABELS: Record<EventAnswer, string> = {
   no: 'No puedo',
 };
 
+/**
+ * Qué se puede contestar, según lo que se pregunte, y en el orden en que se
+ * lee.
+ *
+ * En una guerra no hay «tal vez»: las líneas se reparten con nombres, y quien
+ * dice que quizá ocupa un hueco que a la hora de armar el tablero está vacío.
+ *
+ * Gemelo de `respuestasDe` en server/events.js, que es quien manda: aquí
+ * decide qué botones se enseñan, allí decide qué se guarda.
+ */
+export const respuestasDe = (kind: EventKind): EventAnswer[] =>
+  kind === 'war' ? ['yes', 'no'] : ['yes', 'maybe', 'no'];
+
 export interface EventResponse {
   playerId: string;
   name: string;

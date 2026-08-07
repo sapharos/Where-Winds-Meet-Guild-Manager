@@ -35,6 +35,7 @@ import {
   getEvent,
   myEvents,
   respond,
+  respuestasDe,
   getAgendaChannel,
   setDiscordMessage,
 } from './events.js';
@@ -643,6 +644,41 @@ const RESPUESTAS = [
   { answer: 'no', label: 'No puedo', emoji: '✖' },
 ];
 
+const RESPUESTA = (answer) => RESPUESTAS.find((r) => r.answer === answer);
+
+/** Los botones que se ofrecen: en una guerra, dos. */
+const ofrecidas = (evento) => respuestasDe(evento.kind).map(RESPUESTA);
+
+/**
+ * Las listas que se enseñan: las que se ofrecen, más cualquiera que alguien
+ * haya contestado.
+ *
+ * Una guerra de antes del cambio tiene sus «tal vez» guardados, y dejar de
+ * pintar la lista los borraría de la vista sin borrarlos de ningún sitio: el
+ * recuento no cuadraría y a esa gente habría que ir a buscarla sin saber que
+ * falta. Se enseña lo que hay, se ofrece lo que se pregunta.
+ */
+const mostradas = (evento) => {
+  const dadas = new Set((evento.responses ?? []).map((r) => r.answer));
+  return RESPUESTAS.filter(
+    (r) => respuestasDe(evento.kind).includes(r.answer) || dadas.has(r.answer),
+  );
+};
+
+/**
+ * El marcador de una fila de /agenda.
+ *
+ * El «tal vez» se calla en las guerras, que ya no lo preguntan, salvo que
+ * alguien lo tenga contestado de antes: un cero permanente en una columna que
+ * no existe se lee como si nadie dudara.
+ */
+const recuento = (e) => {
+  const partes = [`✅ ${e.yes}`];
+  if (respuestasDe(e.kind).includes('maybe') || e.maybe > 0) partes.push(`❔ ${e.maybe}`);
+  partes.push(`✖ ${e.no}`);
+  return partes.join(' · ');
+};
+
 const marca = (iso, formato) => `<t:${Math.floor(new Date(iso).getTime() / 1000)}:${formato}>`;
 
 /**
@@ -675,7 +711,7 @@ export function eventoMensaje(evento) {
 
   const de = (answer) => (evento.responses ?? []).filter((r) => r.answer === answer);
 
-  const fields = RESPUESTAS.map(({ answer, label, emoji }) => {
+  const fields = mostradas(evento).map(({ answer, label, emoji }) => {
     const suyos = de(answer);
     return {
       name: `${emoji} ${label} · ${suyos.length}`,
@@ -699,13 +735,13 @@ export function eventoMensaje(evento) {
   // botón que va a contestar «ya está cerrada» es ofrecer algo que no existe.
   if (cerrada) return { embeds: [embed], components: [] };
 
-  // Una guerra con varias partidas no se responde con tres botones, porque la
-  // respuesta útil no es «voy» sino «voy a tres». Un desplegable dice las dos
-  // cosas en un toque, y encima no gasta cinco botones en una fila.
+  // Dos botones en las guerras y tres en lo demás. Los ofrecidos, no los
+  // enseñados: un mensaje viejo puede estar pintando una lista de «tal vez»
+  // que ya no se puede contestar, y eso es correcto -- enseña lo que hay.
   const components = [
     {
       type: 1,
-      components: RESPUESTAS.map(({ answer, label, emoji }) => ({
+      components: ofrecidas(evento).map(({ answer, label, emoji }) => ({
         type: 2,
         style: answer === 'yes' ? 3 : answer === 'no' ? 4 : 2,
         label,
@@ -943,7 +979,7 @@ async function comandoAgenda(interaction) {
     fields: eventos.slice(0, 10).map((e) => {
       const tipo = EVENTO_TIPOS[e.kind] ?? EVENTO_TIPOS.casual;
       const tuya = e.mine
-        ? `**${RESPUESTAS.find((r) => r.answer === e.mine.answer)?.label ?? e.mine.answer}**`
+        ? `**${RESPUESTA(e.mine.answer)?.label ?? e.mine.answer}**`
         : '*sin contestar*';
       // El enlace a la encuesta, cuando está publicada: es lo que convierte
       // esta lista en un sitio desde el que se puede contestar, y no sólo
@@ -951,7 +987,7 @@ async function comandoAgenda(interaction) {
       const donde = e.discordUrl ? `  ·  [ir a la encuesta](${e.discordUrl})` : '';
       return {
         name: `${tipo.emoji}  ${literal(e.title)}${e.cancelledAt ? '  ·  CANCELADO' : ''}`,
-        value: `${marca(e.startsAt, 'F')}\n✅ ${e.yes} · ❔ ${e.maybe} · ✖ ${e.no}  —  tú: ${tuya}${donde}`,
+        value: `${marca(e.startsAt, 'F')}\n${recuento(e)}  —  tú: ${tuya}${donde}`,
         inline: false,
       };
     }),

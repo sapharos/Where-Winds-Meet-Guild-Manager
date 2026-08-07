@@ -23,6 +23,22 @@ import { ROLES } from './permissions.js';
 export const EVENT_KINDS = ['war', 'practice', 'pve', 'casual'];
 export const EVENT_ANSWERS = ['yes', 'no', 'maybe'];
 
+/**
+ * Qué se puede contestar, según lo que se pregunte, y en el orden en que se
+ * lee.
+ *
+ * En una guerra no hay «tal vez»: las líneas se reparten con nombres, y quien
+ * dice que quizá ocupa un hueco que a la hora de armar el tablero está vacío.
+ * Es el sitio donde un maybe cuesta una plaza, así que se pregunta lo único
+ * que se puede usar. En lo demás sigue teniendo sentido.
+ *
+ * Lo ya contestado no se toca: las guerras de antes tienen sus «tal vez»
+ * guardados y se siguen enseñando donde los haya. Lo que cambia es lo que se
+ * ofrece de aquí en adelante.
+ */
+export const respuestasDe = (kind) =>
+  kind === 'war' ? ['yes', 'no'] : ['yes', 'maybe', 'no'];
+
 const MAX_MINUTES = 60 * 12;
 
 /**
@@ -366,6 +382,13 @@ export async function respond(
   if (!evento) throw Object.assign(new Error('no existe ese evento'), { status: 404 });
   if (evento.cancelledAt) {
     throw Object.assign(new Error('ese evento está cancelado'), { status: 409 });
+  }
+
+  // Se comprueba aquí y no arriba porque depende del tipo, que hay que ir a
+  // buscar. Vale para todos los caminos: la web, el bot y el oficial que anota
+  // por otro escriben por esta misma puerta.
+  if (!respuestasDe(evento.kind).includes(answer)) {
+    throw Object.assign(new Error('esa respuesta no vale en este evento'), { status: 400 });
   }
 
   // Quién puede contestar, en el mismo sitio y por la misma razón que la

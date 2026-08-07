@@ -306,9 +306,15 @@ const anotar = (id: string, playerId: string, body: Record<string, unknown>, por
   if (!p) return conRespuestas(id);
   // Como el servidor: quien anota por otro queda fuera de la regla, porque
   // apuntar lo que alguien dijo por voz no es votar en su lugar.
-  const abierta = (eventos.find((x) => x.id === id)?.allowedRoles ?? []) as string[];
+  const evento = eventos.find((x) => x.id === id);
+  const abierta = (evento?.allowedRoles ?? []) as string[];
   if (!porOtro && abierta.length && !abierta.includes(fake.session.user.role)) {
     return { error: 'esta convocatoria no está abierta a tu rango' };
+  }
+  // En una guerra no hay «tal vez». Como el servidor, por si alguien llega por
+  // otro camino que no sean los botones.
+  if (evento?.kind === 'war' && body?.answer === 'maybe') {
+    return { error: 'esa respuesta no vale en este evento' };
   }
   const lista = (respuestas[id] ??= []);
   const fila: RespuestaFalsa = {

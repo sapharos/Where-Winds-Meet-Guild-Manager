@@ -12,6 +12,7 @@ import {
   ROLE_LABELS,
   USER_ROLES,
   UserRole,
+  respuestasDe,
 } from '../types';
 import Sheet from './Sheet';
 
@@ -65,6 +66,24 @@ function paraCampo(iso?: string | null) {
 }
 
 const ORDEN: EventAnswer[] = ['yes', 'maybe', 'no'];
+
+/**
+ * Las listas que se enseñan: las que se ofrecen, más cualquiera que alguien
+ * haya contestado.
+ *
+ * Una guerra de antes del cambio tiene sus «tal vez» guardados, y dejar de
+ * pintar la lista los borraría de la vista sin borrarlos de ningún sitio: el
+ * recuento no cuadraría y a esa gente habría que ir a buscarla sin saber que
+ * falta. Se enseña lo que hay, se ofrece lo que se pregunta.
+ */
+const mostradas = (event: GuildEvent): EventAnswer[] => {
+  const ofrecidas = respuestasDe(event.kind);
+  // En la lista sólo llegan los recuentos; en el detalle, las respuestas.
+  const dadas = event.responses
+    ? new Set(event.responses.map((r) => r.answer))
+    : new Set(ORDEN.filter((a) => (event[a] ?? 0) > 0));
+  return ORDEN.filter((a) => ofrecidas.includes(a) || dadas.has(a));
+};
 
 /** Los días de la semana empezando en lunes, que es como se lee un calendario. */
 const CABECERA = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
@@ -443,7 +462,7 @@ const TarjetaEvento: React.FC<{
     </div>
 
     <div className="flex items-center gap-2 mt-2 pl-11 flex-wrap">
-      {ORDEN.map((answer) => (
+      {mostradas(event).map((answer) => (
         <span
           key={answer}
           className={`text-[11px] leading-none px-1.5 py-[3px] rounded border uppercase font-bold tracking-tighter ${TONO_APAGADO[answer]}`}
@@ -689,7 +708,7 @@ const DetalleEvento: React.FC<{
           <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-2">Tu respuesta</p>
           {invitado ? (
             <div className="flex gap-2 flex-wrap">
-              {ORDEN.map((answer) => (
+              {respuestasDe(event.kind).map((answer) => (
                 <button
                   key={answer}
                   disabled={cerrada}
@@ -712,7 +731,7 @@ const DetalleEvento: React.FC<{
         </div>
       )}
 
-      {ORDEN.map((answer) => {
+      {mostradas(event).map((answer) => {
         const suyos = porRespuesta(answer);
         return (
           <div key={answer}>
@@ -752,7 +771,7 @@ const DetalleEvento: React.FC<{
               >
                 <span className="text-meta text-slate-300 truncate">{p.name}</span>
                 <div className="flex gap-1 shrink-0">
-                  {ORDEN.map((answer) => (
+                  {respuestasDe(event.kind).map((answer) => (
                     <button
                       key={answer}
                       onClick={() => onContestarPor(p.id, answer)}
