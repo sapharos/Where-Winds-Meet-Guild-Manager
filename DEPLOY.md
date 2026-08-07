@@ -295,8 +295,15 @@ is everyday work and this does not undo, so an officer who summons Saturday's
 war does not thereby get to bin the fifty answers it already holds.
 
 `/agenda` lists what is coming with your own answer against each, privately, and
-links each published event straight to its poll — the message gets buried in a
-busy channel, and Monday's is not findable on Friday.
+links each event straight to its poll — the message gets buried in a busy
+channel, and Monday's is not findable on Friday.
+
+It lists **only what has been published**. An event that has not gone out to the
+channel has not been summoned yet: it is written, it is being looked at, and it
+can still change its hour or never happen. On the web that reads correctly — the
+card says *sin publicar* and whoever sees it is whoever is preparing it — but a
+line in a Discord list carries none of that, and the guild would arrange its
+Saturday around something nobody had called. The profile page still shows them.
 
 Answering needs a linked Discord and a roster entry, and the poll's window is
 enforced wherever the answer comes from.

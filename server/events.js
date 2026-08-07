@@ -352,8 +352,15 @@ export async function getEvent(id) {
  * mira su perfil necesita las dos cosas: a qué se apuntó y qué le falta por
  * decir. Y los cancelados a los que dijo que sí, porque quien organizó su
  * sábado alrededor de una guerra es justo a quien hay que avisar.
+ *
+ * `soloPublicados` es para el bot. Un evento sin publicar no se ha convocado
+ * todavía: está escrito, se está mirando, y aún puede cambiar de hora o no
+ * llegar a existir. En la web eso se entiende porque la ficha dice «todavía no
+ * se ha publicado» y quien la ve es quien la programa; en Discord una línea de
+ * una lista no lleva ese matiz, y el gremio se organiza el sábado alrededor de
+ * algo que nadie había convocado.
  */
-export async function myEvents(playerId, { conCancelados = false } = {}) {
+export async function myEvents(playerId, { conCancelados = false, soloPublicados = false } = {}) {
   const { rows } = await pool.query(
     `SELECT ${CAMPOS}, r.answer AS "myAnswer",
             (SELECT count(*)::int FROM event_responses x
@@ -371,8 +378,9 @@ export async function myEvents(playerId, { conCancelados = false } = {}) {
         -- quien hay que avisar. La agenda del bot los quiere todos: allí la
         -- pregunta es «qué hay», no «a qué me apunté».
         AND ($3 OR e.cancelled_at IS NULL OR r.answer = 'yes')
+        AND (NOT $4 OR e.discord_message_id IS NOT NULL)
       ORDER BY e.starts_at`,
-    [GUILD_ID, playerId, conCancelados],
+    [GUILD_ID, playerId, conCancelados, soloPublicados],
   );
 
   const canales = await getAgendaChannels();

@@ -1059,8 +1059,14 @@ async function comandoAgenda(interaction) {
   // Una consulta y no una por evento: diez eventos eran veintiuna idas y
   // vueltas a la base de datos para leer diez respuestas propias, y esto tiene
   // tres segundos antes de que Discord dé el comando por perdido.
-  const eventos = quien.playerId ? await myEvents(quien.playerId, { conCancelados: true }) : [];
-  if (!eventos.length) return aviso('No hay nada programado por delante.');
+  //
+  // Sólo lo publicado: aquí se lee lo que el gremio ya ha visto en su canal. Lo
+  // que está escrito pero sin convocar se queda en la web, donde la ficha dice
+  // que no se ha publicado y quien la mira es quien la está preparando.
+  const eventos = quien.playerId
+    ? await myEvents(quien.playerId, { conCancelados: true, soloPublicados: true })
+    : [];
+  if (!eventos.length) return aviso('No hay nada convocado por delante.');
 
   const embed = {
     author: { name: process.env.GUILD_NAME || 'Zona Zero' },
