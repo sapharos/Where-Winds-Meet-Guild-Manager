@@ -247,19 +247,40 @@ export async function deleteSeries(id) {
 /* ------------------------------------------------------ materializar */
 
 /**
- * Crea los eventos que faltan de aquí a unas semanas.
+ * Crea los eventos de las series a los que ya les toca abrir la encuesta.
+ *
+ * Un evento nace cuando se convoca, no antes. La guerra del sábado aparece el
+ * lunes -- que es cuando su encuesta abre y sale al canal -- y hasta entonces
+ * sólo existe como serie, en Administración.
+ *
+ * Antes se materializaban tres semanas por delante y las encuestas se
+ * publicaban luego, cada una al llegar su lunes. Funcionaba, pero llenaba la
+ * agenda de guerras que nadie había convocado todavía: tres sábados y tres
+ * domingos en pantalla, cinco de ellos sin encuesta y sin nada que hacer. Lo
+ * que se ve ahora es lo que está convocado.
+ *
+ * `semanas` deja de ser cuánto se crea por delante y pasa a ser cuánto se mira:
+ * hay que alcanzar la primera ocurrencia cuya encuesta ya abrió, y una serie
+ * puede abrirla con quince días de antelación. Es aritmética de calendario y no
+ * cuesta nada mirar de más.
  *
  * Idempotente por el índice único de (serie, instante): el programador puede
  * pasar cada cinco minutos, y el arranque puede repetirse, sin que aparezcan
  * dos sábados. Y no toca los eventos ya creados: si un oficial le cambió la
  * hora a la guerra de este sábado, la serie no se la devuelve.
  */
-export async function asegurarEventos({ semanas = 3, ahora = new Date() } = {}) {
+export async function asegurarEventos({ semanas = 4, ahora = new Date() } = {}) {
   const series = (await listSeries()).filter((s) => s.active);
   const creados = [];
 
   for (const s of series) {
     for (const cuando of proximas(s.timezone, s.weekday, s.timeLocal, ahora, semanas)) {
+      // Todavía no toca convocarla. Y no se sale del bucle: las ocurrencias van
+      // en orden, pero una serie sin fecha de apertura no espera a nada y
+      // podría venir detrás de otra que sí.
+      const abre = relativo(s.timezone, cuando, s.opensDaysBefore, s.opensTime);
+      if (abre && abre > ahora) continue;
+
       const { rows } = await pool.query(
         `INSERT INTO guild_events
            (id, guild_id, series_id, kind, title, starts_at, minutes, allowed_discord_roles, notes, opens_at, closes_at,
@@ -277,7 +298,7 @@ export async function asegurarEventos({ semanas = 3, ahora = new Date() } = {}) 
           s.minutes,
           JSON.stringify(s.allowedRoles ?? []),
           s.notes,
-          relativo(s.timezone, cuando, s.opensDaysBefore, s.opensTime),
+          abre,
           relativo(s.timezone, cuando, s.closesDaysBefore, s.closesTime),
           s.reminderMode ?? 'channel',
           s.reminderEveryDays,

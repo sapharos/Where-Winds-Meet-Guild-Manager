@@ -471,8 +471,9 @@ app.get('/api/events/series', requireAuth, requirePermission('events.manage'), a
 
 app.put('/api/events/series/:id?', requireAuth, requirePermission('events.manage'), asHandler(async (req, res) => {
   const serie = await saveSeries({ ...req.body, id: req.params.id || req.body?.id });
-  // Al guardar se materializa ya, para que quien acaba de cambiar la hora vea
-  // el resultado en la agenda en vez de esperar al siguiente turno del reloj.
+  // Al guardar se mira ya si a alguna le toca convocar, para no esperar al
+  // siguiente turno del reloj. Lo que todavía no abre sigue sin aparecer: una
+  // serie es lo que se repite, no lo que ya está convocado.
   await asegurarEventos();
   res.json(serie);
 }));

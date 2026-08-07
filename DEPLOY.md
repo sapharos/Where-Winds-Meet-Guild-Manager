@@ -293,8 +293,11 @@ enforced wherever the answer comes from.
 Saturday and Sunday at 19:30 `AGENDA_TIMEZONE` — and the same panel edits them:
 day, hour, which roles may answer, how the reminder is delivered and repeated,
 and how far ahead each poll opens and closes (out of the box: opens Monday,
-closes Saturday at noon, for both). Events are materialised three weeks ahead,
-inheriting all of that, and each poll is posted when it opens.
+closes Saturday at noon, for both). An event is created the moment its poll
+opens -- Monday for a Saturday war -- inheriting all of that, and posted to the
+channel on that same pass. It is not materialised weeks ahead: what the agenda
+shows is what has actually been summoned, and until then next month's Saturday
+lives in the series and nowhere else.
 
 A series stores wall-clock time and a timezone, not an instant, so "Saturdays at
 19:30" keeps meaning that across a daylight-saving change. Editing a series
