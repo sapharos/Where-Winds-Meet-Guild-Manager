@@ -648,6 +648,29 @@ export interface DiscordSoundboardSound {
   emoji: string | null;
 }
 
+/** Arriba o abajo: por dónde salió el boss. */
+export type CallSpot = 'upper' | 'lower';
+
+export const CALL_SPOT_LABELS: Record<CallSpot, string> = {
+  upper: 'Boss arriba',
+  lower: 'Boss abajo',
+};
+
+/**
+ * Un grito: lo que alguien cantó a mano y viaja a todas las pantallas.
+ *
+ * Existe porque el boss no tiene hora -- ver `callBoss` en server/war.js. El
+ * `id` es lo que hace que cada pantalla lo enseñe una vez y no una por sondeo.
+ */
+export interface WarCall {
+  id: string;
+  type: 'boss';
+  spot: CallSpot;
+  /** Quién lo cantó, por su nombre de cuenta. */
+  by: string | null;
+  at: string;
+}
+
 export interface PermissionCatalog {
   roles: UserRole[];
   permissions: string[];

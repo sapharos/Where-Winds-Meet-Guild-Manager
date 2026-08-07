@@ -164,9 +164,17 @@ export const deployments: Deployment[] = (() => {
  * de ver la alerta sin esperar cinco minutos delante de la pantalla. La jungla
  * sale cada cinco minutos y avisa a falta de uno, así que empezar hace 3:55
  * deja el aviso a cinco segundos vista.
+ *
+ * Con `?boss` arranca dentro de la ventana del primer boss (del 4:00 al 6:00),
+ * que es el estado en el que los botones de cantarlo tienen sentido y el panel
+ * cuenta el próximo salto de treinta segundos.
  */
-const HACE = () =>
-  new URLSearchParams(location.search).has('aviso') ? 3 * 60_000 + 55_000 : 12 * 60_000;
+const HACE = () => {
+  const query = new URLSearchParams(location.search);
+  if (query.has('aviso')) return 3 * 60_000 + 55_000;
+  if (query.has('boss')) return 4 * 60_000 + 40_000;
+  return 12 * 60_000;
+};
 
 export const board = () => ({
   active: { attack: 'st-1', defense: 'st-2' } as Record<WarSide, string | null>,

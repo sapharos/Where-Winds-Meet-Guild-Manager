@@ -251,6 +251,54 @@ export async function clearSide(side) {
   return { cleared: side };
 }
 
+/* ---------------------------------------------------------- el grito a mano */
+
+/**
+ * El aviso que alguien canta con la mano, para que lo recojan las demás
+ * pantallas.
+ *
+ * El boss no tiene hora. Sale dentro de una ventana -- del minuto 4 al 6 el
+ * primero, del 14 al 16 el segundo -- en saltos de treinta segundos, y arriba
+ * o abajo. Un reloj no puede avisar de eso sin mentir dos de cada tres veces,
+ * así que quien lo ve lo canta y esto es lo que lleva el grito de su pantalla
+ * a las treinta restantes.
+ *
+ * Vive en memoria y caduca a los veinte segundos, que es lo que dura un aviso
+ * que sirva: pasado eso quien no lo recogió ya llega tarde, y enseñárselo sólo
+ * le hace mirar un boss que lleva medio minuto peleándose. Guardarlo en la base
+ * no compraría nada -- un reinicio en mitad de una guerra pierde, como mucho,
+ * un grito.
+ */
+const CALL_LIFE = 20_000;
+
+/** Dónde salió: arriba o abajo. Es la mitad del aviso, y sin ella no sirve. */
+export const CALL_SPOTS = ['upper', 'lower'];
+
+let called = null;
+
+export function callBoss(spot, by) {
+  if (!CALL_SPOTS.includes(spot)) {
+    throw Object.assign(new Error('spot must be upper or lower'), { status: 400 });
+  }
+  called = {
+    id: randomUUID(),
+    type: 'boss',
+    spot,
+    // Quién lo canta va en el aviso: en mitad de una guerra saber de quién
+    // viene el grito es lo que decide si se le hace caso.
+    by: by ?? null,
+    at: new Date().toISOString(),
+  };
+  return called;
+}
+
+/** El grito todavía vivo, o null. */
+export function currentCall() {
+  if (!called) return null;
+  if (Date.now() - Date.parse(called.at) > CALL_LIFE) called = null;
+  return called;
+}
+
 /* ------------------------------------------------------------------ wars */
 
 /** A guild war lasts half an hour. Nothing about it outlives that. */

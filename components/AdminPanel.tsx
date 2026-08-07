@@ -1127,13 +1127,18 @@ const AdminPanel: React.FC<Props> = ({
           <div className="mt-6 pt-4 border-t border-slate-800">
             <p className="text-sm text-slate-300 mb-1">
               <i className="fa-solid fa-bullhorn mr-2 text-amber-500"></i>
-              Cuerno automático
+              Cuerno de guerra
             </p>
             <p className="text-xs text-slate-500 mb-3">
-              Con la guerra en marcha, un minuto antes de cada jungla y de cada boss el bot recorre
-              los canales configurados haciendo sonar el sonido elegido del panel de sonidos del
-              servidor. Necesita que el bot pueda Conectar, Hablar y Usar el panel de sonidos en esos
-              canales. «Apagado» no suena.
+              El bot recorre los canales configurados haciendo sonar el sonido elegido del panel de
+              sonidos del servidor. Necesita que el bot pueda Conectar, Hablar y Usar el panel de
+              sonidos en esos canales. «Apagado» no suena.
+            </p>
+            <p className="text-xs text-slate-500 mb-3">
+              La <strong className="text-slate-400">jungla</strong> suena sola, un minuto antes de
+              cada vuelta. El <strong className="text-slate-400">boss</strong> no: sale dentro de una
+              ventana de dos minutos, a saltos de treinta segundos y arriba o abajo, así que lo canta
+              con el botón de la Sala de Guerra quien lo ve salir, y ese botón toca este sonido.
             </p>
             {sonidos.length === 0 ? (
               <p className="text-xs text-slate-500 bg-slate-950 border border-slate-800 rounded-lg p-3">
@@ -1144,8 +1149,8 @@ const AdminPanel: React.FC<Props> = ({
               <div className="grid sm:grid-cols-2 gap-3 max-w-xl">
                 {(
                   [
-                    { evento: 'jungle', label: 'Aviso de jungla' },
-                    { evento: 'boss', label: 'Aviso de boss' },
+                    { evento: 'jungle', label: 'Aviso de jungla (automático)' },
+                    { evento: 'boss', label: 'Grito de boss (a mano)' },
                   ] as const
                 ).map(({ evento, label }) => (
                   <label key={evento} className="block">

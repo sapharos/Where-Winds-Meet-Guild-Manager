@@ -721,7 +721,7 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit, canVo
   return (
     <div className="space-y-4">
       {/* Above the two boards, because both halves fight to the same clock. */}
-      {war && <WarTimers startedAt={war.startedAt} offset={offset} mayBeWarned={canEdit} />}
+      {war && <WarTimers startedAt={war.startedAt} offset={offset} canCall={canEdit} />}
 
       <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-4">
         <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -864,14 +864,12 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit, canVo
                     <i className="fa-solid fa-bullhorn w-4 text-center"></i>
                     Tocar un sonido…
                   </button>
-                  {/* Los avisos con sonido elegido, a un clic: el mismo cuerno
-                      que dispararía el reloj, cuando lo que pasa en el campo
-                      no espera al calendario. */}
+                  {/* Sólo la jungla: es lo único que el reloj canta solo, y
+                      esto es adelantarlo cuando el campo no espera al
+                      calendario. El boss tiene su propio botón arriba, en los
+                      relojes, porque además de sonar avisa a las pantallas. */}
                   {(
-                    [
-                      { event: 'jungle', icon: 'fa-leaf', label: 'Avisar jungla ahora' },
-                      { event: 'boss', icon: 'fa-dragon', label: 'Avisar boss ahora' },
-                    ] as const
+                    [{ event: 'jungle', icon: 'fa-leaf', label: 'Avisar jungla ahora' }] as const
                   )
                     .filter(({ event }) => cuernoConfig[event])
                     .map(({ event, icon, label }) => (

@@ -416,13 +416,27 @@ Two things Discord requires for this to work:
 
 The bot can play a sound from the server's **soundboard** across the war voice
 channels — manually from the Voz menu (pick a sound, pick channels), and
-automatically one minute before each jungle and boss timer while a war is
-running (configured next to the voice channels in Administración).
+automatically one minute before each jungle round while a war is running
+(configured next to the voice channels in Administración).
 
 A bot can only sit in one voice channel at a time, so this is a sweep: it
 joins each channel, fires the sound, and hops to the next — a couple of
 seconds per channel, not simultaneous. For a one-minute warning that is
 plenty.
+
+**The boss is not on the clock.** It spawns inside a two-minute window — from
+4:00 to 6:00 for the first, 14:00 to 16:00 for the second — on thirty-second
+marks, and either upper or lower. Nothing can predict which, so nothing tries:
+the war timers draw the window and count the next thirty-second mark, and
+whoever sees it spawn calls it with the **Cantar boss · Arriba / Abajo**
+buttons (permission `war.edit`). One click does two things: a full-screen
+banner on every war-room screen within about three seconds, and the boss horn
+sweeping the voice channels. The horn runs behind the banner rather than in
+front of it — a sweep takes a quarter of a minute and the screens cannot hear
+about it last.
+
+The call itself lives in the server's memory for twenty seconds and is polled;
+a restart mid-war loses, at worst, one shout.
 
 It needs three more permissions in those voice channels: **Connect**,
 **Speak**, and **Use Soundboard**. The sounds themselves are managed in

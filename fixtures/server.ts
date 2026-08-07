@@ -22,6 +22,7 @@ import {
   ManagedUser,
   Player,
   PlayerBuild,
+  WarCall,
   WarSide,
   WeaponSet,
 } from '../types';
@@ -97,6 +98,32 @@ let cuerno: { jungle: string | null; boss: string | null; slots: string[] } = {
   jungle: '300000000000000001',
   boss: null,
   slots: [],
+};
+
+/**
+ * El grito del boss, como lo guarda el servidor: uno vivo a la vez y veinte
+ * segundos de vida.
+ *
+ * Va en `localStorage` y no en una variable, que es la única forma de que el
+ * banco enseñe la mitad que importa: cantar el boss en una pestaña y verlo
+ * llegar a la otra. Cada pestaña carga su propio servidor de mentira, así que
+ * una variable de módulo sería una persona hablando sola.
+ */
+const GRITO = 'zz-banco-grito';
+
+const leerGrito = (): WarCall | null => {
+  try {
+    const crudo = localStorage.getItem(GRITO);
+    if (!crudo) return null;
+    const call = JSON.parse(crudo) as WarCall;
+    if (Date.now() - Date.parse(call.at) > 20_000) {
+      localStorage.removeItem(GRITO);
+      return null;
+    }
+    return call;
+  } catch {
+    return null;
+  }
 };
 
 const MIEMBROS_DISCORD: DiscordMember[] = [
@@ -449,6 +476,9 @@ const GET: [RegExp, Ruta][] = [
   [/^\/discord\/soundboard$/, () => SONIDOS],
   [/^\/war\/voice-channels$/, () => ({ bot: true, channels: mapaVoz })],
   [/^\/war\/horn$/, () => cuerno],
+  // El grito vivo, con su caducidad: sin ella el banco repetiría el mismo
+  // aviso cada tres segundos hasta recargar la página.
+  [/^\/war\/call$/, () => leerGrito()],
   [/^\/discord\/members$/, (_m, _req, _body, url) => {
     const q = (url.searchParams.get('q') ?? '').trim().toLowerCase();
     if (!q) return [];
@@ -598,6 +628,23 @@ const ESCRITURAS: [string, RegExp, Ruta][] = [
     const ids = [...new Set(ranuras.map((s) => mapaVoz[s]))];
     const results = ids.map((channelId) => ({ channelId, ok: true }));
     return { played: results.length, results };
+  }],
+  // El grito del boss. Como el de verdad: se guarda, y el cuerno (que aquí no
+  // existe) iría por detrás sin hacerlo esperar.
+  ['POST', /^\/war\/call$/, (_m, _req, body) => {
+    const call: WarCall = {
+      id: `grito-${Date.now()}`,
+      type: 'boss',
+      spot: body?.spot === 'lower' ? 'lower' : 'upper',
+      by: fake.session.user.username ?? null,
+      at: new Date().toISOString(),
+    };
+    try {
+      localStorage.setItem(GRITO, JSON.stringify(call));
+    } catch {
+      // Sin almacén el grito sigue valiendo para la pestaña que lo canta.
+    }
+    return { call, horn: cuerno.boss ? 'sweeping' : 'off' };
   }],
   // El reparto de mentira: mueve a los que tienen "Discord" (los vinculados en
   // usuarios) y deja fuera al resto con su motivo, que es la parte de la

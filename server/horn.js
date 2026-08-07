@@ -6,11 +6,17 @@
  * canal las seis líneas se recorren en menos de quince, que para un aviso con
  * un minuto de antelación sobra.
  *
- * La mitad automática vive aquí también: la guerra dura treinta minutos, la
- * jungla vuelve cada cinco y el boss llega al sexto y al decimosexto -- el
- * mismo calendario que pintan los relojes de la Sala de Guerra, calculado
- * desde el mismo startedAt. El planificador mira cada pocos segundos si toca
- * avisar y dispara el barrido un minuto antes de cada evento.
+ * La mitad automática vive aquí también, y es sólo la jungla: la guerra dura
+ * treinta minutos y la jungla vuelve cada cinco -- el mismo calendario que
+ * pintan los relojes de la Sala de Guerra, calculado desde el mismo startedAt.
+ * El planificador mira cada pocos segundos si toca avisar y dispara el barrido
+ * un minuto antes de cada vuelta.
+ *
+ * El boss no está aquí a conciencia. No tiene hora: sale dentro de una ventana
+ * de dos minutos, en saltos de treinta segundos, y arriba o abajo. Un reloj que
+ * lo cantara al sexto minuto acertaría una vez de cada cinco y gritaría en
+ * falso las otras cuatro, que es peor que callarse. Lo canta quien lo ve, con
+ * el botón de la Sala de Guerra, y ese botón toca este mismo cuerno.
  */
 
 import { pool, GUILD_ID } from './db.js';
@@ -26,7 +32,6 @@ const MINUTE = 60_000;
     lo dibuja y esto lo hace sonar; si el juego cambia los tiempos, son dos sitios. */
 const WAR_LENGTH = 30 * MINUTE;
 const JUNGLE_EVERY = 5 * MINUTE;
-const BOSS_AT = [6 * MINUTE, 16 * MINUTE];
 const WARN_BEFORE = MINUTE;
 
 /**
@@ -137,7 +142,10 @@ export async function warnEvent(type) {
 
 /* ------------------------------------------------------- el automático */
 
-/** Los eventos de una guerra, como instantes absolutos desde su comienzo. */
+/**
+ * Los eventos de una guerra que sí tienen hora, como instantes absolutos desde
+ * su comienzo. Sólo la jungla: el boss se canta a mano (ver la cabecera).
+ */
 function schedule(startedAt) {
   // pg devuelve la fecha como objeto Date; el cliente REST, como texto.
   const began = new Date(startedAt).getTime();
@@ -145,7 +153,6 @@ function schedule(startedAt) {
   for (let at = JUNGLE_EVERY; at <= WAR_LENGTH; at += JUNGLE_EVERY) {
     events.push({ key: `jungle-${at}`, type: 'jungle', when: began + at });
   }
-  for (const at of BOSS_AT) events.push({ key: `boss-${at}`, type: 'boss', when: began + at });
   return events;
 }
 
@@ -161,8 +168,9 @@ async function tick() {
     sonados.clear();
     return;
   }
+  // El del boss puede estar puesto y no importar aquí: ese sólo suena a mano.
   const horn = await getHorn();
-  if (!horn.jungle && !horn.boss) return;
+  if (!horn.jungle) return;
 
   const now = Date.now();
   let fired = sonados.get(war.id);

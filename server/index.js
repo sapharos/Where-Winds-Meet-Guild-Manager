@@ -49,6 +49,9 @@ import {
   saveLineup,
   applyLineup,
   deleteLineup,
+  currentWar,
+  callBoss,
+  currentCall,
 } from './war.js';
 import {
   discordEnabled,
@@ -813,6 +816,34 @@ app.post('/api/war/horn/play', requireAuth, requirePermission('war.voice'), asHa
   const ids = [...new Set(wanted.map((s) => channels[s]))];
   const out = await sweepSound(String(soundId), ids);
   res.json(out);
+}));
+
+/* ----------------------------------------------------- el grito del boss */
+
+// Lo lee todo el mundo, cada pocos segundos: el aviso es para quien pelea, no
+// para quien manda. Sondeo y no empuje porque no hay nada más en la aplicación
+// que lo necesite, y veinte segundos de vida hacen que un sondeo corto baste.
+app.get('/api/war/call', requireAuth, asHandler(async (_req, res) => {
+  res.json(currentCall());
+}));
+
+// Cantarlo es de quien lleva la guerra (war.edit), que es el mismo permiso con
+// el que se arma el tablero. Un grito falso vacía tres líneas.
+app.post('/api/war/call', requireAuth, requirePermission('war.edit'), asHandler(async (req, res) => {
+  if (!(await currentWar())) {
+    return res.status(409).json({ error: 'no hay ninguna guerra en curso' });
+  }
+  const call = callBoss(req.body?.spot, req.user?.username ?? null);
+
+  // El cuerno va detrás y sin esperarlo: el barrido tarda un cuarto de minuto
+  // en recorrer las líneas y las pantallas no pueden enterarse después que él.
+  // Que falle es cosa del cuerno, y no puede llevarse por delante el grito.
+  let horn = 'off';
+  if (botEnabled() && (await getHorn()).boss) {
+    horn = 'sweeping';
+    warnEvent('boss').catch((err) => console.error('[cuerno] grito de boss:', err.message));
+  }
+  res.json({ call, horn });
 }));
 
 /**
