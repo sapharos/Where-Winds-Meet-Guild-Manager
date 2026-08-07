@@ -147,10 +147,29 @@ export function verifyInteraction(req) {
 
 /* -------------------------------------------------------------- registro */
 
+/**
+ * Nadie, hasta que un líder diga quién.
+ *
+ * Discord entiende «0» como «ningún permiso del servidor basta», que en la
+ * práctica deja los comandos sólo para quien administra -- y, sobre todo,
+ * habilita el panel de Ajustes del servidor → Integraciones, donde se conceden
+ * por rol. Sin esto los tres comandos le salen en el menú a cualquiera que esté
+ * en el servidor: no le contestan, porque `vetado()` está antes que cualquier
+ * dato, pero los ve, los escribe y pregunta por qué no funcionan.
+ *
+ * Es una cadena, no un número: son los permisos de Discord en un mapa de bits, y
+ * ese mapa no cabe en un entero de JavaScript.
+ *
+ * OJO al desplegar: hasta que se conceda el rol en Integraciones, los comandos
+ * desaparecen para el gremio entero. Está contado en DEPLOY.md.
+ */
+const SOLO_QUIEN_DIGA_EL_LIDER = '0';
+
 /** Lo que el gremio ve al escribir «/» en Discord. */
 const COMMANDS = [
   {
     name: 'perfil',
+    default_member_permissions: SOLO_QUIEN_DIGA_EL_LIDER,
     description: 'Estadísticas del último escaneo del gremio',
     options: [
       // Dos formas de nombrar a otro, porque ninguna sola llega a todo el
@@ -179,6 +198,7 @@ const COMMANDS = [
   },
   {
     name: 'guerra',
+    default_member_permissions: SOLO_QUIEN_DIGA_EL_LIDER,
     description: 'Quién está asignado a cada línea, en ataque y en defensa',
     options: [
       // Las dos como lista cerrada y no como texto: se elige de un desplegable,
@@ -208,6 +228,7 @@ const COMMANDS = [
   },
   {
     name: 'agenda',
+    default_member_permissions: SOLO_QUIEN_DIGA_EL_LIDER,
     description: 'Lo que viene y qué has contestado',
   },
 ];
@@ -869,6 +890,63 @@ export async function refrescarEvento(id) {
 }
 
 /**
+ * Cuánto se espera antes de volver a dibujar una encuesta que sigue recibiendo
+ * votos. Bastante para que una convocatoria de guerra entera quepa en unas
+ * pocas ediciones, poco para que en un canal tranquilo el recuento parezca
+ * instantáneo.
+ */
+const VENTANA_REPINTADO = 3000;
+
+/** Los eventos que se están repintando ahora mismo, y si les han llovido votos. */
+const repintando = new Map();
+
+const espera = (ms) => new Promise((listo) => setTimeout(listo, ms));
+
+/**
+ * Vuelve a dibujar la encuesta, agrupando la avalancha.
+ *
+ * Cada voto reescribía el mensaje entero. Con veinte personas eso pasa
+ * desapercibido; con cien pulsando «voy» en el minuto siguiente a la
+ * convocatoria son cien ediciones del mismo mensaje, y trae dos problemas que no
+ * se ven hasta que el gremio crece. Discord limita las ediciones y la cola se
+ * arrastra. Y peor: cada voto leía el recuento justo después del suyo, así que
+ * **la última edición que aterrizaba era la que mandaba, no la más reciente** --
+ * la encuesta podía quedarse enseñando 97 con 100 votos ya guardados.
+ *
+ * Se dibuja al primer voto y no al último a propósito: en un canal tranquilo,
+ * que es lo normal, quien pulsa ve su voto en el acto. Lo que llegue mientras
+ * tanto se junta en un solo repintado al cerrar la ventana, y ese lee el total
+ * de verdad, así que el número final siempre es el bueno.
+ *
+ * No espera ni lanza: el voto ya está guardado y es lo que importa. Dibujarlo es
+ * cosmética, y la cosmética no tumba una respuesta que la base de datos aceptó.
+ */
+export function repintarEvento(id) {
+  const abierto = repintando.get(id);
+  if (abierto) {
+    // Ya hay un ciclo dibujando lo de este evento; que cuente uno más.
+    abierto.pendiente = true;
+    return;
+  }
+  repintando.set(id, { pendiente: false });
+  void (async () => {
+    try {
+      for (;;) {
+        await refrescarEvento(id);
+        await espera(VENTANA_REPINTADO);
+        // Sin `await` entre mirar y borrar: nada puede colarse en medio, así
+        // que un voto o entra en esta vuelta o abre un ciclo nuevo. Nunca se
+        // pierde entre las dos cosas.
+        if (!repintando.get(id)?.pendiente) break;
+        repintando.set(id, { pendiente: false });
+      }
+    } finally {
+      repintando.delete(id);
+    }
+  })();
+}
+
+/**
  * El recordatorio a quien no ha contestado.
  *
  * Es el mensaje del bot que menciona a personas una por una. La encuesta avisa
@@ -1008,11 +1086,9 @@ async function botonEvento(interaction) {
   const usuario = interaction.member?.user ?? interaction.user;
 
   const quien = usuario?.id ? await cuentaDe(usuario.id) : null;
-  if (!quien) {
-    return aviso(
-      'Tu Discord no está vinculado a ninguna cuenta del gremio, así que no sé por quién apuntarte. Entra en la web con el botón de Discord.',
-    );
-  }
+  const negativa = vetado(quien);
+  if (negativa) return negativa;
+
   if (!quien.playerId) {
     return aviso('Tu cuenta todavía no está unida a una ficha del roster. Avisa a un líder.');
   }
@@ -1036,8 +1112,12 @@ async function botonEvento(interaction) {
     return aviso(err.message);
   }
 
-  const evento = await getEvent(eventId);
-  return { type: UPDATE_MESSAGE, data: cuerpoDe(evento) };
+  // El voto ya está escrito; el mensaje lo redibuja el ciclo agrupado, que sabe
+  // esperar a los que vienen detrás. Aquí no se devuelve nada que reescribir
+  // porque el acuse de un componente ya cierra la interacción por sí solo: quien
+  // pulsó no ve ningún «cargando» colgado.
+  repintarEvento(eventId);
+  return SILENCIO;
 }
 
 /**
@@ -1050,11 +1130,8 @@ async function botonEvento(interaction) {
 async function comandoAgenda(interaction) {
   const usuario = interaction.member?.user ?? interaction.user;
   const quien = usuario?.id ? await cuentaDe(usuario.id) : null;
-  if (!quien) {
-    return aviso(
-      'Tu Discord no está vinculado a ninguna cuenta del gremio. Entra en la web con el botón de Discord y pide tu registro.',
-    );
-  }
+  const negativa = vetado(quien);
+  if (negativa) return negativa;
 
   // Una consulta y no una por evento: diez eventos eran veintiuna idas y
   // vueltas a la base de datos para leer diez respuestas propias, y esto tiene
@@ -1098,6 +1175,16 @@ async function comandoAgenda(interaction) {
 /** Un aviso corto, siempre sólo para quien escribió el comando. */
 const aviso = (texto) => ({ type: MESSAGE, data: { content: texto, flags: EPHEMERAL } });
 
+/**
+ * «Acusado, y no hay nada que reescribir.»
+ *
+ * Un componente se acusa con «voy a reescribir este mensaje», y Discord da eso
+ * por cerrado aunque nunca llegue la reescritura: quien pulsó no se queda con un
+ * «cargando» eterno. Es lo que permite que un voto conteste al instante y el
+ * dibujo vaya por su cuenta, agrupado con los demás.
+ */
+const SILENCIO = { silencio: true };
+
 /** La foto de Discord de quien pregunta, para la esquina del embed. */
 function avatarDe(usuario) {
   if (!usuario?.id || !usuario.avatar) return null;
@@ -1128,6 +1215,37 @@ async function cuentaDe(discordId) {
     [GUILD_ID, discordId],
   );
   return rows[0] ?? null;
+}
+
+/**
+ * La negativa que le toca a quien pregunta, o null si puede seguir.
+ *
+ * Son las dos formas de no ser del gremio, y hacen falta las dos: no tener
+ * cuenta, y tenerla sobre una ficha dada de baja. Lo segundo no lo miraba
+ * nadie -- quien se iba del gremio conservaba el bot hasta que a alguien se le
+ * ocurría deshabilitarle la cuenta a mano, que es un paso que no se da.
+ *
+ * Se comprueba la ficha y no la cuenta a propósito: dar de baja a alguien en el
+ * roster es el gesto que ya se hace cuando alguien se va, y colgar de él el
+ * acceso al bot evita inventar un segundo interruptor que se olvidaría de
+ * pulsar. Una cuenta sin ficha -- un administrador que no juega -- no se toca:
+ * nunca estuvo en el roster, así que no hay baja que leer.
+ *
+ * Esto vale sólo para **quien pregunta**. Mirar la ficha de un ex-miembro sigue
+ * pudiéndose: irse del gremio te quita la voz, no te borra del historial.
+ */
+function vetado(quien) {
+  if (!quien) {
+    return aviso(
+      'Tu Discord no está vinculado a ninguna cuenta del gremio. Entra en la web con el botón de Discord y pide tu registro; un líder lo aprueba.',
+    );
+  }
+  if (quien.playerId && !quien.isActive) {
+    return aviso(
+      'Tu ficha del roster está dada de baja, así que el bot ya no atiende tus comandos. Si es un error, avisa a un líder.',
+    );
+  }
+  return null;
 }
 
 /**
@@ -1182,11 +1300,8 @@ async function comandoPerfil(interaction) {
   if (!usuario?.id) return aviso('No he podido saber quién eres. Inténtalo otra vez.');
 
   const quienPregunta = await cuentaDe(usuario.id);
-  if (!quienPregunta) {
-    return aviso(
-      'Tu Discord no está vinculado a ninguna cuenta del gremio. Entra en la web con el botón de Discord y pide tu registro; un líder lo aprueba.',
-    );
-  }
+  const negativa = vetado(quienPregunta);
+  if (negativa) return negativa;
 
   const mencionado = opcion(interaction, 'miembro');
   const escrito = opcion(interaction, 'nombre');
@@ -1262,11 +1377,9 @@ async function respuestaGuerra({ usuario, bando, linea, publico, tipo }) {
   if (!usuario?.id) return aviso('No he podido saber quién eres. Inténtalo otra vez.');
 
   const quienPregunta = await cuentaDe(usuario.id);
-  if (!quienPregunta) {
-    return aviso(
-      'Tu Discord no está vinculado a ninguna cuenta del gremio. Entra en la web con el botón de Discord y pide tu registro; un líder lo aprueba.',
-    );
-  }
+  const negativa = vetado(quienPregunta);
+  if (negativa) return negativa;
+
   const permisos = await permissionsFor(quienPregunta.cuentaRol);
   if (!permisos.includes('war.view')) {
     return aviso('Tu cuenta no tiene permiso para ver la Sala de Guerra.');
@@ -1405,7 +1518,14 @@ async function autocompletarNombre(interaction) {
             JOIN role_permissions rp
               ON rp.guild_id = u.guild_id AND rp.role = u.role
            WHERE u.guild_id = p.guild_id AND u.discord_id = $3
-             AND u.disabled = false AND rp.permission = 'roster.view')
+             AND u.disabled = false AND rp.permission = 'roster.view'
+             -- La misma baja que mira vetado(), escrita aquí en SQL porque esto
+             -- no puede permitirse la segunda consulta. Una cuenta sin ficha no
+             -- la incumple: no hay baja que leer donde no hay roster.
+             AND NOT EXISTS (
+               SELECT 1 FROM players yo
+                WHERE yo.guild_id = u.guild_id AND yo.id = u.player_id
+                  AND COALESCE(yo.is_active, true) = false))
       ORDER BY COALESCE(p.is_active, true) DESC, p.name
       LIMIT 25`,
     [GUILD_ID, escrito, usuario.id],
@@ -1463,6 +1583,9 @@ function diferir(body, trabajo) {
        */
       async trabajo() {
         const salida = await trabajo();
+        // Nada que reescribir: el acuse ya cerró la interacción y el mensaje lo
+        // dibuja otro. Se devuelve vacío, y quien lo recibe no llama a Discord.
+        if (salida?.silencio) return {};
         // `aviso()` fabrica un mensaje efímero. Sobre un botón eso no puede
         // sustituir al mensaje, así que va como recado aparte.
         const esAviso = salida?.type === MESSAGE && salida?.data?.flags === EPHEMERAL;
@@ -1481,6 +1604,32 @@ function diferir(body, trabajo) {
  * índice y a formatear. El día que haga falta algo lento, la salida es
  * responder tipo 5 (pensando...) y editar el mensaje después.
  */
+/**
+ * Cómo se llama en el log lo que acaba de llegar.
+ *
+ * Vive aquí y no en `index.js` porque los números de tipo son del protocolo de
+ * Discord, y este es el módulo que los conoce. Sale corto a propósito: el log de
+ * una interacción tiene que caber en una línea que se lea de un vistazo.
+ */
+export function nombreDeInteraccion(body) {
+  switch (body?.type) {
+    case PING:
+      return 'ping';
+    case APPLICATION_COMMAND:
+      return `/${body.data?.name ?? '?'}`;
+    case MESSAGE_COMPONENT:
+      return `botón ${body.data?.custom_id ?? '?'}`;
+    case AUTOCOMPLETE:
+      return `autocompletar /${body.data?.name ?? '?'}`;
+    default:
+      return `tipo ${body?.type ?? '?'}`;
+  }
+}
+
+/** Quién la mandó: en un canal viene en `member`, en un privado suelto. */
+export const quienManda = (body) =>
+  body?.member?.user?.id ?? body?.user?.id ?? 'anónimo';
+
 export async function handleInteraction(body) {
   if (body?.type === PING) return { type: PONG };
 

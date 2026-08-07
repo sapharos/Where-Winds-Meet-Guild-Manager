@@ -213,8 +213,42 @@ The bot must have been invited with the `applications.commands` scope (the invit
 link above already includes it). If it was invited without it, registration fails
 with 403 and the log says so; reinviting with the same link fixes it.
 
+Every interaction is logged, whether it works or not, because a member reporting
+"the bot did not answer" is otherwise impossible to tell apart from one whose
+request never arrived:
+
+```
+docker logs --since 1h wwm-guild-manager-api | grep '^\[discord\]'
+```
+
+Each line reads `[discord] /perfil · 4816… · acuse 3 ms`, followed by
+`trabajo 210 ms` when the answer lands. The **acuse** is the number that matters:
+Discord gives three seconds to acknowledge, so anything approaching a second
+there is a warning. `trabajo` has fifteen minutes and only has to finish. The
+nginx log carries the same timing from the outside — `$request_time` is now in
+its access log — so a slow acuse and a slow network can be told apart.
+
 Only members whose Discord is linked to an account get an answer; anyone else is
-told, privately, to link theirs first.
+told, privately, to link theirs first. Leaving the guild is enough to lose the
+bot: an account whose roster entry is marked inactive is refused, so nobody has
+to remember to disable the account by hand as well.
+
+#### Who sees the commands — one manual step
+
+The commands are registered as **available to nobody by default**. That is
+deliberate: otherwise every one of the hundreds of people who may be in the
+Discord server sees `/perfil` in the menu, types it, and gets a refusal. But it
+means that **right after the first deploy of this change, the commands are gone
+for the whole guild until you say who gets them**:
+
+1. Discord server → **Server Settings → Integrations → Zonabot → Commands**.
+2. Give each command the role your guild members already have (the same role the
+   event polls are addressed to is usually the right one), or `@everyone` if you
+   would rather keep it open.
+
+This is Discord's own permission screen, not something this app stores, so it
+survives redeploys and does not need to be redone. It is also the fastest way to
+take a command away from everyone if one ever misbehaves — no deploy needed.
 
 ### The agenda
 

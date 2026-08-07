@@ -66,9 +66,12 @@ import {
   commandsEnabled,
   verifyInteraction,
   handleInteraction,
+  nombreDeInteraccion,
+  quienManda,
   registerCommands,
   publicarEvento,
   refrescarEvento,
+  repintarEvento,
   retirarEvento,
   startAgendaScheduler,
 } from './discordCommands.js';
@@ -611,7 +614,11 @@ app.put('/api/events/:id/response', requireAuth, asHandler(async (req, res) => {
   // El mensaje de Discord se pone al día aunque la respuesta se diera aquí: es
   // la misma lista, y una encuesta que no cuenta lo contestado en la web es una
   // segunda verdad de las que este modelo existe para no tener.
-  void refrescarEvento(req.params.id);
+  //
+  // Por el ciclo agrupado y no directo, igual que los votos del botón: son el
+  // mismo aluvión visto desde otra puerta, y compartirlo es además lo que hace
+  // que un voto en la web y otro en Discord a la vez no se pisen el recuento.
+  repintarEvento(req.params.id);
   res.json(actualizado);
 }));
 
@@ -625,7 +632,7 @@ app.put(
     const actualizado = await respond(req.params.id, req.params.playerId, req.body, {
       porOtro: req.user.id,
     });
-    void refrescarEvento(req.params.id);
+    repintarEvento(req.params.id);
     res.json(actualizado);
   }),
 );
@@ -642,30 +649,62 @@ app.put(
  * comprueba la URL al guardarla en el portal.
  */
 app.post('/api/discord/interactions', asHandler(async (req, res) => {
-  if (!commandsEnabled()) return res.status(503).json({ error: 'los comandos no están configurados' });
-  if (!verifyInteraction(req)) return res.status(401).send('invalid request signature');
+  const llegada = Date.now();
+  const quien = quienManda(req.body);
+  const qué = nombreDeInteraccion(req.body);
+  // Una interacción que funciona no dejaba rastro, y por eso un fallo que el
+  // miembro sí veía se investigaba sobre un log vacío: no se podía distinguir
+  // «llegó y falló» de «nunca llegó». Ahora se anotan las dos mitades por
+  // separado, porque miden cosas distintas. El acuse es el que corre contra los
+  // tres segundos de Discord; el trabajo tiene quince minutos y sólo importa que
+  // termine. Un acuse que se acerque al segundo ya es una explicación.
+  const anota = (cómo, extra = '') =>
+    console.log(`[discord] ${qué} · ${quien} · ${cómo}${extra}`);
+
+  if (!commandsEnabled()) {
+    anota('503 sin configurar');
+    return res.status(503).json({ error: 'los comandos no están configurados' });
+  }
+  if (!verifyInteraction(req)) {
+    // Con la clave bien puesta esto no pasa, así que si aparece repetido es que
+    // alguien está llamando a la puerta o que DISCORD_PUBLIC_KEY es de otra
+    // aplicación. Las dos cosas se quieren ver.
+    anota('401 firma inválida');
+    return res.status(401).send('invalid request signature');
+  }
 
   const respuesta = await handleInteraction(req.body);
-  if (!respuesta) return res.status(400).json({ error: 'unsupported interaction' });
+  if (!respuesta) {
+    anota('400 no soportada');
+    return res.status(400).json({ error: 'unsupported interaction' });
+  }
 
   // Respuesta inmediata: el PING, el autocompletado y los avisos que no tocan
   // la base de datos.
-  if (!respuesta.diferido) return res.json(respuesta);
+  if (!respuesta.diferido) {
+    res.json(respuesta);
+    return anota(`${Date.now() - llegada} ms`);
+  }
 
   // Diferida: se acusa recibo ahora -- que es lo que tiene tres segundos de
   // plazo -- y el contenido se manda cuando esté. Lo que tarde deja de poder
   // tumbar la interacción.
   const { ack, trabajo } = respuesta.diferido;
   res.json(ack);
+  const acusado = Date.now();
+  anota(`acuse ${acusado - llegada} ms`);
 
   const token = req.body?.token;
   void (async () => {
     try {
       const { contenido, recado } = await trabajo();
       if (recado) await followUpInteraction(token, recado);
-      else await editOriginalInteraction(token, contenido);
+      // Sin contenido no hay nada que reescribir: se acusó y el mensaje lo
+      // dibuja otro. Mandar `{}` sería un PATCH que borra el mensaje.
+      else if (contenido) await editOriginalInteraction(token, contenido);
+      anota(`trabajo ${Date.now() - acusado} ms`);
     } catch (err) {
-      console.error('Interacción de Discord fallida:', err);
+      console.error(`[discord] ${qué} · ${quien} · falló a los ${Date.now() - acusado} ms:`, err);
       // Ya se acusó recibo, así que el «pensando…» se queda ahí para siempre
       // salvo que se sustituya por algo. Decir que falló es peor que nada, y
       // mucho mejor que unos puntos suspensivos eternos.
