@@ -56,8 +56,11 @@ const SALIDA_CATALOGO = join(raiz, 'styles', 'iconos.catalogo.generated.css');
  * ejecución (`${activo ? 'fa-solid' : 'fa-regular'} fa-star`) y ninguna lectura
  * del fuente lo vería. Si algún día se añade otro, sale como cuadro vacío: es
  * el precio de no arrastrar las 163 variantes regulares que nadie usa.
+ *
+ * `comprobar.mjs` es lo que evita que ese cuadro vacío llegue a producción: pasa
+ * el marcado entero contra las hojas generadas y canta lo que falte.
  */
-const REGULARES = ['star'];
+const REGULARES = ['star', 'calendar', 'circle', 'clock'];
 const MARCAS = ['discord', 'playstation'];
 
 // fixtures/ queda fuera: es el banco de pruebas y no debe decidir qué pesa la
