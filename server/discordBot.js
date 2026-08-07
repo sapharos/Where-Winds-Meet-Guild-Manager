@@ -106,6 +106,36 @@ export async function listTextChannels() {
     .map((c) => ({ id: c.id, name: c.name }));
 }
 
+/**
+ * Reescribe la respuesta de una interacción que se dejó «pensando…».
+ *
+ * Discord da tres segundos para acusar recibo, pero quince minutos para
+ * contestar de verdad si se acusa con un «pensando». Esto es lo segundo. No
+ * lleva token de bot: la autoriza el token de la propia interacción, que va en
+ * la URL y sólo vale para ella.
+ */
+export async function editOriginalInteraction(token, payload) {
+  await botFetch(`/webhooks/${process.env.DISCORD_CLIENT_ID}/${token}/messages/@original`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+}
+
+/**
+ * Un mensaje aparte, después de haber acusado recibo.
+ *
+ * Hace falta cuando se acusó con «voy a reescribir este mensaje» y luego
+ * resulta que no había nada que reescribir -- alguien sin permiso pulsando el
+ * botón de una encuesta pública. Reescribir el mensaje con la negativa lo
+ * pondría delante del gremio entero; esto se lo dice sólo a quien pulsó.
+ */
+export async function followUpInteraction(token, payload) {
+  await botFetch(`/webhooks/${process.env.DISCORD_CLIENT_ID}/${token}`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
 /** Publica un mensaje y devuelve su id, que es lo que hay que guardar. */
 export async function postMessage(channelId, payload) {
   const mensaje = await botFetch(`/channels/${channelId}/messages`, {

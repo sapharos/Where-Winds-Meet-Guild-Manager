@@ -1270,24 +1270,37 @@ async function autocompletarNombre(interaction) {
   const usuario = interaction.member?.user ?? interaction.user;
   if (!usuario?.id) return vacio;
 
-  const quienPregunta = await cuentaDe(usuario.id);
-  if (!quienPregunta) return vacio;
-  const permisos = await permissionsFor(quienPregunta.cuentaRol);
-  if (!permisos.includes('roster.view')) return vacio;
-
   const escrito = String(
     interaction.data?.options?.find((o) => o.focused)?.value ?? '',
   ).trim();
 
+  // Una consulta y no tres, y aquí importa más que en ningún otro sitio: el
+  // autocompletado se dispara **por cada tecla** que se escribe, no una vez por
+  // comando. Eran tres idas y vueltas por letra -- quién pregunta, qué permisos
+  // tiene su rol, y la búsqueda -- así que escribir un nombre entre dos
+  // personas ocupaba el pool y lo que llegaba después esperaba más de los tres
+  // segundos que Discord concede. Y esto es lo único que no se puede diferir:
+  // las opciones tienen que estar dentro de ese plazo o no hay lista.
+  //
+  // El permiso se comprueba contra `role_permissions` en vez de con
+  // `permissionsFor`. Vale sólo porque `roster.view` no está entre los permisos
+  // fijos de `LOCKED` -- que son los que esa función añade por su cuenta -- así
+  // que para éste las dos cosas dicen lo mismo. No generaliza a otro permiso.
   const { rows } = await pool.query(
     // Los que están en el gremio primero: a quien se fue se le busca a
     // propósito, y hasta entonces sólo estorba en la lista.
     `SELECT p.id, p.name, p.level, COALESCE(p.is_active, true) AS "isActive"
        FROM players p
       WHERE p.guild_id = $1 AND ($2 = '' OR p.name ILIKE '%' || $2 || '%')
+        AND EXISTS (
+          SELECT 1 FROM users u
+            JOIN role_permissions rp
+              ON rp.guild_id = u.guild_id AND rp.role = u.role
+           WHERE u.guild_id = p.guild_id AND u.discord_id = $3
+             AND u.disabled = false AND rp.permission = 'roster.view')
       ORDER BY COALESCE(p.is_active, true) DESC, p.name
       LIMIT 25`,
-    [GUILD_ID, escrito],
+    [GUILD_ID, escrito, usuario.id],
   );
 
   return {
@@ -1297,6 +1310,57 @@ async function autocompletarNombre(interaction) {
         name: `${p.name} · Nv.${p.level}${p.isActive ? '' : ' · fuera del gremio'}`.slice(0, 100),
         value: p.id,
       })),
+    },
+  };
+}
+
+/** Acuse de recibo: «pensando…» para un comando, «ya lo reescribo» para un botón. */
+const DEFERRED_MESSAGE = 5;
+const DEFERRED_UPDATE = 6;
+
+/**
+ * Acusa recibo ya, y contesta cuando haya algo que contestar.
+ *
+ * Discord da **tres segundos** para acusar recibo de una interacción, y quince
+ * minutos para el contenido si se acusa con un «pensando…». Contestar del tirón
+ * ataba cada comando a que la base de datos respondiera dentro de esos tres
+ * segundos, y con varias personas a la vez -- o con el autocompletado ocupando
+ * el pool -- eso deja de cumplirse y Discord enseña un error en vez de nada.
+ *
+ * Diferir rompe esa dependencia entera: el plazo se cumple siempre, porque
+ * acusar recibo no toca la base de datos. Lo que tarde en llegar el contenido
+ * se ve como unos puntos suspensivos, que es lo que debe pasar cuando algo
+ * tarda.
+ *
+ * Un botón se acusa con `DEFERRED_UPDATE` -- «voy a reescribir este mensaje» --
+ * y por eso el trabajo puede decir que lo suyo no era reescribirlo sino avisar
+ * a quien pulsó: reescribir la encuesta pública con «no tienes permiso» lo
+ * pondría delante de todo el gremio.
+ */
+function diferir(body, trabajo) {
+  const esComponente = body?.type === MESSAGE_COMPONENT;
+  // Un comando que pidió respuesta pública se acusa en público; el resto, en
+  // privado. La visibilidad se fija aquí y ya no se puede cambiar después.
+  const publico =
+    body?.data?.options?.find((o) => o.name === 'publico')?.value === true;
+
+  return {
+    diferido: {
+      ack: esComponente
+        ? { type: DEFERRED_UPDATE }
+        : { type: DEFERRED_MESSAGE, data: publico ? {} : { flags: EPHEMERAL } },
+      /**
+       * Devuelve qué hacer con lo que salga: reescribir la respuesta, o
+       * mandarle un recado aparte a quien pulsó.
+       */
+      async trabajo() {
+        const salida = await trabajo();
+        // `aviso()` fabrica un mensaje efímero. Sobre un botón eso no puede
+        // sustituir al mensaje, así que va como recado aparte.
+        const esAviso = salida?.type === MESSAGE && salida?.data?.flags === EPHEMERAL;
+        if (esComponente && esAviso) return { recado: salida.data };
+        return { contenido: salida?.data ?? {} };
+      },
     },
   };
 }
@@ -1313,16 +1377,19 @@ export async function handleInteraction(body) {
   if (body?.type === PING) return { type: PONG };
 
   if (body?.type === AUTOCOMPLETE) {
-    // El autocompletado tiene el mismo presupuesto de tres segundos, y encima
-    // llega una vez por tecla: una consulta por índice y nada más.
-    return body.data?.name === 'perfil' ? autocompletarNombre(body) : { type: CHOICES, data: { choices: [] } };
+    // Lo único que no se puede diferir: Discord quiere las opciones dentro de
+    // los tres segundos o no hay lista que enseñar. Por eso es una sola
+    // consulta y por eso no pasa por aquí abajo.
+    return body.data?.name === 'perfil'
+      ? autocompletarNombre(body)
+      : { type: CHOICES, data: { choices: [] } };
   }
 
   if (body?.type === MESSAGE_COMPONENT) {
     // Botones y desplegables llegan igual; los distingue el id que llevan.
     const id = String(body.data?.custom_id ?? '');
-    if (id.startsWith('guerra:')) return botonGuerra(body);
-    if (id.startsWith('evento:')) return botonEvento(body);
+    if (id.startsWith('guerra:')) return diferir(body, () => botonGuerra(body));
+    if (id.startsWith('evento:')) return diferir(body, () => botonEvento(body));
     return aviso('Ese botón es de una versión anterior del bot. Vuelve a escribir el comando.');
   }
 
@@ -1330,11 +1397,11 @@ export async function handleInteraction(body) {
 
   switch (body.data?.name) {
     case 'perfil':
-      return comandoPerfil(body);
+      return diferir(body, () => comandoPerfil(body));
     case 'guerra':
-      return comandoGuerra(body);
+      return diferir(body, () => comandoGuerra(body));
     case 'agenda':
-      return comandoAgenda(body);
+      return diferir(body, () => comandoAgenda(body));
     default:
       return aviso('Ese comando ya no existe. Prueba con `/perfil`, `/guerra` o `/agenda`.');
   }

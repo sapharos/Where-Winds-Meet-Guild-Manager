@@ -20,6 +20,7 @@ services:
       # start, with an explanatory log line, if this is left empty.
       DATABASE_URL: ${DATABASE_URL:-}
       DATABASE_SSL: ${DATABASE_SSL:-false}
+      DATABASE_POOL_MAX: ${DATABASE_POOL_MAX:-30}
       GUILD_ID: ${GUILD_ID:-default-guild}
       GUILD_NAME: ${GUILD_NAME:-My Guild}
       # Signs session cookies. Leave empty and one is generated and kept in the

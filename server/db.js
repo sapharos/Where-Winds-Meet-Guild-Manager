@@ -10,10 +10,35 @@ if (!process.env.DATABASE_URL) {
   process.exit(1);
 }
 
+/**
+ * El pool, con techo y con relojes.
+ *
+ * Venía con los valores de fábrica: diez conexiones y ninguna espera acotada.
+ * Eso aguanta una web donde cada pantalla pide una vez, pero no un bot: el
+ * autocompletado de Discord dispara una interacción **por tecla pulsada**, y
+ * cada una traía sus consultas. Escribir ocho letras deprisa, entre dos
+ * personas, y las diez conexiones estaban ocupadas; lo que llegaba después
+ * esperaba, y esperar más de tres segundos es que Discord dé la interacción por
+ * perdida y enseñe un error.
+ *
+ * `statement_timeout` es lo que impide que una consulta atascada se quede con
+ * su conexión para siempre: prefiere fallar y soltarla. Y `connectionTimeout`
+ * hace que pedir una conexión que no llega falle rápido en vez de colgarse.
+ */
 export const pool = new pg.Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.DATABASE_SSL === 'true' ? { rejectUnauthorized: false } : undefined,
+  max: Number(process.env.DATABASE_POOL_MAX) || 30,
+  idleTimeoutMillis: 30_000,
+  connectionTimeoutMillis: 5_000,
+  // Ninguna consulta de este producto tarda segundos; una que lo haga está
+  // atascada, y sostenerla sólo propaga la espera al resto.
+  statement_timeout: 8_000,
 });
+
+// Una conexión inactiva que el servidor corta emite 'error' en el pool, y sin
+// oyente eso tumba el proceso entero. Se anota y se sigue: el pool abre otra.
+pool.on('error', (err) => console.error('[pg] conexión inactiva perdida:', err.message));
 
 export const GUILD_ID = process.env.GUILD_ID || 'default-guild';
 const GUILD_NAME = process.env.GUILD_NAME || 'My Guild';

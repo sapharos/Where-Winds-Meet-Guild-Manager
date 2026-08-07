@@ -73,7 +73,7 @@ import {
   startAgendaScheduler,
 } from './discordCommands.js';
 import { listSeries, saveSeries, deleteSeries, seedSeries, asegurarEventos } from './agenda.js';
-import { listTextChannels } from './discordBot.js';
+import { listTextChannels, editOriginalInteraction, followUpInteraction } from './discordBot.js';
 import { VOICE_SLOTS, getVoiceChannels, setVoiceChannels, deployVoice } from './voice.js';
 import {
   listEvents,
@@ -556,7 +556,35 @@ app.post('/api/discord/interactions', asHandler(async (req, res) => {
 
   const respuesta = await handleInteraction(req.body);
   if (!respuesta) return res.status(400).json({ error: 'unsupported interaction' });
-  res.json(respuesta);
+
+  // Respuesta inmediata: el PING, el autocompletado y los avisos que no tocan
+  // la base de datos.
+  if (!respuesta.diferido) return res.json(respuesta);
+
+  // Diferida: se acusa recibo ahora -- que es lo que tiene tres segundos de
+  // plazo -- y el contenido se manda cuando esté. Lo que tarde deja de poder
+  // tumbar la interacción.
+  const { ack, trabajo } = respuesta.diferido;
+  res.json(ack);
+
+  const token = req.body?.token;
+  void (async () => {
+    try {
+      const { contenido, recado } = await trabajo();
+      if (recado) await followUpInteraction(token, recado);
+      else await editOriginalInteraction(token, contenido);
+    } catch (err) {
+      console.error('Interacción de Discord fallida:', err);
+      // Ya se acusó recibo, así que el «pensando…» se queda ahí para siempre
+      // salvo que se sustituya por algo. Decir que falló es peor que nada, y
+      // mucho mejor que unos puntos suspensivos eternos.
+      await editOriginalInteraction(token, {
+        content: `No se pudo completar: ${err.message ?? 'error inesperado'}. Inténtalo otra vez.`,
+        embeds: [],
+        components: [],
+      }).catch(() => null);
+    }
+  })();
 }));
 
 // El ID de Discord es un snowflake: sólo dígitos. Validarlo aquí evita que un
