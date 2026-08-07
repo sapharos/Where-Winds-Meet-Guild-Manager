@@ -196,6 +196,25 @@ place, keeping whatever filter it was drawn with; the line above says when it
 was last looked at, and Discord keeps counting that up on its own, so a stale
 board says so without anyone pressing anything.
 
+`/build` is each member's own primary build: its name, weapons, role, notes, the
+weapon set the game groups those weapons under, and the names of whatever other
+builds they have saved. Two dropdowns underneath change it — which of their
+builds is the primary one, and what role they play with it — and the message
+redraws itself with whatever ended up saved.
+
+That role is not decoration: the primary build's first role is what the roster
+carries, and the War Room counts it to balance the lanes. A member whose main
+changed and never said so is a lane balanced on a stale number, which is the
+whole reason this is worth a command rather than a trip to the web.
+
+It asks for no permission at all, matching the web: whoever is linked to their
+own roster entry may always edit their own builds. It never shows anyone else's
+— unlike `/perfil`, this is a place where something gets changed, and mixing the
+two would mean deciding whose dropdown was pressed on every click. Creating the
+first build, changing its weapons, and writing notes stay on the web, where the
+catalogue has colours and icons; `publico: Sí` posts it to the channel as a
+read-only card, with no dropdowns for passers-by to press.
+
 Discord delivers commands as ordinary HTTPS requests to this app, so there is no
 extra process to run — but it has to be able to prove they are really from
 Discord:

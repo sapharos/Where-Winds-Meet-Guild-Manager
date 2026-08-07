@@ -26,7 +26,7 @@
 import { createPublicKey, verify } from 'node:crypto';
 import { pool, GUILD_ID } from './db.js';
 import { SCAN_FIELDS } from './scans.js';
-import { listBuilds } from './builds.js';
+import { listBuilds, saveBuilds } from './builds.js';
 import { listWeaponSets } from './weapons.js';
 import { permissionsFor } from './auth.js';
 import { LANE_INFO, LANE_CAPACITY, WAR_CAPACITY, SIDES, getBoard, listStrategies } from './war.js';
@@ -231,6 +231,19 @@ const COMMANDS = [
     default_member_permissions: SOLO_QUIEN_DIGA_EL_LIDER,
     description: 'Lo que viene y qué has contestado',
   },
+  {
+    name: 'build',
+    default_member_permissions: SOLO_QUIEN_DIGA_EL_LIDER,
+    description: 'Tu build principal: mírala y cámbiala',
+    options: [
+      {
+        type: 5, // booleano
+        name: 'publico',
+        description: 'Enseñarla en el canal en vez de sólo a ti (sin poder cambiarla)',
+        required: false,
+      },
+    ],
+  },
 ];
 
 /**
@@ -429,6 +442,166 @@ export function perfilEmbed({ player, scans, builds, weaponSets, avatarUrl, guil
 
   return embed;
 }
+
+/**
+ * Los tres papeles, como los ofrece el desplegable.
+ *
+ * «Healer» y no «Sanador» por la misma razón que en el tablero de guerra: es
+ * como los llama el gremio hablando, y esto es Discord. La web sigue diciendo
+ * Sanador, que es su idioma.
+ */
+const PAPELES = [
+  { value: 'Tank', label: 'Tanque', description: 'Aguantas y abres hueco' },
+  { value: 'Healer', label: 'Healer', description: 'Sostienes a los demás' },
+  { value: 'DPS', label: 'DPS', description: 'Haces el daño' },
+];
+
+/**
+ * Cómo se escribe un papel en este comando.
+ *
+ * Sale de `PAPELES` y no de una segunda tabla a propósito: el desplegable y el
+ * texto de debajo tienen que decir lo mismo, y dos listas paralelas es
+ * exactamente la forma de que un día dejen de decirlo.
+ */
+const NOMBRE_PAPEL = Object.fromEntries(PAPELES.map((p) => [p.value, p.label]));
+
+/** Lo que Discord acepta en un desplegable, y lo que hay que decir si sobra. */
+const MAX_OPCIONES = 25;
+
+/**
+ * Tu build principal, y lo que puedes cambiarle desde aquí.
+ *
+ * Pura y sin Discord delante por la misma razón que `perfilEmbed`: es la parte
+ * que hay que poder mirar y corregir sin levantar nada.
+ *
+ * `editable` decide si se pintan los desplegables. Va en falso cuando la ficha
+ * se enseña en el canal: un desplegable en un mensaje público lo puede tocar
+ * cualquiera que pase, y aunque cada quien sólo se edita lo suyo -- el dueño de
+ * la interacción es quien pulsa, no quien escribió el comando -- eso es una
+ * confusión que no hace falta tener. En público se lee y ya.
+ */
+export function buildVista({ player, builds, weaponSets, editable = true, guildName = null }) {
+  const principal = builds.find((b) => b.isPrimary) ?? builds[0] ?? null;
+  const conjunto = principal?.weapons?.length
+    ? weaponSets.find((s) => s.weapons.includes(principal.weapons[0]))
+    : null;
+
+  if (!principal) {
+    return {
+      embeds: [
+        {
+          author: { name: guildName ?? 'Zona Zero' },
+          title: player.name,
+          description:
+            'No tienes ninguna build anotada, así que la Sala de Guerra no sabe con qué juegas.\n\n' +
+            'La primera se crea en la web, en **Mi perfil**: hace falta una vez, con sus armas y sus notas. ' +
+            'A partir de ahí este comando basta para cambiar de principal.',
+          color: LATON,
+        },
+      ],
+      components: [],
+    };
+  }
+
+  const armas = principal.weapons?.length ? principal.weapons.join(' · ') : '*sin armas anotadas*';
+  const papeles = principal.roles?.length
+    ? principal.roles.map((r) => NOMBRE_PAPEL[r] ?? r).join(' · ')
+    : '*sin papel anotado*';
+
+  const fields = [
+    { name: 'Armas', value: armas, inline: true },
+    { name: 'Papel', value: papeles, inline: true },
+  ];
+  if (conjunto) fields.push({ name: 'Conjunto', value: conjunto.name, inline: false });
+  if (principal.notes) fields.push({ name: 'Notas', value: literal(principal.notes), inline: false });
+
+  const otras = builds.filter((b) => b !== principal);
+  if (otras.length) {
+    fields.push({
+      name: `Tus otras builds (${otras.length})`,
+      value: otras.map((b) => literal(b.name)).join(' · '),
+      inline: false,
+    });
+  }
+
+  const embeds = [
+    {
+      author: { name: guildName ?? 'Zona Zero' },
+      title: player.name,
+      description: `**${literal(principal.name)}**`,
+      // El color del arma, igual que en la ficha y que en la tarjeta del roster.
+      color: conjunto ? comoEntero(conjunto.color) : LATON,
+      fields,
+      // Lo que está en juego, dicho donde se lee: el papel de la principal es
+      // el que la Sala de Guerra cuenta para equilibrar líneas, así que
+      // tenerlo mal no es un detalle cosmético.
+      footer: {
+        text: editable
+          ? 'El papel de tu build principal es lo que la Sala de Guerra usa para equilibrar las líneas'
+          : 'Armas y notas se cambian en la web, en Mi perfil',
+      },
+    },
+  ];
+
+  if (!editable) return { embeds, components: [] };
+
+  const components = [];
+
+  // Cambiar de principal sólo tiene sentido si hay entre qué elegir.
+  if (builds.length > 1) {
+    const opciones = builds.slice(0, MAX_OPCIONES).map((b) => ({
+      label: recortar(b.name, 100),
+      value: b.id,
+      description: b.weapons?.length ? recortar(b.weapons.join(' · '), 100) : undefined,
+      default: b === principal,
+    }));
+    components.push({
+      type: 1,
+      components: [
+        {
+          type: 3,
+          custom_id: 'build:principal',
+          placeholder: 'Cuál es tu build principal',
+          options: opciones,
+        },
+      ],
+    });
+    // Nada de recortes callados: si a alguien no le cabe una build en la lista,
+    // que lo sepa en vez de creer que la perdió.
+    if (builds.length > MAX_OPCIONES) {
+      embeds[0].fields.push({
+        name: 'Aviso',
+        value: `Sólo caben ${MAX_OPCIONES} en la lista; las demás se cambian en la web.`,
+        inline: false,
+      });
+    }
+  }
+
+  components.push({
+    type: 1,
+    components: [
+      {
+        type: 3,
+        custom_id: 'build:papel',
+        placeholder: 'Qué papel haces con ella',
+        min_values: 1,
+        max_values: PAPELES.length,
+        options: PAPELES.map((p) => ({
+          ...p,
+          default: (principal.roles ?? []).includes(p.value),
+        })),
+      },
+    ],
+  });
+
+  return { embeds, components };
+}
+
+/** Discord corta las etiquetas por su cuenta; mejor cortarlas diciéndolo. */
+const recortar = (texto, largo) => {
+  const limpio = String(texto ?? '');
+  return limpio.length > largo ? `${limpio.slice(0, largo - 1)}…` : limpio;
+};
 
 /**
  * Los roles como se agrupan dentro de una línea.
@@ -1362,6 +1535,118 @@ async function comandoPerfil(interaction) {
 }
 
 /**
+ * `/build` -- la tuya, y sólo la tuya.
+ *
+ * No lleva opción para mirar la de otro a propósito, aunque `/perfil` sí la
+ * tenga: esto no es una consulta sino un sitio donde se cambia algo, y mezclar
+ * las dos cosas obliga a decidir en cada pulsación de quién era el desplegable.
+ * Lo que lleva otro se sigue viendo en su ficha.
+ *
+ * Nadie necesita permiso para esto. Es la misma regla que en la web -- quien
+ * está unido a su ficha puede escribir sus builds sin que le eleven nada --, y
+ * tenerla escrita dos veces sería tener una que se contradice.
+ */
+async function comandoBuild(interaction) {
+  const usuario = interaction.member?.user ?? interaction.user;
+  if (!usuario?.id) return aviso('No he podido saber quién eres. Inténtalo otra vez.');
+
+  const quien = await cuentaDe(usuario.id);
+  const negativa = vetado(quien);
+  if (negativa) return negativa;
+  if (!quien.playerId) {
+    return aviso('Tu cuenta todavía no está unida a una ficha del roster. Avisa a un líder.');
+  }
+
+  const publico = opcion(interaction, 'publico') === true;
+  const [builds, weaponSets] = await Promise.all([listBuilds(quien.playerId), listWeaponSets()]);
+
+  return {
+    type: MESSAGE,
+    data: {
+      ...buildVista({
+        player: quien,
+        builds,
+        weaponSets,
+        editable: !publico,
+        guildName: process.env.GUILD_NAME,
+      }),
+      // El nombre de una build lo escribe su dueño, así que un «@everyone» ahí
+      // dentro avisaría al servidor entero desde un comando de consulta.
+      allowed_mentions: { parse: [] },
+      ...(publico ? {} : { flags: EPHEMERAL }),
+    },
+  };
+}
+
+/**
+ * Los desplegables de `/build`.
+ *
+ * Quien manda es quien pulsa, no quien escribió el comando, y por eso se vuelve
+ * a resolver la cuenta aquí en vez de fiarse del mensaje: cada quien se cambia
+ * lo suyo, pulse donde pulse.
+ *
+ * Se guarda la lista entera y no el cambio suelto porque `saveBuilds` es lo que
+ * mantiene la regla de que hay exactamente una principal -- escribirlo por
+ * partes dejaría un instante con dos, o con ninguna -- y es además lo que
+ * arrastra el papel de la principal a la ficha del roster, que es de donde la
+ * Sala de Guerra saca el equilibrio de las líneas.
+ */
+async function menuBuild(interaction) {
+  const usuario = interaction.member?.user ?? interaction.user;
+  const quien = usuario?.id ? await cuentaDe(usuario.id) : null;
+  const negativa = vetado(quien);
+  if (negativa) return negativa;
+  if (!quien.playerId) {
+    return aviso('Tu cuenta todavía no está unida a una ficha del roster. Avisa a un líder.');
+  }
+
+  const builds = await listBuilds(quien.playerId);
+  if (!builds.length) {
+    return aviso('No tienes ninguna build que cambiar. La primera se crea en la web, en Mi perfil.');
+  }
+
+  const [, qué] = String(interaction.data?.custom_id ?? '').split(':');
+  const elegido = interaction.data?.values ?? [];
+  let siguientes;
+
+  if (qué === 'principal') {
+    // Pudo borrarse desde la web con el mensaje abierto. Se dice y no se
+    // guarda nada: mejor que elegir otra por su cuenta.
+    if (!builds.some((b) => b.id === elegido[0])) {
+      return aviso('Esa build ya no existe. Vuelve a escribir `/build` para ver las que tienes.');
+    }
+    siguientes = builds.map((b) => ({ ...b, isPrimary: b.id === elegido[0] }));
+  } else if (qué === 'papel') {
+    const papeles = elegido.filter((v) => PAPELES.some((p) => p.value === v));
+    if (!papeles.length) return aviso('Elige al menos un papel.');
+    const principal = builds.find((b) => b.isPrimary) ?? builds[0];
+    siguientes = builds.map((b) => (b === principal ? { ...b, roles: papeles } : b));
+  } else {
+    return aviso('Ese desplegable es de una versión anterior del bot. Vuelve a escribir `/build`.');
+  }
+
+  await saveBuilds(quien.playerId, siguientes);
+
+  // Se relee en vez de dibujar lo que se acaba de mandar: `saveBuilds` decide
+  // cuál queda de principal si la lista no lo dejaba claro, y el mensaje tiene
+  // que enseñar lo que quedó guardado, no lo que se pidió.
+  const [frescas, weaponSets] = await Promise.all([listBuilds(quien.playerId), listWeaponSets()]);
+
+  return {
+    type: UPDATE_MESSAGE,
+    data: {
+      ...buildVista({
+        player: quien,
+        builds: frescas,
+        weaponSets,
+        guildName: process.env.GUILD_NAME,
+      }),
+      allowed_mentions: { parse: [] },
+    },
+  };
+}
+
+/**
  * El tablero, contestado igual lo pida un comando o el botón de actualizar.
  *
  * `tipo` es lo único que cambia entre los dos: un comando manda un mensaje
@@ -1647,6 +1932,7 @@ export async function handleInteraction(body) {
     const id = String(body.data?.custom_id ?? '');
     if (id.startsWith('guerra:')) return diferir(body, () => botonGuerra(body));
     if (id.startsWith('evento:')) return diferir(body, () => botonEvento(body));
+    if (id.startsWith('build:')) return diferir(body, () => menuBuild(body));
     return aviso('Ese botón es de una versión anterior del bot. Vuelve a escribir el comando.');
   }
 
@@ -1659,7 +1945,9 @@ export async function handleInteraction(body) {
       return diferir(body, () => comandoGuerra(body));
     case 'agenda':
       return diferir(body, () => comandoAgenda(body));
+    case 'build':
+      return diferir(body, () => comandoBuild(body));
     default:
-      return aviso('Ese comando ya no existe. Prueba con `/perfil`, `/guerra` o `/agenda`.');
+      return aviso('Ese comando ya no existe. Prueba con `/perfil`, `/guerra`, `/agenda` o `/build`.');
   }
 }
