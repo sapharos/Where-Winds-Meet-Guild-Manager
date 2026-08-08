@@ -86,7 +86,7 @@ import {
   editOriginalInteraction,
   followUpInteraction,
 } from './discordBot.js';
-import { VOICE_SLOTS, getVoiceChannels, setVoiceChannels, deployVoice } from './voice.js';
+import { VOICE_SLOTS, getVoiceChannels, setVoiceChannels, deployVoice, moveUnit } from './voice.js';
 import {
   listEvents,
   getEvent,
@@ -768,6 +768,34 @@ app.post('/api/war/voice/move', requireAuth, requirePermission('war.voice'), asH
     return res.status(400).json({ error: 'side must be attack or defense' });
   }
   res.json(await deployVoice(mode, side));
+}));
+
+// Los canales del servidor, para poder colgarle uno a una unidad táctica sin
+// pasar por el panel de administración: quien arma la guerra inventa las
+// unidades sobre la marcha, y pedirle a un administrador que le abra una
+// ranura cada vez es no tener la función. Con war.edit, que es el permiso de
+// escribir el plan, y no con users.manage: los nombres de los canales de voz
+// ya los ve cualquiera desde Discord.
+app.get('/api/war/voice/channels', requireAuth, requirePermission('war.edit'), asHandler(async (_req, res) => {
+  if (!botEnabled()) {
+    return res.status(503).json({ error: 'el bot de Discord no está configurado' });
+  }
+  res.json(await listVoiceChannels());
+}));
+
+app.post('/api/war/voice/unit', requireAuth, requirePermission('war.voice'), asHandler(async (req, res) => {
+  if (!botEnabled()) {
+    return res.status(503).json({ error: 'el bot de Discord no está configurado' });
+  }
+  const { side, unitId, mode } = req.body ?? {};
+  if (!['attack', 'defense'].includes(side)) {
+    return res.status(400).json({ error: 'side must be attack or defense' });
+  }
+  if (!['gather', 'return'].includes(mode)) {
+    return res.status(400).json({ error: 'mode must be gather or return' });
+  }
+  if (!unitId) return res.status(400).json({ error: 'unitId is required' });
+  res.json(await moveUnit(side, String(unitId), mode));
 }));
 
 /* -------------------------------------------------------------- war horn */

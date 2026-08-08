@@ -398,11 +398,23 @@ being required to field a lineup.
 ### War voice channels
 
 With the bot set up, **Administración → Canales de voz de guerra** maps the
-guild's voice channels to the war board: one general channel, one per side, one
-per lane of each side. The Sala de Guerra then offers anyone with the *Mover a
-canales de voz* permission (officers and up by default) three one-click moves:
-gather everyone in the general channel, split by side, or spread each deployed
-member to their lane's channel.
+guild's voice channels to the war board: one general channel, one for the lane
+leaders, one per side, one per lane of each side. The Sala de Guerra then offers
+anyone with the *Mover a canales de voz* permission (officers and up by default)
+four one-click moves: gather everyone in the general channel, split by side,
+spread each deployed member to their lane's channel, or gather just the lane
+leaders.
+
+**Tactical units get their own channel.** A unit — escorting the coffin, holding
+the camps — draws from all three lanes, so it is the one group the slot map
+cannot address. Instead the channel hangs off the unit itself: on each unit's
+card in the Sala de Guerra, anyone with *war.edit* picks a voice channel from a
+dropdown, and anyone with *war.voice* then gets two buttons. **Reunir** takes
+everyone assigned to that unit into its channel; **Devolver** sends each of them
+back to the channel of the lane they are deployed in, which is the only home the
+board knows for them. Devolver works whether or not the unit has a channel, so a
+unit gathered by hand still has a way back. Deleting the unit takes the
+assignment with it, leaving no orphan slot behind.
 
 Two things Discord requires for this to work:
 

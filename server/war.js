@@ -702,6 +702,10 @@ function cleanUnits(raw) {
     healer: count(unit?.healer, SIDE_CAPACITY),
     dps: count(unit?.dps, SIDE_CAPACITY),
     notes: unit?.notes ? String(unit.notes).slice(0, 300) : null,
+    // Un id de canal de Discord o nada. Se guarda aquí y no en el mapa de
+    // ranuras de voz porque la unidad se lleva su canal consigo: borrar la
+    // unidad borra la asignación, sin dejar una ranura huérfana detrás.
+    voiceChannelId: /^\d{5,25}$/.test(String(unit?.voiceChannelId ?? '')) ? unit.voiceChannelId : null,
   }));
 }
 
@@ -791,6 +795,22 @@ export async function setActiveStrategy(side, id) {
     [activeKey(side), id],
   );
   return { active: id };
+}
+
+/**
+ * Las unidades tácticas del plan en vigor de un bando.
+ *
+ * Sin plan activo la lista está vacía, que no es lo mismo que un plan sin
+ * unidades pero se atiende igual: no hay nada a lo que llamar.
+ */
+export async function activeUnits(side) {
+  const { rows } = await pool.query(
+    `SELECT s.units FROM app_settings a
+       JOIN war_strategies s ON s.id = a.value AND s.guild_id = $2 AND s.side = $3
+      WHERE a.key = $1`,
+    [activeKey(side), GUILD_ID, side],
+  );
+  return rows[0]?.units ?? [];
 }
 
 export async function listStrategies() {

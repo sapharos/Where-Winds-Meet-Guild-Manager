@@ -3,11 +3,13 @@ import { api } from '../services/authService';
 import {
   Deployment,
   DiscordSoundboardSound,
+  DiscordVoiceChannel,
   LANE_CAPACITY,
   Player,
   PlayerBuild,
   Role,
   SavedLineup,
+  TacticalUnit,
   VOICE_SLOT_LABELS,
   WAR_CAPACITY,
   WAR_LANES,
@@ -173,6 +175,15 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit, canVo
   const [vozCanales, setVozCanales] = useState<Record<string, string>>({});
   const [moviendo, setMoviendo] = useState(false);
   const vozLista = Object.keys(vozCanales).length > 0;
+  // Si el bot está configurado. Aparte del mapa de ranuras porque las unidades
+  // tácticas traen su canal puesto: se las puede reunir aunque nadie haya
+  // rellenado todavía las ranuras de las líneas.
+  const [vozBot, setVozBot] = useState(false);
+  // Los canales del servidor, para colgarle uno a una unidad táctica. Sólo se
+  // piden si se pueden usar: sin bot no hay nada que elegir, y sin war.edit
+  // tampoco hay dónde guardarlo.
+  const [canalesVoz, setCanalesVoz] = useState<DiscordVoiceChannel[]>([]);
+  const puedeAsignarVoz = canEdit && canalesVoz.length > 0;
   // El cuerno manual: la hoja, el panel de sonidos, y la selección en curso.
   const [cuernoAbierto, setCuernoAbierto] = useState(false);
   const [sonidos, setSonidos] = useState<DiscordSoundboardSound[] | null>(null);
@@ -204,11 +215,19 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit, canVo
       if (board.now) setOffset(Date.parse(board.now) - Date.now());
     }
     setConvocatoria(await api<GuildEvent | null>('/events/next-war').catch(() => null));
-    if (canVoice) {
+    if (canVoice || canEdit) {
       const voz = await api<{ bot: boolean; channels: Record<string, string> }>(
         '/war/voice-channels',
       ).catch(() => null);
-      setVozCanales(voz?.bot ? voz.channels : {});
+      setVozBot(Boolean(voz?.bot));
+      if (canVoice) setVozCanales(voz?.bot ? voz.channels : {});
+      // La lista entera sólo la necesita quien puede asignar: el que sólo mueve
+      // gente ve el canal de la unidad por su nombre en el propio desplegable.
+      if (canEdit && voz?.bot) {
+        setCanalesVoz(await api<DiscordVoiceChannel[]>('/war/voice/channels').catch(() => []));
+      }
+    }
+    if (canVoice) {
       setCuernoConfig(
         await api<{ jungle: string | null; boss: string | null }>('/war/horn').catch(() => ({
           jungle: null,
@@ -617,6 +636,68 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit, canVo
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo mover a nadie');
+    } finally {
+      setMoviendo(false);
+    }
+  };
+
+  /**
+   * Le pone canal de voz a una unidad, o se lo quita.
+   *
+   * El canal vive dentro de la unidad, así que esto guarda la estrategia
+   * entera. Se pinta al momento y se revierte si falla, como el resto del
+   * tablero: entre elegir el canal y llamar a la unidad no suele haber ni un
+   * segundo, y un desplegable que tarda en confirmarse se vuelve a tocar.
+   */
+  const asignarCanal = async (unitId: string, channelId: string) => {
+    if (!strategy) return;
+    const before = strategies;
+    const next: WarStrategy = {
+      ...strategy,
+      units: strategy.units.map((u) =>
+        u.id === unitId ? { ...u, voiceChannelId: channelId || null } : u,
+      ),
+    };
+    setError(null);
+    setStrategies(strategies.map((s) => (s.id === strategy.id ? next : s)));
+    try {
+      await api('/war/strategies', { method: 'PUT', body: JSON.stringify({ strategy: next }) });
+    } catch (err) {
+      setStrategies(before);
+      setError(err instanceof Error ? err.message : 'No se pudo asignar el canal');
+    }
+  };
+
+  /**
+   * Llama a una unidad a su canal, o la devuelve a las líneas de las que salió.
+   *
+   * Una unidad no es una línea: sus diez personas pueden venir de las tres, y
+   * por eso la vuelta va por el despliegue de cada uno y no por un botón
+   * inverso del mismo canal. El aviso nombra la unidad porque hay varias y los
+   * dos botones se pulsan seguidos.
+   */
+  const moverUnidad = async (unit: TacticalUnit, mode: 'gather' | 'return') => {
+    setMoviendo(true);
+    setError(null);
+    try {
+      const out = await api<{
+        total: number;
+        moved: number;
+        skipped: { name: string; reason: string }[];
+        unit: string;
+      }>('/war/voice/unit', { method: 'POST', body: JSON.stringify({ side, unitId: unit.id, mode }) });
+      const hecho = mode === 'gather' ? 'reunidos en su canal' : 'devueltos a su línea';
+      setAviso(
+        out.total === 0
+          ? `No hay nadie asignado a «${out.unit}».`
+          : out.skipped.length
+            ? `«${out.unit}»: ${out.moved} de ${out.total} ${hecho}. Quedaron ${
+                out.skipped.length
+              }: ${out.skipped.map((s) => `${s.name} (${s.reason})`).join(', ')}.`
+            : `«${out.unit}»: los ${out.moved} están ${hecho}.`,
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo mover a la unidad');
     } finally {
       setMoviendo(false);
     }
@@ -1067,6 +1148,78 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit, canVo
                       ? members.map((m) => m.name).join(', ')
                       : <span className="text-slate-600 italic">Sin nadie asignado</span>}
                   </p>
+
+                  {/*
+                    La voz de la unidad, al pie de su propia tarjeta.
+
+                    Reunir y devolver son dos botones y no uno que alterna: en
+                    mitad de una guerra nadie se acuerda de en qué estado dejó
+                    cada unidad, y un botón que cambia de significado solo se
+                    pulsa al revés. Devolver no necesita que la unidad tenga
+                    canal -- cada uno vuelve a la línea en la que está
+                    desplegado --, así que se ofrece aunque no lo tenga: si se
+                    reunió a mano, el camino de vuelta sigue estando.
+                  */}
+                  {(puedeAsignarVoz || (canVoice && vozBot)) && (
+                    <div className="mt-3 pt-2 border-t border-slate-800/70 space-y-2">
+                      {puedeAsignarVoz ? (
+                        <select
+                          value={unit.voiceChannelId ?? ''}
+                          onChange={(e) => void asignarCanal(unit.id, e.target.value)}
+                          aria-label={`Canal de voz de ${unit.name || 'la unidad'}`}
+                          title="Dónde se reúne esta unidad"
+                          className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-[11px] text-slate-300 outline-none focus:ring-1 focus:ring-amber-500"
+                        >
+                          <option value="">— sin canal de voz —</option>
+                          {canalesVoz.map((c) => (
+                            <option key={c.id} value={c.id}>
+                              🔊 {c.name}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        unit.voiceChannelId && (
+                          <p className="text-[10px] text-slate-500 truncate">
+                            <i className="fa-solid fa-headset mr-1.5"></i>
+                            Tiene canal de voz propio
+                          </p>
+                        )
+                      )}
+
+                      {canVoice && vozBot && (
+                        <div className="flex gap-1.5">
+                          <button
+                            disabled={moviendo || !unit.voiceChannelId || !members.length}
+                            onClick={() => void moverUnidad(unit, 'gather')}
+                            title={
+                              !unit.voiceChannelId
+                                ? 'Esta unidad no tiene canal de voz asignado'
+                                : !members.length
+                                  ? 'No hay nadie asignado a esta unidad'
+                                  : `Llevar a los ${members.length} de la unidad a su canal`
+                            }
+                            className="flex-1 min-h-tap text-[11px] rounded border border-slate-700 text-slate-300 hover:text-amber-500 hover:border-amber-700 disabled:text-slate-600 disabled:border-slate-800 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-1.5 px-2"
+                          >
+                            <i className="fa-solid fa-users-rays"></i>
+                            Reunir
+                          </button>
+                          <button
+                            disabled={moviendo || !members.length}
+                            onClick={() => void moverUnidad(unit, 'return')}
+                            title={
+                              members.length
+                                ? 'Devolver a cada uno al canal de la línea en la que está desplegado'
+                                : 'No hay nadie asignado a esta unidad'
+                            }
+                            className="flex-1 min-h-tap text-[11px] rounded border border-slate-700 text-slate-300 hover:text-amber-500 hover:border-amber-700 disabled:text-slate-600 disabled:border-slate-800 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-1.5 px-2"
+                          >
+                            <i className="fa-solid fa-arrow-rotate-left"></i>
+                            Devolver
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </section>
               );
             })}

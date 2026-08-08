@@ -24,6 +24,7 @@ import {
   PlayerBuild,
   WarCall,
   WarSide,
+  WarStrategy,
   WeaponSet,
 } from '../types';
 import * as fake from './guild';
@@ -42,6 +43,7 @@ interface Store {
   builds: PlayerBuild[];
   weaponSets: WeaponSet[];
   deployments: Deployment[];
+  strategies: WarStrategy[];
   lineups: LineupGuardado[];
   active: Record<WarSide, string | null>;
   locked: Record<WarSide, boolean>;
@@ -164,6 +166,9 @@ const store: Store = {
   builds: structuredClone(fake.builds),
   weaponSets: structuredClone(fake.weaponSets),
   deployments: structuredClone(fake.deployments),
+  // Copiadas y no compartidas: asignarle un canal de voz a una unidad guarda
+  // la estrategia entera, y el banco tiene que quedarse con el cambio.
+  strategies: structuredClone(fake.strategies),
   // Una guardada de fábrica: la foto del ataque inicial, para que la hoja de
   // formaciones tenga algo que enseñar y que aplicar.
   lineups: [
@@ -446,7 +451,7 @@ const GET: [RegExp, Ruta][] = [
   [/^\/builds$/, () => store.builds],
   [/^\/weapon-sets$/, () => store.weaponSets],
   [/^\/war\/deployments$/, () => store.deployments],
-  [/^\/war\/strategies$/, () => fake.strategies],
+  [/^\/war\/strategies$/, () => store.strategies],
   [
     /^\/war\/board$/,
     () => ({
@@ -475,6 +480,9 @@ const GET: [RegExp, Ruta][] = [
   [/^\/events\/config\/roles$/, () => ({ bot: true, roles: ROLES_DISCORD })],
   [/^\/discord\/soundboard$/, () => SONIDOS],
   [/^\/war\/voice-channels$/, () => ({ bot: true, channels: mapaVoz })],
+  // La misma lista que ve Administración: la Sala de Guerra la necesita para
+  // poder colgarle un canal a una unidad táctica.
+  [/^\/war\/voice\/channels$/, () => CANALES_VOZ],
   [/^\/war\/horn$/, () => cuerno],
   // El grito vivo, con su caducidad: sin ella el banco repetiría el mismo
   // aviso cada tres segundos hasta recargar la página.
@@ -654,6 +662,43 @@ const ESCRITURAS: [string, RegExp, Ruta][] = [
       d.side === m[1] && d.playerId === m[2] ? { ...d, isLaneLeader: Boolean(body?.leader) } : d,
     );
     return { leader: Boolean(body?.leader) };
+  }],
+  ['PUT', /^\/war\/strategies$/, (_m, _req, body) => {
+    const strategy = body?.strategy as WarStrategy | undefined;
+    if (!strategy) return { error: 'falta la estrategia' };
+    const at = store.strategies.findIndex((s) => s.id === strategy.id);
+    if (at >= 0) store.strategies[at] = strategy;
+    else store.strategies.push({ ...strategy, id: strategy.id || `st-${Date.now()}` });
+    return { id: strategy.id, units: strategy.units };
+  }],
+  // Reunir una unidad y devolverla. Como el de verdad: sólo se mueve a los
+  // vinculados, y la vuelta va por la línea de cada uno, así que una ranura
+  // sin canal en `mapaVoz` deja fuera a los de esa línea con su motivo.
+  ['POST', /^\/war\/voice\/unit$/, (_m, _req, body) => {
+    const unit = store.strategies
+      .flatMap((s) => (s.side === body?.side ? s.units : []))
+      .find((u) => u.id === body?.unitId);
+    if (!unit) return { error: 'esa unidad no está en el plan en vigor' };
+    if (body?.mode === 'gather' && !unit.voiceChannelId) {
+      return { error: 'esa unidad no tiene canal de voz asignado' };
+    }
+    const conDiscord = new Set(
+      store.usuarios.filter((u) => u.discordId && u.playerId).map((u) => u.playerId),
+    );
+    const nombres = new Map(store.players.map((p) => [p.id, p.name]));
+    const suyos = store.deployments.filter(
+      (d) => d.side === body?.side && d.unitIds?.includes(unit.id),
+    );
+    let moved = 0;
+    const skipped: { name: string; reason: string }[] = [];
+    for (const d of suyos) {
+      const name = nombres.get(d.playerId) ?? d.playerId;
+      const destino = body?.mode === 'gather' ? unit.voiceChannelId : mapaVoz[`${d.side}:${d.lane}`];
+      if (!destino) skipped.push({ name, reason: 'canal sin configurar' });
+      else if (!conDiscord.has(d.playerId)) skipped.push({ name, reason: 'sin Discord vinculado' });
+      else moved++;
+    }
+    return { total: suyos.length, moved, skipped, unit: unit.name };
   }],
   ['POST', /^\/war\/voice\/move$/, (_m, _req, body) => {
     const conDiscord = new Set(

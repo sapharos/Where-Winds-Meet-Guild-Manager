@@ -76,6 +76,13 @@ export interface TacticalUnit extends RoleTargets {
   icon: string;
   color: string;
   notes?: string | null;
+  /**
+   * El canal de voz donde se reúne la unidad, si tiene uno propio. Va en la
+   * unidad y no en el mapa de ranuras porque una unidad nace y muere con el
+   * plan que la nombra, mientras que las líneas son siempre las mismas tres.
+   * Sin canal, la unidad se sigue leyendo igual: sólo no se la puede llamar.
+   */
+  voiceChannelId?: string | null;
 }
 
 /**

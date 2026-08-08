@@ -109,9 +109,21 @@ export const strategies: WarStrategy[] = [
     side: 'attack',
     name: 'Vanguardia Sombría',
     composition: { left: targets(2, 1, 4), center: targets(3, 2, 5), right: targets(2, 1, 3) },
+    // La escolta va con canal de voz propio y las otras dos sin él a
+    // propósito: los botones de reunir y devolver sólo se entienden viendo al
+    // lado una unidad que todavía no tiene dónde reunirse.
     units: [
       { id: 'u-1', name: 'Punta de lanza', icon: 'fa-khanda', color: '#c2564a', tank: 2, healer: 1, dps: 2 },
-      { id: 'u-2', name: 'Escolta del féretro', icon: 'fa-box', color: '#4a7fc2', tank: 1, healer: 2, dps: 1 },
+      {
+        id: 'u-2',
+        name: 'Escolta del féretro',
+        icon: 'fa-box',
+        color: '#4a7fc2',
+        tank: 1,
+        healer: 2,
+        dps: 1,
+        voiceChannelId: '200000000000000010',
+      },
       { id: 'u-3', name: 'Campamentos', icon: 'fa-fire', color: '#5fa383', tank: 1, healer: 1, dps: 3 },
     ],
   },
