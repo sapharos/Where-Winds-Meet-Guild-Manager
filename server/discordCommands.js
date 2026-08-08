@@ -148,28 +148,35 @@ export function verifyInteraction(req) {
 /* -------------------------------------------------------------- registro */
 
 /**
- * Nadie, hasta que un líder diga quién.
+ * Visibles para todos; quién es del gremio lo decide la web.
  *
- * Discord entiende «0» como «ningún permiso del servidor basta», que en la
- * práctica deja los comandos sólo para quien administra -- y, sobre todo,
- * habilita el panel de Ajustes del servidor → Integraciones, donde se conceden
- * por rol. Sin esto los tres comandos le salen en el menú a cualquiera que esté
- * en el servidor: no le contestan, porque `vetado()` está antes que cualquier
- * dato, pero los ve, los escribe y pregunta por qué no funcionan.
+ * Ser del gremio es tener cuenta enlazada, y eso no es ningún rol de Discord:
+ * no hay rol que conceder que signifique lo mismo, y mantener uno a mano en
+ * paralelo al roster es tener dos listas que se contradicen el día que alguien
+ * entra. `vetado()` ya mira lo que de verdad importa -- cuenta enlazada y ficha
+ * de alta -- antes de tocar ningún dato, así que la puerta está puesta donde se
+ * puede mantener sola.
  *
- * Es una cadena, no un número: son los permisos de Discord en un mapa de bits, y
- * ese mapa no cabe en un entero de JavaScript.
+ * Esto estuvo en «0» (nadie, hasta que un líder conceda el rol en Ajustes del
+ * servidor → Integraciones) durante un día. Cumplía su objetivo -- que los
+ * cientos de personas del servidor que no son del gremio no vieran comandos que
+ * no les iban a contestar -- pero a cambio se los quitó al gremio entero, que
+ * es a quien están hechos: quien no era administrador de Discord dejó de verlos
+ * de un despliegue para otro. El precio correcto es el contrario: que quien no
+ * es del gremio los vea y reciba una negativa que además le explica cómo
+ * enlazarse, en vez de que quien sí lo es tenga que esperar a que un líder se
+ * acuerde de un panel de Discord.
  *
- * OJO al desplegar: hasta que se conceda el rol en Integraciones, los comandos
- * desaparecen para el gremio entero. Está contado en DEPLOY.md.
+ * `null` y no omitir el campo: el registro es un PUT que reemplaza la
+ * definición entera, y decirlo explícitamente es lo que borra un «0» anterior.
  */
-const SOLO_QUIEN_DIGA_EL_LIDER = '0';
+const LOS_VE_TODO_EL_MUNDO = null;
 
 /** Lo que el gremio ve al escribir «/» en Discord. */
 const COMMANDS = [
   {
     name: 'perfil',
-    default_member_permissions: SOLO_QUIEN_DIGA_EL_LIDER,
+    default_member_permissions: LOS_VE_TODO_EL_MUNDO,
     description: 'Estadísticas del último escaneo del gremio',
     options: [
       // Dos formas de nombrar a otro, porque ninguna sola llega a todo el
@@ -198,7 +205,7 @@ const COMMANDS = [
   },
   {
     name: 'guerra',
-    default_member_permissions: SOLO_QUIEN_DIGA_EL_LIDER,
+    default_member_permissions: LOS_VE_TODO_EL_MUNDO,
     description: 'Quién está asignado a cada línea, en ataque y en defensa',
     options: [
       // Las dos como lista cerrada y no como texto: se elige de un desplegable,
@@ -228,12 +235,12 @@ const COMMANDS = [
   },
   {
     name: 'agenda',
-    default_member_permissions: SOLO_QUIEN_DIGA_EL_LIDER,
+    default_member_permissions: LOS_VE_TODO_EL_MUNDO,
     description: 'Lo que viene y qué has contestado',
   },
   {
     name: 'build',
-    default_member_permissions: SOLO_QUIEN_DIGA_EL_LIDER,
+    default_member_permissions: LOS_VE_TODO_EL_MUNDO,
     description: 'Tu build principal: mírala y cámbiala',
     options: [
       {
