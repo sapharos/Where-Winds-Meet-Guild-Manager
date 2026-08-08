@@ -44,6 +44,7 @@ import {
   postMessage,
   editMessage,
   deleteMessage,
+  listGuildRoles,
   memberRoles,
   sendDirectMessage,
 } from './discordBot.js';
@@ -300,6 +301,81 @@ export async function registerCommands() {
   } catch (err) {
     console.error('No se pudieron registrar los comandos de Discord:', err.message);
   }
+}
+
+/* --------------------------------------------------------- a quién contesta */
+
+/**
+ * Los roles de Discord a los que el bot atiende. Vacío, a todo el mundo.
+ *
+ * Se guardan los ids y no los nombres: renombrar el rol en Discord no rompe
+ * nada, que es la mitad de «si el rol cambia a futuro». La otra mitad es que
+ * esto se elige en Administración y no aquí, así que rehacer los roles del
+ * servidor se arregla volviendo a escogerlo, sin desplegar.
+ *
+ * Es una lista y no un rol solo por lo mismo que en los eventos: durante un
+ * cambio de rol conviven el viejo y el nuevo unos días, y con un único hueco
+ * habría que elegir a quién dejar fuera mientras tanto.
+ */
+const ROLES_KEY = `discord_bot_roles:${GUILD_ID}`;
+
+export async function getBotRoles() {
+  const { rows } = await pool.query(`SELECT value FROM app_settings WHERE key = $1`, [ROLES_KEY]);
+  if (!rows.length) return [];
+  try {
+    const leido = JSON.parse(rows[0].value);
+    return Array.isArray(leido) ? leido : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function setBotRoles(roles) {
+  // Los ids de Discord son números largos. Con exigir eso se cae la basura sin
+  // atarse a un tamaño que Discord puede cambiar -- igual que en los eventos.
+  const limpios = [
+    ...new Set((Array.isArray(roles) ? roles : []).filter((r) => /^\d{5,25}$/.test(String(r)))),
+  ];
+  await pool.query(
+    `INSERT INTO app_settings (key, value) VALUES ($1, $2)
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+    [ROLES_KEY, JSON.stringify(limpios)],
+  );
+  return limpios;
+}
+
+/**
+ * La negativa por rol, o null si puede pasar.
+ *
+ * Va en `handleInteraction` y no en `vetado()` a propósito: los roles vienen
+ * dentro de la propia interacción, así que esto no cuesta ninguna consulta por
+ * persona y corta antes que nada -- comandos, botones y autocompletado con la
+ * misma regla, en vez de seis sitios que hay que acordarse de tocar a la vez.
+ *
+ * La regla la pone `puedeContestar()`, la misma de los eventos, porque es la
+ * misma pregunta: si los roles que llevas puestos cumplen una restricción. Dos
+ * copias de esto serían dos que acaban diciendo cosas distintas.
+ *
+ * En un privado no hay `member` y por tanto no hay roles que leer. Con
+ * restricción puesta eso es un no: no se puede afirmar que tenga el rol, que es
+ * justo lo que se está preguntando. Los comandos son del servidor del gremio,
+ * así que en la práctica siempre traen `member`.
+ */
+async function sinElRol(body) {
+  const exigidos = await getBotRoles();
+  if (puedeContestar(exigidos, body?.member?.roles ?? null)) return null;
+
+  // Nombrar el rol que falta: «no tienes permiso» obliga a preguntar cuál, y
+  // quien contesta es el mismo líder al que se le pide. Si Discord no da la
+  // lista se dice lo genérico, que sigue siendo cierto.
+  const nombres = await listGuildRoles()
+    .then((todos) => todos.filter((r) => exigidos.includes(r.id)).map((r) => r.name))
+    .catch(() => []);
+  return aviso(
+    nombres.length
+      ? `El bot es para el gremio: te falta el rol ${nombres.map((n) => `**${n}**`).join(' o ')} en este servidor. Pídeselo a un líder.`
+      : 'El bot es para el gremio, y tu cuenta de Discord no tiene el rol que hace falta. Pídeselo a un líder.',
+  );
 }
 
 /* ------------------------------------------------------------- presentación */
@@ -2003,6 +2079,17 @@ export const quienManda = (body) =>
 
 export async function handleInteraction(body) {
   if (body?.type === PING) return { type: PONG };
+
+  // La puerta del gremio, antes que nada. Los comandos se los ve todo el
+  // servidor -- así nadie tiene que mantener una lista de a quién enseñárselos
+  // en paralelo al roster --, y quien no es del gremio se entera aquí, con una
+  // negativa que además le dice qué le falta.
+  const negativa = await sinElRol(body);
+  if (negativa) {
+    // El autocompletado no admite un mensaje: Discord espera opciones o nada.
+    // Una lista vacía es lo que ya recibe quien no tiene a nadie que buscar.
+    return body?.type === AUTOCOMPLETE ? { type: CHOICES, data: { choices: [] } } : negativa;
+  }
 
   if (body?.type === AUTOCOMPLETE) {
     // Lo único que no se puede diferir: Discord quiere las opciones dentro de

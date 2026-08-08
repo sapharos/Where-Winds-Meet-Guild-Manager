@@ -103,6 +103,17 @@ const AdminPanel: React.FC<Props> = ({
   const [rolesDiscord, setRolesDiscord] = useState<DiscordRole[]>([]);
   const [mapaVoz, setMapaVoz] = useState<VoiceChannelMap>({});
   const [vozSucia, setVozSucia] = useState(false);
+  /**
+   * A qué roles del servidor atiende el bot. Vacío es a todo el que tenga
+   * cuenta enlazada, que es como viene de fábrica.
+   *
+   * Los roles se piden aparte de `rolesDiscord`: aquella lista la trae el
+   * permiso de gestionar eventos y ésta el de gestionar cuentas, y un oficial
+   * puede tener uno sin el otro.
+   */
+  const [rolesBot, setRolesBot] = useState<DiscordRole[]>([]);
+  const [rolesBotPermitidos, setRolesBotPermitidos] = useState<string[]>([]);
+  const [rolesBotSucio, setRolesBotSucio] = useState(false);
   /** El panel de sonidos del servidor y qué sonido toca en cada aviso de guerra. */
   const [sonidos, setSonidos] = useState<DiscordSoundboardSound[]>([]);
   const [cuerno, setCuerno] = useState<{
@@ -161,6 +172,12 @@ const AdminPanel: React.FC<Props> = ({
               '/war/horn',
             ).catch(() => ({ jungle: null, boss: null, slots: [] })),
           );
+          const puerta = await api<{ roles: DiscordRole[]; allowed: string[] }>(
+            '/discord/bot-roles',
+          ).catch(() => null);
+          setRolesBot(puerta?.roles ?? []);
+          setRolesBotPermitidos(puerta?.allowed ?? []);
+          setRolesBotSucio(false);
         }
       }
       // Aparte de `canManageUsers`: programar eventos y gestionar cuentas son
@@ -305,6 +322,31 @@ const AdminPanel: React.FC<Props> = ({
       report('Canales de voz guardados.');
     } catch (err) {
       report(err instanceof Error ? err.message : 'No se pudieron guardar los canales', false);
+    }
+  };
+
+  /**
+   * Guarda a quién atiende el bot.
+   *
+   * Con botón y no al momento, al revés que el cuerno: quitar el único rol
+   * marcado deja al bot abierto a todo el gremio, y eso no debe pasar a mitad
+   * de recomponer la lista.
+   */
+  const guardarRolesBot = async () => {
+    try {
+      const { allowed } = await api<{ allowed: string[] }>('/discord/bot-roles', {
+        method: 'PUT',
+        body: JSON.stringify({ allowed: rolesBotPermitidos }),
+      });
+      setRolesBotPermitidos(allowed);
+      setRolesBotSucio(false);
+      report(
+        allowed.length
+          ? 'Guardado: el bot sólo atiende a esos roles.'
+          : 'Guardado: el bot atiende a cualquiera con cuenta enlazada.',
+      );
+    } catch (err) {
+      report(err instanceof Error ? err.message : 'No se pudo guardar', false);
     }
   };
 
@@ -681,6 +723,95 @@ const AdminPanel: React.FC<Props> = ({
       )}
 
       {activa === 'armas' && <WeaponSets canEdit={canManageBuilds} onSaved={onWeaponSetsChanged} />}
+
+      {/*
+        Quién puede usar el bot.
+
+        Los comandos se los ve todo el servidor a propósito: esconderlos exige
+        mantener una lista de roles en paralelo al roster, y el día que alguien
+        entra al gremio hay dos sitios que actualizar y sólo se acuerda uno.
+        Aquí se dice a quién le contesta, que es la pregunta que sí importa, y
+        se guarda el id del rol -- renombrarlo en Discord no rompe nada.
+      */}
+      {activa === 'cuentas' && canManageUsers && botDiscord && (
+        <section className="bg-slate-900/60 border border-slate-800 rounded-xl p-6">
+          <div className="flex items-center justify-between mb-1 gap-4 flex-wrap">
+            <h2 className="cinzel text-2xl font-bold text-amber-500">Quién puede usar el bot</h2>
+            <button
+              onClick={guardarRolesBot}
+              disabled={!rolesBotSucio}
+              className="bg-amber-600 hover:bg-amber-500 disabled:bg-slate-800 disabled:text-slate-600 disabled:cursor-not-allowed text-white text-sm font-bold py-2 px-4 rounded transition-all flex items-center gap-2"
+            >
+              <i className="fa-solid fa-floppy-disk"></i>
+              Guardar
+            </button>
+          </div>
+          <p className="text-xs text-slate-500 mb-4">
+            Los comandos <code className="text-slate-400">/perfil</code>,{' '}
+            <code className="text-slate-400">/guerra</code>,{' '}
+            <code className="text-slate-400">/agenda</code> y{' '}
+            <code className="text-slate-400">/build</code> los ve todo el servidor, pero el bot sólo
+            le contesta a quien lleve uno de estos roles. Sin ninguno marcado atiende a cualquiera
+            que tenga su Discord enlazado a una cuenta del gremio. Enlazar la cuenta y estar de alta
+            en el roster hace falta en los dos casos.
+          </p>
+
+          {rolesBot.length === 0 ? (
+            <p className="text-sm text-slate-400 bg-slate-950 border border-slate-800 rounded-lg p-3">
+              <i className="fa-solid fa-triangle-exclamation mr-2 text-amber-500"></i>
+              No puedo leer los roles del servidor de Discord. Mientras tanto el bot atiende a
+              cualquiera con cuenta enlazada.
+            </p>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {rolesBot.map((rol) => {
+                const marcado = rolesBotPermitidos.includes(rol.id);
+                return (
+                  <button
+                    key={rol.id}
+                    type="button"
+                    aria-pressed={marcado}
+                    onClick={() => {
+                      // Sobre lo que hay, no sobre lo que se leyó al pintar:
+                      // marcar dos roles seguidos son dos pulsaciones que
+                      // pueden caer antes de que React repinte, y la segunda
+                      // partiendo de la lista vieja borra la primera.
+                      //
+                      // En el orden del servidor y no en el de las pulsaciones,
+                      // igual que en las series: la lista se lee tal cual.
+                      setRolesBotPermitidos((antes) =>
+                        antes.includes(rol.id)
+                          ? antes.filter((r) => r !== rol.id)
+                          : rolesBot
+                              .filter((r) => r.id === rol.id || antes.includes(r.id))
+                              .map((r) => r.id),
+                      );
+                      setRolesBotSucio(true);
+                    }}
+                    className={`min-h-tap px-3 rounded-md border text-sm font-bold transition-colors duration-micro ${
+                      marcado ? 'bg-slate-800 border-slate-600' : 'bg-slate-950 border-slate-800'
+                    }`}
+                    style={
+                      rol.color
+                        ? { color: rol.color, borderColor: marcado ? rol.color : undefined }
+                        : undefined
+                    }
+                  >
+                    <i className={`fa-solid ${marcado ? 'fa-check' : 'fa-minus'} mr-2 text-[10px]`}></i>
+                    @{rol.name}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          <p className="text-[11px] text-slate-600 mt-3 leading-relaxed">
+            {rolesBotPermitidos.length === 0
+              ? 'Ahora mismo: cualquiera con cuenta enlazada y ficha de alta.'
+              : `Ahora mismo: sólo quien lleve ${rolesBotPermitidos.length === 1 ? 'ese rol' : 'alguno de esos roles'}. A los demás el bot les dice qué les falta.`}
+          </p>
+        </section>
+      )}
 
       {activa === 'cuentas' && canManageUsers && (
         <section className="bg-slate-900/60 border border-slate-800 rounded-xl p-6">

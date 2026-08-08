@@ -160,6 +160,9 @@ const ROLES_DISCORD = [
  */
 const MIS_ROLES_DISCORD = ['200000000000000001', '200000000000000002'];
 
+/** A qué roles atiende el bot. Vacío, a todos: el estado de fábrica. */
+let rolesDelBot: string[] = [];
+
 const store: Store = {
   players: structuredClone(fake.players),
   ranks: structuredClone(fake.ranks),
@@ -478,6 +481,9 @@ const GET: [RegExp, Ruta][] = [
   [/^\/discord\/status$/, () => ({ bot: true })],
   [/^\/discord\/voice-channels$/, () => CANALES_VOZ],
   [/^\/events\/config\/roles$/, () => ({ bot: true, roles: ROLES_DISCORD })],
+  // La puerta del bot. Arranca sin restricción, que es como viene de fábrica:
+  // el estado que hay que poder ver antes de marcar nada.
+  [/^\/discord\/bot-roles$/, () => ({ bot: true, roles: ROLES_DISCORD, allowed: rolesDelBot })],
   [/^\/discord\/soundboard$/, () => SONIDOS],
   [/^\/war\/voice-channels$/, () => ({ bot: true, channels: mapaVoz })],
   // La misma lista que ve Administración: la Sala de Guerra la necesita para
@@ -598,6 +604,18 @@ const ESCRITURAS: [string, RegExp, Ruta][] = [
     if (at >= 0) eventos.splice(at, 1);
     delete respuestas[m[1]];
     return { ok: true };
+  }],
+  ['PUT', /^\/discord\/bot-roles$/, (_m, _req, body) => {
+    // Como el de verdad: se queda con los ids que parecen de Discord y sin
+    // repetidos, así que el banco enseña lo que se guardó y no lo que se envió.
+    rolesDelBot = [
+      ...new Set(
+        (Array.isArray(body?.allowed) ? body.allowed : []).filter((r: unknown) =>
+          /^\d{5,25}$/.test(String(r)),
+        ),
+      ),
+    ] as string[];
+    return { allowed: rolesDelBot };
   }],
   ['PUT', /^\/war\/voice-channels$/, (_m, _req, body) => {
     mapaVoz = body?.channels ?? {};

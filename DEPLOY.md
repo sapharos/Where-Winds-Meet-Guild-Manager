@@ -263,27 +263,36 @@ told, privately, to link theirs first. Leaving the guild is enough to lose the
 bot: an account whose roster entry is marked inactive is refused, so nobody has
 to remember to disable the account by hand as well.
 
-#### Who sees the commands — no manual step
+#### Who sees the commands, and who gets an answer
 
-The commands are registered **visible to everyone**, and membership is decided by
-the app, not by a Discord role. Being in the guild means having a linked account;
-no Discord role means the same thing, and keeping one by hand alongside the
-roster gives you two lists that disagree the first time somebody joins. Whoever
-is not in the guild sees the command, runs it, and gets a private refusal that
-tells them how to link — which is the more useful half of the trade.
+These are two different questions, answered in two different places.
 
-This was briefly the other way round: registered as *available to nobody*, to be
-granted per role in Server Settings → Integrations. It kept the commands out of
-the menu for the hundreds of people who are in the Discord server but not in the
-guild, at the price of taking them away from the guild itself until a leader
-remembered a Discord panel. Anyone who was not a Discord administrator lost the
-bot from one deploy to the next. If you ever set those per-role overrides, clear
-them in **Server Settings → Integrations → Zonabot → Commands** — an override
-stored there beats what the app registers, so a stale one still hides the
-commands from your members.
+**Seeing them** is open: the commands are registered visible to the whole
+server. Hiding them per role would mean keeping a Discord role list in step with
+the roster by hand, and the day somebody joins the guild there are two places to
+update and only one gets remembered.
 
-That screen remains the fastest way to take a command away from everyone if one
-ever misbehaves — no deploy needed.
+**Getting an answer** is the gate, and it lives in **Administración → Cuentas →
+Quién puede usar el bot**: pick the Discord roles the bot serves. Anyone without
+one of them gets a private refusal naming the role they are missing, so they know
+what to ask a leader for. Leave it empty — the factory state — and the bot
+answers anyone whose Discord is linked to a guild account.
+
+Role **ids** are what get stored, so renaming a role in Discord changes nothing.
+If the roles are ever rebuilt from scratch, re-pick them on that screen; no
+deploy involved. Linking an account and being active on the roster are still
+required either way — the role is an extra condition, not a replacement.
+
+This was briefly done the other way round, by registering the commands as
+*available to nobody* and granting them per role in Server Settings →
+Integrations. It kept them out of the menu for the hundreds of people who are in
+the Discord server but not in the guild, at the price of taking them away from
+the guild itself until a leader remembered a Discord panel: anyone who was not a
+Discord administrator lost the bot from one deploy to the next. If you ever set
+those per-role overrides, **clear them** — an override stored in Discord beats
+what the app registers, so a stale one still hides the commands from your
+members. That screen remains the fastest way to pull a command from everyone if
+one ever misbehaves.
 
 ### The agenda
 

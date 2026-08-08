@@ -72,6 +72,8 @@ import {
   nombreDeInteraccion,
   quienManda,
   registerCommands,
+  getBotRoles,
+  setBotRoles,
   publicarEvento,
   refrescarEvento,
   repintarEvento,
@@ -454,6 +456,22 @@ app.get('/api/events/config/roles', requireAuth, asHandler(async (_req, res) => 
     bot: botEnabled(),
     roles: botEnabled() ? await listGuildRoles().catch(() => []) : [],
   });
+}));
+
+// A qué roles del servidor atiende el bot. Vacío es a todo el mundo, que es el
+// estado de fábrica: un gremio que no lo configure tiene el bot abierto, no
+// roto. Se lee con la misma llave con la que se escribe porque esta lista sólo
+// se enseña en Administración, y ahí ya se está dentro.
+app.get('/api/discord/bot-roles', requireAuth, requirePermission('users.manage'), asHandler(async (_req, res) => {
+  res.json({
+    bot: botEnabled(),
+    roles: botEnabled() ? await listGuildRoles().catch(() => []) : [],
+    allowed: await getBotRoles(),
+  });
+}));
+
+app.put('/api/discord/bot-roles', requireAuth, requirePermission('users.manage'), asHandler(async (req, res) => {
+  res.json({ allowed: await setBotRoles(req.body?.allowed ?? []) });
 }));
 
 // El canal donde se publican las encuestas, elegido de una lista y no copiado a
