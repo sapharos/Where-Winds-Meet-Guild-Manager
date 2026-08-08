@@ -112,6 +112,29 @@ interface Countdown {
   remaining: number;
 }
 
+/**
+ * El color de cada reloj, como peldaño de rampa y no como número.
+ *
+ * Estaba escrito a mano -- `#a3e635` para la jungla, `#f87171` para el boss, y
+ * `#e2e8f0` para las cifras -- y eso es un tema oscuro cableado dentro de un
+ * producto que tiene dos. En claro la cifra caía en gris casi blanco sobre una
+ * tarjeta casi blanca y no se leía (docs/DIRECCION_VISUAL.md §2). Los peldaños
+ * se resuelven contra la variable del tema vigente, así que el mismo nombre
+ * vale de día y de noche.
+ *
+ * El 500 y no el 400 a propósito: es el peldaño que pasa AA en los dos temas
+ * sobre la superficie de tarjeta, que es donde cae.
+ */
+const TONOS = {
+  jungla: '--s-500',
+  boss: '--d-500',
+} as const;
+
+type Tono = keyof typeof TONOS;
+
+const tinta = (tono: Tono, alpha?: number) =>
+  alpha === undefined ? `rgb(var(${TONOS[tono]}))` : `rgb(var(${TONOS[tono]}) / ${alpha})`;
+
 const clock = (ms: number) => {
   const total = Math.max(0, Math.ceil(ms / 1000));
   return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
@@ -153,6 +176,66 @@ function bossWindow(elapsed: number): BossWindow | null {
   };
 }
 
+/**
+ * Un reloj, con la misma pauta que las fichas del tablero: superficie opaca
+ * del tema, y el color del evento sólido y pequeño -- la barra del canto y el
+ * icono. Era un lavado del color al 6% sobre un fondo oscuro fijo, y eso en
+ * tema claro es un color al 6% sobre blanco, que no es nada.
+ *
+ * La cifra es tinta del tema salvo cuando el momento ha llegado: entonces se
+ * tiñe, que es la única vez que el color dice algo que el número no diga ya.
+ *
+ * Va fuera del componente y no dentro, que es donde vivía su antecesor. Una
+ * función declarada dentro del `render` es un tipo nuevo en cada pasada, así
+ * que React desmonta y vuelve a montar lo que devuelve -- cuatro veces por
+ * segundo, que es lo que tarda el reloj en latir. El `animate-pulse` se
+ * reiniciaba antes de llegar a ninguna parte y la ventana abierta no llegaba
+ * a parpadear nunca.
+ */
+const Reloj: React.FC<{
+  tono: Tono;
+  icon: string;
+  /** Lo que hay encima: el nombre del evento o su ventana. */
+  etiqueta: string;
+  /** La cifra, o null si ya no queda nada que contar. */
+  valor: string | null;
+  /** La línea de abajo, si el reloj cuenta algo que hay que explicar. */
+  pie?: string;
+  /** Si esto es ya: cuenta atrás dentro del aviso, o ventana abierta. */
+  urgente: boolean;
+}> = ({ tono, icon, etiqueta, valor, pie, urgente }) => (
+  <div
+    className={`relative overflow-hidden flex items-center gap-3 rounded-lg border bg-slate-900 pl-4 pr-4 py-2 ${
+      urgente ? 'animate-pulse' : ''
+    }`}
+    style={{ borderColor: valor ? tinta(tono, urgente ? 1 : 0.4) : 'rgb(var(--n-800))' }}
+  >
+    {/* La barra del canto: 4 px de color sólido, que es lo único que no
+        depende de contra qué fondo cae. Recortada por la tarjeta. */}
+    <span
+      aria-hidden
+      className="absolute left-0 top-0 bottom-0 w-1"
+      style={{ backgroundColor: valor ? tinta(tono) : 'rgb(var(--n-800))' }}
+    />
+    <i
+      className={`fa-solid ${icon} text-lg`}
+      style={{ color: valor ? tinta(tono) : 'rgb(var(--n-700))' }}
+    ></i>
+    <div>
+      <p className="text-[10px] uppercase tracking-wider text-slate-500">{etiqueta}</p>
+      <p
+        className={`text-2xl font-bold tabular-nums leading-none ${
+          valor ? (urgente ? '' : 'text-slate-100') : 'text-slate-700'
+        }`}
+        style={urgente && valor ? { color: tinta(tono) } : undefined}
+      >
+        {valor ?? '--:--'}
+      </p>
+      {pie && <p className="text-[10px] text-slate-500 mt-0.5">{pie}</p>}
+    </div>
+  </div>
+);
+
 interface Props {
   /** When the war began, as the server told it. */
   startedAt: string;
@@ -180,7 +263,7 @@ const WarTimers: React.FC<Props> = ({ startedAt, offset, canCall }) => {
   const [warnings, setWarnings] = useState<'off' | 'on'>('off');
   const fired = useRef<Set<string>>(new Set());
   const audio = useRef<AudioContext | null>(null);
-  const [toast, setToast] = useState<{ title: string; sub: string; colour: string } | null>(null);
+  const [toast, setToast] = useState<{ title: string; sub: string; tono: Tono } | null>(null);
   const clearing = useRef<number | undefined>(undefined);
   /** Los gritos ya enseñados: el sondeo devuelve el mismo hasta que caduca. */
   const heard = useRef<Set<string>>(new Set());
@@ -202,13 +285,13 @@ const WarTimers: React.FC<Props> = ({ startedAt, offset, canCall }) => {
   const announce = (
     title: string,
     sub: string,
-    colour: string,
+    tono: Tono,
     alarm: { tone: [number, number][]; buzz: number[]; tag: string },
   ) => {
     // The banner is for everyone in the room. It asks no permission and makes
     // no noise, so there is no reason to keep it from the people who are only
     // there to fight.
-    setToast({ title, sub, colour });
+    setToast({ title, sub, tono });
     window.clearTimeout(clearing.current);
     clearing.current = window.setTimeout(() => setToast(null), 8_000);
 
@@ -242,7 +325,7 @@ const WarTimers: React.FC<Props> = ({ startedAt, offset, canCall }) => {
       if (fired.current.has(key)) return;
       fired.current.add(key);
 
-      announce(jungle.label, `en ${warning.label}`, '#a3e635', {
+      announce(jungle.label, `en ${warning.label}`, 'jungla', {
         tone: warning.tone,
         buzz: warning.buzz,
         tag: key,
@@ -260,7 +343,7 @@ const WarTimers: React.FC<Props> = ({ startedAt, offset, canCall }) => {
       announce(
         CALL_SPOT_LABELS[call.spot],
         call.by ? `¡Sale ahora! · lo canta ${call.by}` : '¡Sale ahora!',
-        '#f87171',
+        'boss',
         { tone: CALL_TONE, buzz: CALL_BUZZ, tag: call.id },
       );
     };
@@ -343,7 +426,7 @@ const WarTimers: React.FC<Props> = ({ startedAt, offset, canCall }) => {
         body: JSON.stringify({ spot }),
       });
       heard.current.add(out.call.id);
-      announce(CALL_SPOT_LABELS[spot], '¡Sale ahora! · lo cantas tú', '#f87171', {
+      announce(CALL_SPOT_LABELS[spot], '¡Sale ahora! · lo cantas tú', 'boss', {
         tone: CALL_TONE,
         buzz: CALL_BUZZ,
         tag: out.call.id,
@@ -355,69 +438,6 @@ const WarTimers: React.FC<Props> = ({ startedAt, offset, canCall }) => {
     }
   };
 
-  const Face: React.FC<{ event: Countdown | null; name: string; icon: string; colour: string }> = ({
-    event,
-    name,
-    icon,
-    colour,
-  }) => {
-    const close = event !== null && event.remaining <= WARNING_MS;
-    return (
-      <div
-        className={`flex items-center gap-3 rounded-lg border px-4 py-2 ${close ? 'animate-pulse' : ''}`}
-        style={{
-          borderColor: event ? `${colour}${close ? 'ff' : '66'}` : '#1e293b',
-          background: `${colour}${close ? '26' : '0f'}`,
-        }}
-      >
-        <i className={`fa-solid ${icon} text-lg`} style={{ color: event ? colour : '#475569' }}></i>
-        <div>
-          <p className="text-[10px] uppercase tracking-wider text-slate-400">
-            {event ? event.label : name}
-          </p>
-          <p
-            className="text-2xl font-bold tabular-nums leading-none"
-            style={{ color: event ? (close ? colour : '#e2e8f0') : '#475569' }}
-          >
-            {event ? clock(event.remaining) : '--:--'}
-          </p>
-        </div>
-      </div>
-    );
-  };
-
-  /**
-   * La ventana del boss, que no es una cuenta atrás sino un aviso de que hay
-   * que mirar. Abierta dice cuánto falta para el próximo salto de treinta
-   * segundos, que es cuando puede aparecer; cerrada, cuánto falta para que
-   * empiece a poder.
-   */
-  const rojo = '#f87171';
-  const VentanaBoss = () => (
-    <div
-      className={`flex items-center gap-3 rounded-lg border px-4 py-2 ${boss?.open ? 'animate-pulse' : ''}`}
-      style={{
-        borderColor: boss ? `${rojo}${boss.open ? 'ff' : '66'}` : '#1e293b',
-        background: `${rojo}${boss?.open ? '26' : '0f'}`,
-      }}
-    >
-      <i className="fa-solid fa-dragon text-lg" style={{ color: boss ? rojo : '#475569' }}></i>
-      <div>
-        <p className="text-[10px] uppercase tracking-wider text-slate-400">
-          {boss ? `Boss ${boss.index} · ${mark(boss.from)}–${mark(boss.to)}` : 'Boss'}
-        </p>
-        <p
-          className="text-2xl font-bold tabular-nums leading-none"
-          style={{ color: boss ? (boss.open ? rojo : '#e2e8f0') : '#475569' }}
-        >
-          {boss ? clock(boss.remaining) : '--:--'}
-        </p>
-        <p className="text-[10px] text-slate-500 mt-0.5">
-          {!boss ? 'no quedan' : boss.open ? 'para el próximo salto' : 'para que pueda salir'}
-        </p>
-      </div>
-    </div>
-  );
 
   return (
     <>
@@ -444,20 +464,20 @@ const WarTimers: React.FC<Props> = ({ startedAt, offset, canCall }) => {
             // ella: mezclados, el color teñía la pantalla entera y lo que había
             // detrás seguía leyéndose a través, que es justo lo que un aviso no
             // debe permitir.
-            background: `radial-gradient(circle at 50% 42%, ${toast.colour}30 0%, transparent 58%), rgb(var(--n-950) / 0.97)`,
+            background: `radial-gradient(circle at 50% 42%, ${tinta(toast.tono, 0.19)} 0%, transparent 58%), rgb(var(--n-950) / 0.97)`,
             backdropFilter: 'blur(4px)',
           }}
         >
           <span
             className="rounded-full border-2 px-4 py-1 text-[11px] uppercase tracking-[0.2em] font-bold animate-pulse"
-            style={{ borderColor: toast.colour, color: toast.colour }}
+            style={{ borderColor: tinta(toast.tono), color: tinta(toast.tono) }}
           >
             Aviso
           </span>
 
           <span
             className="cinzel text-[clamp(2.75rem,14vw,6rem)] font-bold leading-[0.95] drop-shadow-lg"
-            style={{ color: toast.colour, textShadow: `0 0 44px ${toast.colour}80` }}
+            style={{ color: tinta(toast.tono), textShadow: `0 0 44px ${tinta(toast.tono, 0.5)}` }}
           >
             {toast.title}
           </span>
@@ -480,8 +500,26 @@ const WarTimers: React.FC<Props> = ({ startedAt, offset, canCall }) => {
         </p>
       </div>
 
-      <Face event={jungle} name="Jungla" icon="fa-leaf" colour="#a3e635" />
-      <VentanaBoss />
+      <Reloj
+        tono="jungla"
+        icon="fa-leaf"
+        etiqueta={jungle ? jungle.label : 'Jungla'}
+        valor={jungle ? clock(jungle.remaining) : null}
+        urgente={jungle !== null && jungle.remaining <= WARNING_MS}
+      />
+
+      {/* La ventana del boss, que no es una cuenta atrás sino un aviso de que
+          hay que mirar. Abierta cuenta lo que falta para el próximo salto de
+          treinta segundos, que es cuando puede aparecer; cerrada, lo que falta
+          para que empiece a poder. */}
+      <Reloj
+        tono="boss"
+        icon="fa-dragon"
+        etiqueta={boss ? `Boss ${boss.index} · ${mark(boss.from)}–${mark(boss.to)}` : 'Boss'}
+        valor={boss ? clock(boss.remaining) : null}
+        pie={!boss ? 'no quedan' : boss.open ? 'para el próximo salto' : 'para que pueda salir'}
+        urgente={boss?.open === true}
+      />
 
       {/*
         Los dos botones del grito.
@@ -504,13 +542,22 @@ const WarTimers: React.FC<Props> = ({ startedAt, offset, canCall }) => {
               onClick={() => void cantar(spot)}
               disabled={calling !== null}
               title={`Avisar a todas las líneas de que el boss salió ${label.toLowerCase()}`}
-              className="min-h-tap px-4 py-2 rounded-lg border-2 border-red-500/70 bg-red-500/10 text-red-300 hover:bg-red-500/25 hover:text-red-100 disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center gap-2 font-bold"
+              // Relleno y no contorno, que era un texto teñido sobre un lavado
+              // al 10%: en tema claro se quedaba en 3,94 sobre la tarjeta, por
+              // debajo de AA para los 16 px en negrita que tiene. Los peldaños
+              // de relleno de la rampa (600-950) existen justo para esto --
+              // llevan texto blanco y valen en los dos temas, así que el
+              // contraste deja de depender de cuál esté puesto.
+              //
+              // Y es además lo que estos dos botones son. Un contorno se lee
+              // como una etiqueta; esto es la acción más urgente de la pantalla.
+              className="min-h-tap px-4 py-2 rounded-lg bg-red-700 hover:bg-red-600 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center gap-2 font-bold shadow-sm"
             >
               <i
                 className={`fa-solid ${calling === spot ? 'fa-circle-notch fa-spin' : icon} text-lg`}
               ></i>
               <span className="text-left leading-tight">
-                <span className="block text-[9px] uppercase tracking-wider text-red-400/80 font-normal">
+                <span className="block text-[9px] uppercase tracking-wider text-white/75 font-normal">
                   Cantar boss
                 </span>
                 {label}
