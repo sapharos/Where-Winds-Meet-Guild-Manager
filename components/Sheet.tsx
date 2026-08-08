@@ -44,7 +44,22 @@ const UMBRAL = 96;
 
 const Sheet: React.FC<Props> = ({ title, subtitle, size = 'md', footer, onClose, children }) => {
   const caja = useRef<HTMLDivElement>(null);
-  const devolverFoco = useRef<HTMLElement | null>(null);
+  /**
+   * Quién tenía el foco antes de abrir, para devolvérselo al cerrar.
+   *
+   * Se lee en el primer render y no en un efecto, porque un efecto llega
+   * tarde: React aplica el `autoFocus` del contenido al montar, o sea antes,
+   * así que lo que se guardaba era el campo de dentro de la hoja. Al cerrar se
+   * intentaba devolver el foco a un elemento que se estaba desmontando, no
+   * pasaba nada, y acababa en el `body` -- justo el «principio del documento»
+   * que esto venía a evitar. En el primer render el foco todavía está en el
+   * botón que abrió la hoja, que es lo que hay que recordar.
+   */
+  const devolverFoco = useRef<HTMLElement | null>(
+    typeof document === 'undefined' ? null : (document.activeElement as HTMLElement),
+  );
+  /** A quién se le dio el foco al abrir. Ver el efecto de más abajo. */
+  const objetivo = useRef<HTMLElement | null>(null);
   // Cuánto se ha arrastrado hacia abajo. Sólo `transform`, nunca `top`.
   const [arrastre, setArrastre] = useState(0);
   const inicio = useRef<number | null>(null);
@@ -95,9 +110,29 @@ const Sheet: React.FC<Props> = ({ title, subtitle, size = 'md', footer, onClose,
 
   /** Escape cierra, y el tabulador no se escapa de la hoja. */
   useEffect(() => {
-    devolverFoco.current = document.activeElement as HTMLElement;
-    const dentro = caja.current?.querySelectorAll<HTMLElement>(FOCO);
-    dentro?.[0]?.focus();
+    /*
+      Dónde va el cursor al abrir, decidido una sola vez.
+
+      Varios formularios ponen `autoFocus` en su primer campo -- el alta de
+      miembro, iniciar guerra, los conjuntos de armas --, y llevarse el foco a
+      la X es contradecirles: se abría el formulario con el cursor en el botón
+      de cerrar y había que ir a buscar el campo con el ratón. Así que si el
+      contenido ya dijo dónde lo quiere, se respeta; y si no dijo nada, el
+      primer elemento de la hoja.
+
+      La decisión se guarda porque en `StrictMode` esto se monta, se desmonta y
+      se vuelve a montar: la limpieza de en medio devuelve el foco al botón que
+      abrió la hoja, así que en la segunda vuelta ya no habría rastro del
+      `autoFocus` y se acabaría enfocando la X igual. Recordando el elemento se
+      repite la misma decisión en las dos vueltas, y en producción -- una sola
+      vuelta -- hace exactamente lo mismo.
+    */
+    if (!objetivo.current) {
+      objetivo.current = caja.current?.contains(document.activeElement)
+        ? (document.activeElement as HTMLElement)
+        : caja.current?.querySelector<HTMLElement>(FOCO) ?? null;
+    }
+    objetivo.current?.focus();
 
     const alPulsar = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
