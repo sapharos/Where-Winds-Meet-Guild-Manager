@@ -179,11 +179,12 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit, canVo
   // tácticas traen su canal puesto: se las puede reunir aunque nadie haya
   // rellenado todavía las ranuras de las líneas.
   const [vozBot, setVozBot] = useState(false);
-  // Los canales del servidor, para colgarle uno a una unidad táctica. Sólo se
-  // piden si se pueden usar: sin bot no hay nada que elegir, y sin war.edit
-  // tampoco hay dónde guardarlo.
+  // Los canales del servidor, sólo para poder nombrar el de cada unidad. El
+  // canal se elige en Estrategias, al escribir el plan; aquí se lee.
   const [canalesVoz, setCanalesVoz] = useState<DiscordVoiceChannel[]>([]);
-  const puedeAsignarVoz = canEdit && canalesVoz.length > 0;
+  /** El nombre del canal, o su marca genérica si el bot ya no lo ve. */
+  const nombreDeCanal = (id: string) =>
+    canalesVoz.find((c) => c.id === id)?.name ?? 'Canal de voz propio';
   // El cuerno manual: la hoja, el panel de sonidos, y la selección en curso.
   const [cuernoAbierto, setCuernoAbierto] = useState(false);
   const [sonidos, setSonidos] = useState<DiscordSoundboardSound[] | null>(null);
@@ -221,9 +222,9 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit, canVo
       ).catch(() => null);
       setVozBot(Boolean(voz?.bot));
       if (canVoice) setVozCanales(voz?.bot ? voz.channels : {});
-      // La lista entera sólo la necesita quien puede asignar: el que sólo mueve
-      // gente ve el canal de la unidad por su nombre en el propio desplegable.
-      if (canEdit && voz?.bot) {
+      // La lista entera, sólo para poner nombre al canal de cada unidad: un
+      // «Reunir» que no dice adónde lleva es un botón que hay que probar.
+      if (canVoice && voz?.bot) {
         setCanalesVoz(await api<DiscordVoiceChannel[]>('/war/voice/channels').catch(() => []));
       }
     }
@@ -638,33 +639,6 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit, canVo
       setError(err instanceof Error ? err.message : 'No se pudo mover a nadie');
     } finally {
       setMoviendo(false);
-    }
-  };
-
-  /**
-   * Le pone canal de voz a una unidad, o se lo quita.
-   *
-   * El canal vive dentro de la unidad, así que esto guarda la estrategia
-   * entera. Se pinta al momento y se revierte si falla, como el resto del
-   * tablero: entre elegir el canal y llamar a la unidad no suele haber ni un
-   * segundo, y un desplegable que tarda en confirmarse se vuelve a tocar.
-   */
-  const asignarCanal = async (unitId: string, channelId: string) => {
-    if (!strategy) return;
-    const before = strategies;
-    const next: WarStrategy = {
-      ...strategy,
-      units: strategy.units.map((u) =>
-        u.id === unitId ? { ...u, voiceChannelId: channelId || null } : u,
-      ),
-    };
-    setError(null);
-    setStrategies(strategies.map((s) => (s.id === strategy.id ? next : s)));
-    try {
-      await api('/war/strategies', { method: 'PUT', body: JSON.stringify({ strategy: next }) });
-    } catch (err) {
-      setStrategies(before);
-      setError(err instanceof Error ? err.message : 'No se pudo asignar el canal');
     }
   };
 
@@ -1160,34 +1134,20 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit, canVo
                     desplegado --, así que se ofrece aunque no lo tenga: si se
                     reunió a mano, el camino de vuelta sigue estando.
                   */}
-                  {(puedeAsignarVoz || (canVoice && vozBot)) && (
+                  {canVoice && vozBot && (
                     <div className="mt-3 pt-2 border-t border-slate-800/70 space-y-2">
-                      {puedeAsignarVoz ? (
-                        <select
-                          value={unit.voiceChannelId ?? ''}
-                          onChange={(e) => void asignarCanal(unit.id, e.target.value)}
-                          aria-label={`Canal de voz de ${unit.name || 'la unidad'}`}
-                          title="Dónde se reúne esta unidad"
-                          className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-[11px] text-slate-300 outline-none focus:ring-1 focus:ring-amber-500"
-                        >
-                          <option value="">— sin canal de voz —</option>
-                          {canalesVoz.map((c) => (
-                            <option key={c.id} value={c.id}>
-                              🔊 {c.name}
-                            </option>
-                          ))}
-                        </select>
-                      ) : (
-                        unit.voiceChannelId && (
-                          <p className="text-[10px] text-slate-500 truncate">
-                            <i className="fa-solid fa-headset mr-1.5"></i>
-                            Tiene canal de voz propio
-                          </p>
-                        )
+                      {/* Sólo de lectura: el canal se elige al escribir el plan,
+                          en Estrategias, porque es parte de lo que la unidad es
+                          y no todas necesitan uno. Aquí se dice cuál es, para
+                          que «Reunir» no sea un botón que no dice adónde. */}
+                      {unit.voiceChannelId && (
+                        <p className="text-[10px] text-slate-500 truncate">
+                          <i className="fa-solid fa-headset mr-1.5"></i>
+                          {nombreDeCanal(unit.voiceChannelId)}
+                        </p>
                       )}
 
-                      {canVoice && vozBot && (
-                        <div className="flex gap-1.5">
+                      <div className="flex gap-1.5">
                           <button
                             disabled={moviendo || !unit.voiceChannelId || !members.length}
                             onClick={() => void moverUnidad(unit, 'gather')}
@@ -1216,8 +1176,7 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit, canVo
                             <i className="fa-solid fa-arrow-rotate-left"></i>
                             Devolver
                           </button>
-                        </div>
-                      )}
+                      </div>
                     </div>
                   )}
                 </section>

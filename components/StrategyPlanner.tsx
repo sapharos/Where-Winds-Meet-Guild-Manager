@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../services/authService';
 import {
+  DiscordVoiceChannel,
   LANE_CAPACITY,
   RoleTargets,
   TacticalUnit,
@@ -77,6 +78,8 @@ const StrategyPlanner: React.FC<Props> = ({ side, canEdit, onClose, onSaved }) =
   const [message, setMessage] = useState<{ text: string; ok: boolean } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [iconFor, setIconFor] = useState<{ strategy: number; unit: string } | null>(null);
+  /** Los canales de voz del servidor. Vacío si no hay bot: entonces no se ofrece. */
+  const [canalesVoz, setCanalesVoz] = useState<DiscordVoiceChannel[]>([]);
 
   const load = async () => {
     const all = await api<WarStrategy[]>('/war/strategies').catch(() => []);
@@ -86,6 +89,14 @@ const StrategyPlanner: React.FC<Props> = ({ side, canEdit, onClose, onSaved }) =
   useEffect(() => {
     void load();
   }, [side]);
+
+  // Una vez y no por bando: los canales del servidor son los mismos para los
+  // dos, y cambiar de pestaña no es motivo para volver a preguntárselos.
+  useEffect(() => {
+    void api<DiscordVoiceChannel[]>('/war/voice/channels')
+      .then(setCanalesVoz)
+      .catch(() => setCanalesVoz([]));
+  }, []);
 
   const patch = (index: number, changes: Partial<WarStrategy>) =>
     setDrafts((prev) => (prev ?? []).map((s, i) => (i === index ? { ...s, ...changes } : s)));
@@ -377,6 +388,41 @@ const StrategyPlanner: React.FC<Props> = ({ side, canEdit, onClose, onSaved }) =
                             </button>
                           )}
                         </div>
+
+                        {/*
+                          El canal donde se reúne la unidad, si es que se
+                          reúne. Va aquí y no en el tablero porque es parte de
+                          lo que la unidad es: quien escribe el plan sabe que
+                          la escolta necesita hablar aparte y que los
+                          campamentos no. En mitad de una guerra ya no es una
+                          decisión, es una casilla que rellenar con prisa.
+
+                          «Sin canal» primero y por defecto: la mayoría de las
+                          unidades no lo necesitan, y la lista sólo aparece si
+                          hay bot que la sirva -- un desplegable vacío sería
+                          preguntar algo que no se puede contestar.
+                        */}
+                        {canalesVoz.length > 0 && (
+                          <select
+                            value={unit.voiceChannelId ?? ''}
+                            disabled={!canEdit}
+                            onChange={(e) =>
+                              patchUnit(index, unit.id, { voiceChannelId: e.target.value || null })
+                            }
+                            title="Dónde se reúne esta unidad, si necesita canal propio"
+                            aria-label={`Canal de voz de ${unit.name || 'la unidad'}`}
+                            className={`w-full sm:w-36 shrink-0 bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs outline-none focus:ring-1 focus:ring-amber-500 ${
+                              unit.voiceChannelId ? 'text-slate-300' : 'text-slate-600'
+                            }`}
+                          >
+                            <option value="">— sin canal —</option>
+                            {canalesVoz.map((c) => (
+                              <option key={c.id} value={c.id}>
+                                🔊 {c.name}
+                              </option>
+                            ))}
+                          </select>
+                        )}
 
                         <div className="flex gap-2 sm:contents">
                           {ROLES.map((role) => (

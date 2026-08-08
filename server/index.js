@@ -789,12 +789,15 @@ app.post('/api/war/voice/move', requireAuth, requirePermission('war.voice'), asH
 }));
 
 // Los canales del servidor, para poder colgarle uno a una unidad táctica sin
-// pasar por el panel de administración: quien arma la guerra inventa las
-// unidades sobre la marcha, y pedirle a un administrador que le abra una
-// ranura cada vez es no tener la función. Con war.edit, que es el permiso de
-// escribir el plan, y no con users.manage: los nombres de los canales de voz
-// ya los ve cualquiera desde Discord.
-app.get('/api/war/voice/channels', requireAuth, requirePermission('war.edit'), asHandler(async (_req, res) => {
+// pasar por el panel de administración: quien escribe la estrategia inventa las
+// unidades sobre la marcha, y pedirle a un administrador que le abra una ranura
+// cada vez es no tener la función.
+//
+// Sólo sesión, como el mapa de ranuras de al lado y por lo mismo: lo leen dos
+// pantallas con permisos distintos -- el planificador para elegir, el tablero
+// para poder nombrar el canal en el que se reúne cada unidad -- y el nombre de
+// un canal de voz ya lo ve cualquiera del gremio desde el propio Discord.
+app.get('/api/war/voice/channels', requireAuth, asHandler(async (_req, res) => {
   if (!botEnabled()) {
     return res.status(503).json({ error: 'el bot de Discord no está configurado' });
   }

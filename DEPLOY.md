@@ -419,16 +419,23 @@ four one-click moves: gather everyone in the general channel, split by side,
 spread each deployed member to their lane's channel, or gather just the lane
 leaders.
 
-**Tactical units get their own channel.** A unit — escorting the coffin, holding
-the camps — draws from all three lanes, so it is the one group the slot map
-cannot address. Instead the channel hangs off the unit itself: on each unit's
-card in the Sala de Guerra, anyone with *war.edit* picks a voice channel from a
-dropdown, and anyone with *war.voice* then gets two buttons. **Reunir** takes
-everyone assigned to that unit into its channel; **Devolver** sends each of them
-back to the channel of the lane they are deployed in, which is the only home the
-board knows for them. Devolver works whether or not the unit has a channel, so a
-unit gathered by hand still has a way back. Deleting the unit takes the
-assignment with it, leaving no orphan slot behind.
+**Tactical units can have their own channel.** A unit — escorting the coffin,
+holding the camps — draws from all three lanes, so it is the one group the slot
+map cannot address. Instead the channel hangs off the unit itself, chosen where
+the unit is designed: in **Estrategias**, each unit has a channel dropdown that
+starts at *sin canal*. Most units never need one — the escort has to talk apart,
+the camps do not — so it is left optional rather than being one more box to fill
+in during a war.
+
+On the war board, anyone with *war.voice* then gets two buttons per unit.
+**Reunir** takes everyone assigned to that unit into its channel, and is
+unavailable for a unit that has none. **Devolver** sends each of them back to the
+channel of the lane they are deployed in, which is the only home the board knows
+for them; it works whether or not the unit has a channel, so a unit gathered by
+hand still has a way back. The board shows which channel a unit gathers in but
+does not let you change it — that is a decision for the plan, not for the middle
+of a battle. Deleting the unit takes the assignment with it, leaving no orphan
+slot behind.
 
 Two things Discord requires for this to work:
 
