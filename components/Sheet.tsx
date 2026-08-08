@@ -49,7 +49,31 @@ const Sheet: React.FC<Props> = ({ title, subtitle, size = 'md', footer, onClose,
   const [arrastre, setArrastre] = useState(0);
   const inicio = useRef<number | null>(null);
 
-  const cerrar = useCallback(() => onClose(), [onClose]);
+  /**
+   * Cerrar, con identidad fija de por vida.
+   *
+   * `onClose` casi siempre llega como una función escrita en el sitio
+   * -- `onClose={() => setFormOpen(false)}` --, así que es nueva en cada render
+   * del padre. Colgar de ella un `useCallback` hacía que `cerrar` cambiase
+   * también, y con él las dependencias del efecto de abajo: el efecto se
+   * limpiaba y se volvía a montar, y al montarse mueve el foco al primer
+   * elemento de la hoja, que es la X de cerrar.
+   *
+   * En un formulario cuyo estado vive en el mismo componente que pinta la hoja
+   * -- el alta de miembro, las formaciones -- eso pasaba con **cada tecla**:
+   * escribías una letra, el padre se repintaba, y el foco se iba al botón de
+   * cerrar. Sólo en ésos, porque son los que se repintan al teclear; los que
+   * reciben un `onClose` estable nunca lo hicieron, que es lo que hacía que el
+   * fallo pareciera cosa de dos formularios sueltos.
+   *
+   * La referencia se actualiza después de cada render, así que Escape y el
+   * velo siguen llamando al `onClose` de ahora y no al del primer render.
+   */
+  const ultimoCierre = useRef(onClose);
+  useEffect(() => {
+    ultimoCierre.current = onClose;
+  });
+  const cerrar = useCallback(() => ultimoCierre.current(), []);
 
   /**
    * Bloquea el scroll de detrás mientras la hoja está abierta.
