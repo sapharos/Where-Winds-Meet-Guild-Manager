@@ -7,9 +7,10 @@ so you drive the interface yourself at whatever pace you like.
     python capture.py --calibrate     # check the regions line up, once
     python capture.py                 # then leave this running and browse
 
-Frames are only kept once the picture has held still for a moment, so
-scrolling never leaves a smeared half-frame behind, and anything already
-captured is skipped. Browsing the same member twice costs nothing.
+Se guarda un fotograma cada vez que la imagen cambia y se queda quieta, asi
+que un scroll nunca deja media pantalla borrosa, y mirar sin tocar nada no
+escribe nada. Volver a un miembro escribe otro PNG y no pasa nada: parse.py
+ya vota entre fotogramas repetidos.
 
 Press Ctrl+C in this window when you are done.
 """
@@ -84,10 +85,24 @@ class Identifier:
 
     def __init__(self, announce, cache_path: Path):
         self.announce = announce
-        self.queue: queue.Queue = queue.Queue()
+        # LIFO y no FIFO: reconocer cuesta un par de segundos y tu vas mas
+        # rapido que eso, asi que cuando hay cola lo que sale por consola es de
+        # hace varios miembros -- justo lo que se siente como que se ha colgado.
+        # Atendiendo el ultimo, lo que lees es del que tienes delante. No se
+        # descarta nada: los de atras se leen igual, solo despues, y el recuento
+        # de campos es un conjunto, asi que el orden no cambia el resultado.
+        self.queue: queue.LifoQueue = queue.LifoQueue()
         self.uids: dict[str, str] = {}
         self.panels: dict[str, int] = {}
         self.fields: dict[str, set] = {}
+        # Cuando se capturo cada panel y de quien era, para poder poner el UID
+        # bajo el nombre real y no bajo un mote de secta. Mismo criterio que
+        # parse.py, que ya lo hacia al final; aqui faltaba, y por eso los avisos
+        # de "sin UID" mentian con esos miembros.
+        self.panel_times: list[tuple[float, str]] = []
+        # Popups leidos cuyo panel todavia no ha llegado. Con la cola al reves
+        # el panel de al lado puede leerse despues, asi que se reintenta.
+        self.popups_sueltos: list[tuple[float, dict]] = []
         self.parse = None
         self.wanted: set = set()
         self.ready = threading.Event()
@@ -127,10 +142,18 @@ class Identifier:
             return f"   {BOLD}sube al principio{RESET}"
         return ""
 
-    def submit(self, kind: str, image: Image.Image, filename: str) -> None:
+    def submit(self, kind: str, image: Image.Image, filename: str, when: float) -> None:
         with self.lock:
             self.pending += 1
-        self.queue.put((kind, image, filename))
+        self.queue.put((kind, image, filename, when))
+
+    def waiting(self) -> int:
+        """Cuantos fotogramas quedan por leer, para poder decirlo en pantalla.
+
+        Una cola invisible es lo que convierte "va con retraso" en "se ha
+        colgado": con el numero delante se ve que avanza y cuanto falta."""
+        with self.lock:
+            return self.pending
 
     def drain(self, timeout: float = 20.0) -> None:
         """Espera a que no quede nada por leer, ni en la cola ni en la mano.
@@ -161,7 +184,7 @@ class Identifier:
         self.ready.set()
 
         while True:
-            kind, image, filename = self.queue.get()
+            kind, image, filename, when = self.queue.get()
             try:
                 readings = parse.run_ocr(engine, image, self.cache, filename)
                 # Cada pocos fotogramas, por si la sesion acaba de mala manera:
@@ -170,13 +193,16 @@ class Identifier:
                 if self.dirty >= 10:
                     self.save_cache()
                 if kind == "list":
-                    self._report_popup(parse.read_popup(readings, image.width, image.height))
+                    self._report_popup(
+                        parse.read_popup(readings, image.width, image.height), when
+                    )
                 else:
                     self._report_panel(
                         parse.read_header(readings, image.width, image.height),
                         readings,
                         image.width,
                         image.height,
+                        when,
                     )
             except Exception as err:  # noqa: BLE001
                 self.announce(f"{GREY}       (no se pudo leer: {err}){RESET}")
@@ -184,23 +210,79 @@ class Identifier:
                 with self.lock:
                     self.pending -= 1
 
-    def _report_popup(self, found) -> None:
+    # Lo mismo que SAME_CLICK_SECONDS en parse.py: pulsar el retrato cambia las
+    # dos regiones a la vez, asi que el panel de ese instante lleva el nombre
+    # real del que el popup puede estar enseñando un mote.
+    MISMO_CLIC = 3.0
+
+    def _al_lado(self, cuando: float) -> str | None:
+        """De quien era el panel capturado en ese mismo momento."""
+        cerca = [(abs(t - cuando), nombre) for t, nombre in self.panel_times
+                 if abs(t - cuando) <= self.MISMO_CLIC]
+        return min(cerca)[1] if cerca else None
+
+    def _anotar_uid(self, found: dict, cuando: float) -> bool:
+        """Guarda el UID bajo el nombre real. False si aun no se sabe cual es.
+
+        Un mote es un nombre que no es de nadie: si lo que enseña el popup ya
+        lo ha producido algun panel, es el miembro y no un mote, por cerca que
+        esten los dos fotogramas. Misma regla que parse.py -- tenerla escrita
+        dos veces distintas seria tener una que se contradice."""
+        leido = found["nameAsRead"]
+        real = self._al_lado(cuando)
+        if leido in self.panels or real is None:
+            self.uids[leido] = found["uid"]
+            return True
+        if real != leido:
+            self.uids[real] = found["uid"]
+            self.announce(f"{GREY}       '{leido}' es el mote de {real}{RESET}")
+        else:
+            self.uids[real] = found["uid"]
+        return True
+
+    def _report_popup(self, found, cuando: float) -> None:
         # A list frame without a popup is just a scroll; saying so every time
         # would bury the reports that matter.
         if not found:
             return
-        self.uids[found["nameAsRead"]] = found["uid"]
+
+        # Con la cola al reves el panel de al lado puede no haberse leido
+        # todavia. Se aparta y se reintenta en cuanto llegue uno, en vez de
+        # apuntar el UID bajo un mote que luego no casa con nadie.
+        if self._al_lado(cuando) is None and found["nameAsRead"] not in self.panels:
+            self.popups_sueltos.append((cuando, found))
+            return
+
+        self._anotar_uid(found, cuando)
         self.announce(
             f"       {GREEN}UID de {found['nameAsRead']}{RESET}: {found['uid']}"
             f"{GREY}   ({len(self.uids)} identificados){RESET}"
         )
 
-    def _report_panel(self, header, readings, width: int, height: int) -> None:
+    def _resolver_sueltos(self) -> None:
+        """Reintenta los popups que esperaban a que se leyera su panel."""
+        quedan = []
+        for cuando, found in self.popups_sueltos:
+            if self._al_lado(cuando) is None and found["nameAsRead"] not in self.panels:
+                quedan.append((cuando, found))
+                continue
+            self._anotar_uid(found, cuando)
+            self.announce(
+                f"       {GREEN}UID de {found['nameAsRead']}{RESET}: {found['uid']}"
+                f"{GREY}   ({len(self.uids)} identificados){RESET}"
+            )
+        self.popups_sueltos = quedan
+
+    def _report_panel(self, header, readings, width: int, height: int, cuando: float) -> None:
         name = (header or {}).get("name")
         if not name:
             return
 
         self.panels[name] = self.panels.get(name, 0) + 1
+        self.panel_times.append((cuando, name))
+        # Este panel puede ser el que le faltaba a un popup ya leido.
+        if self.popups_sueltos:
+            self._resolver_sueltos()
         got = self.fields.setdefault(name, set())
         # Lo que este fotograma aporta de nuevo, para poder enseñarlo. Los
         # repetidos se callan: al bajar el scroll las posiciones se solapan a
@@ -322,7 +404,7 @@ def main() -> int:
         "--tolerance",
         type=float,
         default=1.5,
-        help="how different two pictures must be to count as new, 0-255 (default: 1.5)",
+        help="cuanto puede moverse la imagen y seguir contando como quieta, 0-255 (default: 1.5)",
     )
     parser.add_argument("--calibrate", action="store_true", help="write one annotated screenshot and exit")
     parser.add_argument("--beep", action="store_true", help="also beep on each frame, to browse without looking")
@@ -364,14 +446,17 @@ def main() -> int:
         print(f"\nNavega el gremio. Espera a ver {BOLD}SIGUIENTE{RESET} antes de cada paso.")
         print("Ctrl+C aqui para terminar.\n")
 
-        # Per region: the last picture seen, how long it has held still, and
-        # every picture already written out.
+        # Por region: la ultima imagen vista y cuanto lleva quieta. Ya no se
+        # guarda la lista de todo lo escrito: comparar contra ella era lo que
+        # descartaba fotogramas buenos.
         last_seen: dict[str, np.ndarray] = {}
         still_for: dict[str, int] = {r.name: 0 for r in regions}
-        saved: dict[str, list[np.ndarray]] = {r.name: [] for r in regions}
         counts: dict[str, int] = {r.name: 0 for r in regions}
         labels = {"list": "lista", "panel": "panel"}
         ticks = 0
+        # Enlazado antes que `status`, que lo consulta para enseñar la cola: el
+        # hilo del reconocedor puede escribir en cuanto se construye.
+        identifier = None
         # Redirected to a file, the redrawn status line would pile up instead of
         # overwriting itself, so only draw it for a real terminal.
         live = sys.stdout.isatty()
@@ -380,7 +465,17 @@ def main() -> int:
             if not live:
                 return ""
             spin = SPINNER[(ticks // 3) % len(SPINNER)]
-            return f"{GREY}  {spin} mirando...   lista {counts['list']} / panel {counts['panel']}{RESET}"
+            # La cola, cuando la hay. Leer un fotograma cuesta un par de
+            # segundos y tu vas mas rapido, asi que a veces se acumula; sin
+            # verlo parece que la herramienta se ha parado. Con el numero
+            # delante se ve que baja solo, y no hay nada que esperar: lo que
+            # queda en la cola ya esta guardado en disco.
+            atras = identifier.waiting() if identifier is not None else 0
+            cola = f"{GREY}   leyendo {atras}{RESET}" if atras > 1 else ""
+            return (
+                f"{GREY}  {spin} mirando...   lista {counts['list']} / panel {counts['panel']}"
+                f"{RESET}{cola}"
+            )
 
         # The recogniser reports from its own thread, so writing is serialised.
         printing = threading.Lock()
@@ -398,7 +493,8 @@ def main() -> int:
                 except Exception:
                     pass
 
-        identifier = None if args.no_identify else Identifier(announce, out_dir / ".ocr-cache-v2.json")
+        if not args.no_identify:
+            identifier = Identifier(announce, out_dir / ".ocr-cache-v2.json")
 
         sys.stdout.write(status())
         sys.stdout.flush()
@@ -431,13 +527,30 @@ def main() -> int:
 
                     stamp = datetime.now().strftime("%H:%M:%S")
 
-                    # Say so out loud when nothing was written, otherwise a
-                    # revisited screen looks like the tool has stopped working.
-                    if any(not differs(sig, seen, args.tolerance) for seen in saved[region.name]):
-                        announce(f"{GREY}  {stamp}  {name:5s}  ya lo tenia{RESET}      {BOLD}SIGUIENTE{RESET}", beep=True)
-                        continue
-
-                    saved[region.name].append(sig)
+                    # Aqui se descartaba el fotograma si se parecia a CUALQUIER
+                    # otro ya guardado de esa region, y por eso hacia falta
+                    # repetir un scroll diez veces.
+                    #
+                    # No podia funcionar. Reducido a 64x64 en gris, un panel es
+                    # casi todo etiquetas -- las mismas para todo el mundo -- y
+                    # lo unico que cambia, las cifras, queda en manchas de dos
+                    # pixeles. Medido sobre un barrido real: dos paneles de
+                    # MIEMBROS DISTINTOS se separan entre 1.50 y 1.55, y el
+                    # umbral era 1.50. Cero margen. Y como se comparaba contra
+                    # todo lo guardado desde el principio, el riesgo crecia con
+                    # el barrido: al 7% de fotogramas les pasaba rozando en el
+                    # primer cuarto y al 35% en el tercero. De ahi salian 581
+                    # fotogramas para 85 miembros donde bastaban 255.
+                    #
+                    # Lo peor no era guardar de menos, era que el fotograma
+                    # descartado tampoco se leia: se tiraba entero, sin mirarlo.
+                    #
+                    # Ahora se guarda todo lo que se asiente. No es guardar de
+                    # mas: `still_for` solo dispara en el fotograma exacto en
+                    # que la imagen se queda quieta, asi que mirar una pantalla
+                    # sin tocar nada no escribe nada, y volver a un miembro
+                    # cuesta un PNG de 270 KB. Los repetidos de verdad los
+                    # resuelve parse.py, que ya vota entre fotogramas.
                     counts[region.name] += 1
                     filename = f"{region.name}-{counts[region.name]:04d}.png"
                     image.save(out_dir / filename)
@@ -457,7 +570,7 @@ def main() -> int:
                         beep=True,
                     )
                     if identifier is not None:
-                        identifier.submit(region.name, image.copy(), filename)
+                        identifier.submit(region.name, image.copy(), filename, elapsed)
 
                 if live:
                     sys.stdout.write("\r" + status())

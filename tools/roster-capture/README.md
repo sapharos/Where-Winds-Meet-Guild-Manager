@@ -37,8 +37,28 @@ python capture.py
 Leave it running and browse the guild normally: pick a member, scroll the
 detail panel through its three positions, move to the next. A frame is written
 only once the picture has held still, so scrolling never leaves a smeared
-half-frame, and anything already seen is skipped -- revisiting a member, going
-back, or pausing costs nothing. The running count tells you it is working.
+half-frame; sitting on a screen without touching anything writes nothing. The
+running count tells you it is working.
+
+Three frames per member is all it takes, because the first one does double
+duty: clicking the portrait opens the social popup **and** selects the member,
+so that single instant carries the account number on the left and the whole
+first block of the detail panel -- down to *Treasure Token Obtained* -- on the
+right. Then two scrolls for the rest. Order does not matter and overlap is
+free.
+
+Revisiting a member writes another PNG rather than being skipped. That is
+deliberate, and it replaced a duplicate check that could not do its job: shrunk
+to 64x64 grey, a detail panel is mostly labels -- the same for everybody -- and
+the numbers that actually differ survive as two-pixel smudges. Measured across
+a real sweep, two panels belonging to **different members** sit only 1.50 to
+1.55 apart, and the threshold for calling something a duplicate was 1.50. With
+no margin, genuinely new panels were being thrown away, unread and unwritten,
+which is what made a scroll need repeating until it happened to land somewhere
+different enough. Because every frame was compared against every frame kept so
+far, it got worse as the sweep went on: 7% of frames scraped past the threshold
+in the first quarter, 35% by the third. The cost was 581 frames for 85 members
+where 255 would have done.
 
 Ctrl+C in the console when you are done. Frames land in
 `frames/<date>-<time>/`, named `panel-0001.png` and `list-0001.png`, y ahi mismo
@@ -48,6 +68,8 @@ escribe y lo haces luego a mano.
 
 Expect roughly three panel frames per member plus a handful of list frames.
 For a guild of 76 that is around 240 files and a few tens of megabytes.
+Browsing back and forth adds files rather than being skipped, so a leisurely
+sweep costs more disk than a tidy one -- around 270 KB a frame.
 
 ## Notes
 
@@ -116,12 +138,32 @@ El contador dice cuanto falta por bajar: si tras el ultimo scroll no pone
 listan los miembros que quedaron incompletos y que campos les faltan.
 
 Leer un fotograma cuesta un par de segundos, asi que se hace en un hilo aparte
-y el aviso llega mientras haces el clic siguiente; la captura nunca se detiene.
+y la captura nunca se detiene. Si vas mas rapido que eso se forma cola, y la
+linea de estado la enseña (`leyendo 4`): no hay nada que esperar, porque los
+PNG ya estan en disco y lo unico que va con retraso es el comentario.
+
+Se atiende **el fotograma mas nuevo primero**. Con una cola normal, ir rapido
+significaba leer en pantalla lo de hace cinco miembros, que es lo que se siente
+como que la herramienta se ha colgado; asi lo que lees es siempre del que
+tienes delante. No se descarta nada -- los de atras se leen igual, solo
+despues -- y el recuento de campos es un conjunto, de modo que el orden no
+cambia en que acaba.
 
 Si aparecen datos de alguien cuyo panel social todavia no se ha leido, se marca
 `<- sin UID todavia`. Eso significa que te saltaste su retrato: vuelve a el
 antes de seguir, que en ese momento cuesta un clic. Al terminar se listan los
 que quedaron sin UID.
+
+Ese aviso mira el nombre real y no el que enseñe el popup. Un miembro cuya
+secta le pone un mote lo enseña ahi en vez de su nombre, y apuntar el UID bajo
+el mote dejaba a la persona marcada como que le faltaba, teniendolo. En el
+mismo barrido de antes eran 8 UID archivados bajo un nombre que ningun panel
+produjo, y 12 miembros marcados sin UID en falso. Ahora se resuelve igual que
+en `parse.py` -- por el panel capturado en ese mismo instante -- y se dice:
+
+```
+       'KaelithRen' es el mote de maskmango
+```
 
 Con `--no-identify` se desactiva, y el arranque es inmediato -- a cambio, luego
 `parse.py` tiene que reconocerlo todo desde cero.
