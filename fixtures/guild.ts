@@ -210,11 +210,18 @@ const figuresFor = (seed: number): Record<string, number> =>
     ]),
   );
 
-const participantsFor = (howMany: number, seed: number) =>
+const participantsFor = (howMany: number, seed: number, sinLinea = false) =>
   players.slice(0, howMany).map((p, at) => ({
     playerId: p.id,
     name: p.name,
     side: (at % 2 === 0 ? 'attack' : 'defense') as WarSide,
+    // Una guerra cargada desde su captura no sabe dónde estaba nadie, y esa
+    // columna vacía es un estado que hay que poder mirar.
+    lane: sinLinea ? null : LANES[at % LANES.length],
+    // Un cambio a mitad en la primera guerra: el que salió y el que entró, que
+    // es lo que enseñan las dos flechas junto al nombre.
+    leftAt: !sinLinea && at === 2 ? day(2) : null,
+    joinedAt: !sinLinea && at === 3 ? day(2) : null,
     stats: figuresFor(seed + at),
     weapons: builds.find((b) => b.playerId === p.id)?.weapons ?? [],
   }));
@@ -227,7 +234,9 @@ export const wars = [
   { id: 'w-2', name: 'Puente de Sauces', startedAt: day(5), endedAt: day(5), matchType: 'ranked' as const, outcome: 'loss' as const, seed: 11, count: 24 },
   { id: 'w-3', name: 'Reto contra Nube Errante', startedAt: day(9), endedAt: day(9), matchType: 'custom' as const, outcome: 'win' as const, seed: 19, count: 18 },
   { id: 'w-4', name: 'Vado de Piedra', startedAt: day(14), endedAt: day(14), matchType: 'league' as const, outcome: null, seed: 27, count: 12 },
-  { id: 'w-5', name: 'La primera', startedAt: day(21), endedAt: day(21), matchType: 'league' as const, outcome: 'loss' as const, seed: 41, count: 8 },
+  // La última se cargó desde su captura meses después: sin líneas, que es lo
+  // que queda cuando lo único que se guardó fue la pantalla final.
+  { id: 'w-5', name: 'La primera', startedAt: day(21), endedAt: day(21), matchType: 'league' as const, outcome: 'loss' as const, seed: 41, count: 8, imported: true },
 ];
 
 export const warRows = wars.map((w) => ({
@@ -237,6 +246,7 @@ export const warRows = wars.map((w) => ({
   endedAt: w.endedAt,
   matchType: w.matchType,
   outcome: w.outcome,
+  imported: 'imported' in w && w.imported === true,
   participants: w.count,
   images: w.id === 'w-1' ? 3 : 0,
 }));
@@ -244,7 +254,13 @@ export const warRows = wars.map((w) => ({
 export const warDetail = (id: string) => {
   const w = wars.find((x) => x.id === id);
   if (!w) return null;
-  return { ...w, images: [], participants: participantsFor(w.count, w.seed) };
+  const cargada = 'imported' in w && w.imported === true;
+  return {
+    ...w,
+    imported: cargada,
+    images: [],
+    participants: participantsFor(w.count, w.seed, cargada),
+  };
 };
 
 export const warsOf = (playerId: string) =>

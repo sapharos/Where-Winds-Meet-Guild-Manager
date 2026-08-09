@@ -45,6 +45,9 @@ import {
   addWarImage,
   removeWarImage,
   setContribution,
+  substitute,
+  importWar,
+  usualLanes,
   listLineups,
   saveLineup,
   applyLineup,
@@ -1189,6 +1192,22 @@ app.post('/api/war/wars', requireAuth, requirePermission('war.edit'), asHandler(
 
 app.post('/api/war/wars/:id/end', requireAuth, requirePermission('war.edit'), asHandler(async (req, res) => {
   res.json(await endWar(req.params.id, req.body?.outcome));
+}));
+
+// Un cambio con la guerra en marcha. Sin `in` es una baja sin relevo.
+app.post('/api/war/wars/:id/substitute', requireAuth, requirePermission('war.edit'), asHandler(async (req, res) => {
+  res.json(await substitute(req.params.id, req.body?.out, req.body?.in ?? null));
+}));
+
+// Una guerra que ya pasó, reconstruida desde sus pantallazos.
+app.post('/api/war/wars/import', requireAuth, requirePermission('war.edit'), asHandler(async (req, res) => {
+  res.json(await importWar(req.body ?? {}));
+}));
+
+// Dónde suele jugar cada uno. Lo lee el importador para colocar las filas que
+// salen del pantallazo sin que haya que repartir treinta personas a mano.
+app.get('/api/war/usual-lanes', requireAuth, asHandler(async (_req, res) => {
+  res.json(await usualLanes());
 }));
 
 app.patch('/api/war/wars/:id', requireAuth, requirePermission('war.edit'), asHandler(async (req, res) => {

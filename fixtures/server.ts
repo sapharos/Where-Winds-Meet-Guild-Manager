@@ -465,6 +465,12 @@ const GET: [RegExp, Ruta][] = [
     }),
   ],
   [/^\/war\/lineups$/, () => store.lineups],
+  // Dónde suele jugar cada uno: aquí es sencillamente donde está desplegado,
+  // que basta para que el importador llegue con las líneas ya puestas.
+  [
+    /^\/war\/usual-lanes$/,
+    () => store.deployments.map((d) => ({ playerId: d.playerId, side: d.side, lane: d.lane, games: 3 })),
+  ],
   [/^\/war\/wars$/, () => fake.warRows],
   [/^\/war\/wars\/([^/]+)$/, (m) => fake.warDetail(m[1])],
   [/^\/players\/([^/]+)\/scans$/, (m) => fake.scansOf(m[1])],
@@ -941,6 +947,23 @@ const ESCRITURAS: [string, RegExp, Ruta][] = [
   ['POST', /^\/war\/wars\/([^/]+)\/end$/, () => {
     store.current = null;
     return { ok: true };
+  }],
+  // El cambio en caliente: quien sale deja el tablero y quien entra ocupa su
+  // sitio, con su línea y su puesto. Es lo que se ve al hacerlo de verdad.
+  ['POST', /^\/war\/wars\/([^/]+)\/substitute$/, (_m, _req, body) => {
+    const sale = store.deployments.find((d) => d.playerId === body.out);
+    if (!sale) return { ok: false };
+    store.deployments = [
+      ...store.deployments.filter((d) => d.playerId !== body.out),
+      ...(body.in ? [{ ...sale, playerId: body.in as string }] : []),
+    ];
+    return { out: body.out, in: body.in ?? null, side: sale.side, lane: sale.lane };
+  }],
+  // Cargar una guerra pasada. Devuelve un identificador porque la pantalla se
+  // va derecha a ella; lo demás no se guarda, que para eso está el aviso.
+  ['POST', /^\/war\/wars\/import$/, (_m, _req, body) => {
+    console.warn(`[banco] guerra cargada sin efecto: ${body?.participants?.length ?? 0} filas`);
+    return { id: 'w-1', participants: body?.participants?.length ?? 0 };
   }],
 ];
 

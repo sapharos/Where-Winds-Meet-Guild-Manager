@@ -163,6 +163,10 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit, canVo
   const [history, setHistory] = useState(false);
   // Quién tiene el menú de acciones abierto, en el tablero o en el banquillo.
   const [abierto, setAbierto] = useState<string | null>(null);
+  // El buscador de relevos, sólo mientras se pelea. Aparte del buscador del
+  // banquillo porque ese vive detrás de la hoja y no se ve desde aquí.
+  const [buscaRelevo, setBuscaRelevo] = useState('');
+  const [relevando, setRelevando] = useState(false);
   // Formaciones guardadas: la hoja, el nombre en curso y el resultado del
   // último aplicar. El aviso es aparte del error porque no es un fallo: "3 no
   // volvieron y te digo por qué" es información, no una excusa.
@@ -290,6 +294,9 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit, canVo
   // A settled side is read-only: this is the line-up as it will be fielded.
   const shut = locked[side];
   const arranging = canEdit && !shut;
+  // Con la guerra en marcha el tablero no se rearma, pero sí se declara quién
+  // se salió y quién entró en su lugar. Es lo único que se escribe entonces.
+  const enGuerra = canEdit && Boolean(war);
   const unitsOf = new Map<string, string[]>(here.map((d) => [d.playerId, d.unitIds ?? []]));
   // Where somebody stands on the other board: nobody fights both halves, so
   // this is what makes them unavailable here.
@@ -545,6 +552,36 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit, canVo
     setFinishing(false);
     setError(null);
     await load();
+  };
+
+  /**
+   * Un cambio con la guerra ya empezada.
+   *
+   * A diferencia de `move`, esto no se pinta antes de tiempo: mover una ficha
+   * mientras se arma la formación es reversible de un toque, pero un cambio
+   * queda escrito en el acta de la guerra, y enseñarlo hecho antes de saber si
+   * se hizo es lo que después no cuadra con el pantallazo final. Media segundo
+   * de espera a cambio de que lo que se ve sea lo que quedó registrado.
+   *
+   * Con `entra` en null es una baja sin relevo: se salió y nadie lo cubrió.
+   */
+  const sustituir = async (sale: string, entra: string | null) => {
+    if (!war) return;
+    setError(null);
+    setRelevando(true);
+    try {
+      await api(`/war/wars/${war.id}/substitute`, {
+        method: 'POST',
+        body: JSON.stringify({ out: sale, in: entra }),
+      });
+      setAbierto(null);
+      setBuscaRelevo('');
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo hacer el cambio');
+    } finally {
+      setRelevando(false);
+    }
   };
 
   const clear = async () => {
@@ -1431,19 +1468,35 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit, canVo
                             <span className="truncate">{build?.name ?? ROLE_NAMES[p.role]}</span>
                           </p>
                         </div>
-                        {arranging && (
+                        {(arranging || enGuerra) && (
                           // Eran dos botones de 16x16 y una equis sin caja, que
                           // el propio código llamaba "para pantallas táctiles".
                           // Ahora es un menú de 44 que abre las mismas acciones
                           // escritas, más las dos que estaban enterradas en la
                           // tarjeta: la build de esta guerra y las unidades.
+                          //
+                          // Con la guerra en marcha sigue abriendo, aunque la
+                          // formación esté bloqueada: lo que ofrece entonces no
+                          // es rearmar el tablero sino declarar un cambio, que
+                          // es justo lo que hay que poder hacer sin desbloquear.
                           <button
-                            onClick={() => setAbierto(p.id)}
-                            aria-label={`Acciones de ${p.name}`}
+                            onClick={() => {
+                              // Un fallo anterior, de otra acción, se vería
+                              // dentro de esta hoja como si fuera suyo.
+                              setError(null);
+                              setAbierto(p.id);
+                            }}
+                            aria-label={enGuerra ? `Cambiar a ${p.name}` : `Acciones de ${p.name}`}
                             aria-haspopup="dialog"
-                            className="shrink-0 -mr-1 min-h-tap min-w-tap flex items-center justify-center rounded-md text-slate-400 hover:text-amber-500 transition-colors duration-micro"
+                            className={`shrink-0 -mr-1 min-h-tap min-w-tap flex items-center justify-center rounded-md transition-colors duration-micro ${
+                              enGuerra
+                                ? 'text-amber-500/70 hover:text-amber-400'
+                                : 'text-slate-400 hover:text-amber-500'
+                            }`}
                           >
-                            <i className="fa-solid fa-ellipsis-vertical"></i>
+                            <i
+                              className={`fa-solid ${enGuerra ? 'fa-right-left' : 'fa-ellipsis-vertical'}`}
+                            ></i>
                           </button>
                         )}
                       </div>
@@ -1710,6 +1763,102 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit, canVo
         const mine = owned.get(p.id) ?? [];
         const held = unitsOf.get(p.id) ?? [];
 
+        /*
+          Con la guerra en marcha la hoja es otra cosa.
+
+          No ofrece mover de línea ni cambiar la build: la formación está
+          bloqueada y esas dos son decisiones de antes. Ofrece lo único que
+          pasa mientras se pelea -- alguien se cayó -- y lo ofrece en un toque,
+          con el banquillo ya desplegado en lugar de detrás de un submenú. Son
+          dos toques desde la ficha, que es lo que hay tiempo de hacer con la
+          guerra corriendo.
+        */
+        if (enGuerra) {
+          const busca = buscaRelevo.trim().toLowerCase();
+          const relevos = active
+            .filter((c) => c.id !== p.id && !placed.has(c.id) && !elsewhere.has(c.id))
+            .filter((c) => !busca || c.name.toLowerCase().includes(busca))
+            .sort((a, b) => rank(b) - rank(a) || a.name.localeCompare(b.name));
+
+          return (
+            <Sheet
+              title={`Cambiar a ${p.name}`}
+              subtitle={
+                suya
+                  ? `${WAR_LANES.find((l) => l.id === suya.lane)?.label} · ${WAR_SIDE_LABELS[side]} · quien entre hereda su sitio`
+                  : `${WAR_SIDE_LABELS[side]} · quien entre hereda su sitio`
+              }
+              size="sm"
+              onClose={() => {
+                setAbierto(null);
+                setBuscaRelevo('');
+              }}
+            >
+              {/* El aviso vive aquí y no sólo en la barra de arriba: con la
+                  hoja abierta, un fallo detrás de ella no lo lee nadie. */}
+              {error && (
+                <div className="mb-2 text-sm rounded-lg px-4 py-2 flex items-center gap-3 border bg-red-950/60 border-red-900 text-red-200">
+                  <i className="fa-solid fa-triangle-exclamation"></i>
+                  {error}
+                </div>
+              )}
+
+              <input
+                type="search"
+                value={buscaRelevo}
+                onChange={(e) => setBuscaRelevo(e.target.value)}
+                placeholder="Buscar quién entra…"
+                autoComplete="off"
+                enterKeyHint="search"
+                className="w-full min-h-tap bg-slate-950 border border-slate-800 rounded px-3 text-sm outline-none focus:ring-1 focus:ring-amber-500 mb-2"
+              />
+
+              <div className="flex flex-col gap-1 max-h-[45vh] overflow-y-auto">
+                {relevos.map((c) => {
+                  const build = buildOf(c);
+                  return (
+                    <button
+                      key={c.id}
+                      disabled={relevando}
+                      onClick={() => void sustituir(p.id, c.id)}
+                      className="min-h-tap flex items-center gap-3 px-3 -mx-1 rounded-md text-left text-slate-200 hover:bg-slate-800/60 disabled:opacity-40 transition-colors duration-micro"
+                    >
+                      <i className="fa-solid fa-arrow-right-to-bracket w-5 text-center text-emerald-500"></i>
+                      <span className="flex-1 min-w-0">
+                        <span className="block truncate">{c.name}</span>
+                        <span className="block text-meta text-slate-500 truncate">
+                          {rolesOf(c)
+                            .map((r) => ROLE_NAMES[r])
+                            .join(' · ')}
+                          {build?.name ? ` — ${build.name}` : ''}
+                        </span>
+                      </span>
+                    </button>
+                  );
+                })}
+                {!relevos.length && (
+                  <p className="text-xs text-slate-600 italic py-3 text-center">
+                    {busca ? 'Nadie coincide' : 'No queda nadie en el banquillo'}
+                  </p>
+                )}
+              </div>
+
+              {/* Una baja sin relevo también hay que poder decirla: se
+                  quedaron veintinueve y eso es parte de lo que pasó. */}
+              <div className="mt-4 pt-3 border-t border-slate-800">
+                <button
+                  disabled={relevando}
+                  onClick={() => void sustituir(p.id, null)}
+                  className="w-full min-h-tap flex items-center gap-3 px-3 -mx-1 rounded-md text-left text-red-400 hover:bg-red-500/10 disabled:opacity-40 transition-colors duration-micro"
+                >
+                  <i className="fa-solid fa-person-walking-arrow-right w-5 text-center"></i>
+                  Se salió y nadie lo cubre
+                </button>
+              </div>
+            </Sheet>
+          );
+        }
+
         return (
           <Sheet
             title={p.name}
@@ -1914,6 +2063,7 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit, canVo
         <WarHistory
           canEdit={canEdit}
           weaponSets={weaponSets}
+          players={players}
           onClose={() => setHistory(false)}
           onChanged={() => void load()}
         />

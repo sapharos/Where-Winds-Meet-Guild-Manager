@@ -258,12 +258,33 @@ export interface ReadRow {
 
 interface Props {
   images: string[];
+  /**
+   * Contra quién se emparejan los nombres leídos.
+   *
+   * Para una guerra ya registrada son sus participantes, que es la lista corta
+   * y correcta. Para una guerra que se está reconstruyendo desde el pantallazo
+   * no hay participantes todavía, así que se le pasa el gremio entero: la
+   * misma comparación difusa, sobre una lista más larga.
+   */
   participants: { playerId: string; name: string }[];
   onClose: () => void;
   onApply: (rows: ReadRow[]) => Promise<void>;
+  /** Lo que se está leyendo, cuando no es «los resultados de esta guerra». */
+  title?: string;
+  subtitle?: string;
+  /** Qué pasa al aceptar: guardar, o pasar al siguiente paso de otra cosa. */
+  applyLabel?: string;
 }
 
-const ResultsReader: React.FC<Props> = ({ images, participants, onClose, onApply }) => {
+const ResultsReader: React.FC<Props> = ({
+  images,
+  participants,
+  onClose,
+  onApply,
+  title = 'Leer resultados',
+  subtitle = 'Lo leído se revisa antes de guardarse. Corrige lo que haga falta.',
+  applyLabel = 'Guardar',
+}) => {
   const [stage, setStage] = useState<'idle' | 'loading' | 'reading' | 'done' | 'failed'>('idle');
   const [progress, setProgress] = useState('');
   const [rows, setRows] = useState<ReadRow[]>([]);
@@ -455,12 +476,7 @@ const ResultsReader: React.FC<Props> = ({ images, participants, onClose, onApply
   const matched = rows.filter((r) => r.playerId);
 
   return (
-    <Sheet
-      title="Leer resultados"
-      subtitle="Lo leído se revisa antes de guardarse. Corrige lo que haga falta."
-      size="xl"
-      onClose={onClose}
-    >
+    <Sheet title={title} subtitle={subtitle} size="xl" onClose={onClose}>
       <div className="space-y-4">
           {(stage === 'loading' || stage === 'reading') && (
             <p className="text-sm text-slate-400 flex items-center gap-3">
@@ -645,7 +661,7 @@ const ResultsReader: React.FC<Props> = ({ images, participants, onClose, onApply
                   className="min-h-tap bg-amber-600 hover:bg-amber-500 disabled:bg-slate-800 text-white text-sm font-bold px-6 rounded transition-all flex items-center gap-2"
                 >
                   <i className="fa-solid fa-floppy-disk"></i>
-                  Guardar {matched.length} filas
+                  {applyLabel} {matched.length} filas
                 </button>
               </div>
             </>

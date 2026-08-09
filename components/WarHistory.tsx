@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../services/authService';
 import { expectationOf, impactOf, impactShade } from '../services/impact';
 import {
+  Player,
+  WAR_LANES,
   WAR_MATCH_TYPE_LABELS,
   WAR_OUTCOME_LABELS,
   WAR_SIDE_LABELS,
@@ -11,6 +13,7 @@ import {
   WarSide,
   WeaponSet,
 } from '../types';
+import ImportWar from './ImportWar';
 import ResultsReader from './ResultsReader';
 import FigureCell from './FigureCell';
 import { SetBadge } from './BuildEditor';
@@ -23,6 +26,8 @@ interface WarRow {
   endedAt: string | null;
   outcome: WarOutcome | null;
   matchType: WarMatchType;
+  /** Reconstruida desde sus capturas en vez de arbitrada en vivo. */
+  imported: boolean;
   participants: number;
   images: number;
 }
@@ -31,7 +36,15 @@ interface Participant {
   playerId: string;
   name: string;
   side: WarSide;
-  lane: WarLane;
+  /**
+   * Nula cuando no consta: una guerra cargada desde su pantallazo final sabe
+   * quién peleó, nunca dónde estaba, y meses después nadie lo recuerda.
+   */
+  lane: WarLane | null;
+  /** Cuándo se salió, si se salió antes de que acabara. */
+  leftAt: string | null;
+  /** Cuándo entró, si entró a mitad para cubrir a alguien. */
+  joinedAt: string | null;
   /** The build the war froze for them, if one was chosen before it started. */
   buildId: string | null;
   /**
@@ -83,7 +96,7 @@ const minutes = (from: string, to: string | null) =>
  * and nothing in it needs that: the figures have to be legible to a reader and
  * to whatever reads them later, which a wide JPEG manages at a tenth the size.
  */
-async function shrink(file: Blob): Promise<string> {
+export async function shrink(file: Blob): Promise<string> {
   const bitmap = await createImageBitmap(file);
   const scale = Math.min(1, 1800 / bitmap.width);
   const canvas = document.createElement('canvas');
@@ -96,6 +109,8 @@ async function shrink(file: Blob): Promise<string> {
 interface Props {
   canEdit: boolean;
   weaponSets: WeaponSet[];
+  /** El gremio, para emparejar los nombres de una guerra que se carga entera. */
+  players: Player[];
   onClose: () => void;
   /**
    * Something changed here that the board behind is also showing. Deleting the
@@ -110,13 +125,14 @@ interface Props {
  * What the wars left behind: who was there, what they did, and the screens the
  * game showed at the end.
  */
-const WarHistory: React.FC<Props> = ({ canEdit, weaponSets, onClose, onChanged }) => {
+const WarHistory: React.FC<Props> = ({ canEdit, weaponSets, players, onClose, onChanged }) => {
   const [wars, setWars] = useState<WarRow[] | null>(null);
   const [chosen, setChosen] = useState<string | null>(null);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [message, setMessage] = useState<{ text: string; ok: boolean } | null>(null);
   const [zoom, setZoom] = useState<number | null>(null);
   const [reading, setReading] = useState(false);
+  const [importing, setImporting] = useState(false);
   // Impact first, because a results table nobody ordered is read top to bottom
   // looking for who mattered, and that is the column that answers it.
   const [sort, setSort] = useState<{ key: string; desc: boolean }>({ key: 'impact', desc: true });
@@ -230,6 +246,9 @@ const WarHistory: React.FC<Props> = ({ canEdit, weaponSets, onClose, onChanged }
     const of = (p: Participant): string | number => {
       if (sort.key === 'name') return p.name.toLowerCase();
       if (sort.key === 'side') return p.side;
+      // Sin línea va al final ordenando de la A a la Z: "no consta" no es una
+      // línea más, y ponerla entre la amarilla y la roja la haría parecerlo.
+      if (sort.key === 'lane') return p.lane ?? 'zzz';
       if (sort.key === 'impact') return scores.get(p.playerId) ?? 0;
       return p.stats?.[sort.key] ?? -1;
     };
@@ -352,6 +371,19 @@ const WarHistory: React.FC<Props> = ({ canEdit, weaponSets, onClose, onChanged }
             <p className="text-sm text-slate-500">Todavía no se ha librado ninguna guerra.</p>
           )}
 
+          {/* Arriba y no al final de la lista: de las guerras que faltan por
+              cargar suele haber muchas seguidas, y buscar el botón bajo cien
+              filas cada vez es lo que hace que se cargue una sola. */}
+          {!chosen && canEdit && wars && (
+            <button
+              onClick={() => setImporting(true)}
+              className="w-full min-h-tap border border-dashed border-slate-700 hover:border-amber-700 rounded-lg text-sm text-slate-400 hover:text-amber-500 transition-all flex items-center justify-center gap-2 py-3"
+            >
+              <i className="fa-solid fa-clock-rotate-left"></i>
+              Cargar una guerra pasada desde su captura
+            </button>
+          )}
+
           {/* The list until one is picked. A war brings thirty rows and five
               screens with it, and opening the newest for you buries the rest. */}
           {!chosen && wars && wars.length > 0 && (
@@ -377,6 +409,18 @@ const WarHistory: React.FC<Props> = ({ canEdit, weaponSets, onClose, onChanged }
                           }`}
                         >
                           {WAR_OUTCOME_LABELS[w.outcome]}
+                        </span>
+                      )}
+                      {/* Dicho, porque cambia lo que se puede esperar del
+                          registro: sin plan, con líneas que pueden faltar y
+                          con cifras que alguien leyó meses después. */}
+                      {w.imported && (
+                        <span
+                          title="Reconstruida desde sus capturas"
+                          className="text-[9px] uppercase tracking-wider text-slate-500 border border-slate-700 rounded px-1 py-0.5"
+                        >
+                          <i className="fa-solid fa-clock-rotate-left mr-1"></i>
+                          Cargada
                         </span>
                       )}
                     </div>
@@ -601,8 +645,30 @@ const WarHistory: React.FC<Props> = ({ canEdit, weaponSets, onClose, onChanged }
                         </span>
                         <span className="flex-1 min-w-0 truncate text-slate-100 font-semibold">
                           {p.name}
+                          {p.leftAt && (
+                            <i
+                              className="fa-solid fa-arrow-right-from-bracket text-red-500/70 text-[10px] ml-1.5"
+                              title="Se salió antes de que acabara"
+                            ></i>
+                          )}
+                          {p.joinedAt && (
+                            <i
+                              className="fa-solid fa-arrow-right-to-bracket text-emerald-500/70 text-[10px] ml-1.5"
+                              title="Entró a mitad de la guerra"
+                            ></i>
+                          )}
                         </span>
-                        <span className="text-meta text-slate-500">{WAR_SIDE_LABELS[p.side]}</span>
+                        <span className="text-meta text-slate-500">
+                          {WAR_SIDE_LABELS[p.side]}
+                          {p.lane && (
+                            <span
+                              className="ml-1.5"
+                              style={{ color: WAR_LANES.find((l) => l.id === p.lane)?.colour }}
+                            >
+                              {WAR_LANES.find((l) => l.id === p.lane)?.label}
+                            </span>
+                          )}
+                        </span>
                         <span
                           className="text-lg font-bold tabular-nums"
                           style={{ color: impactShade(scores.get(p.playerId) ?? 0) }}
@@ -639,6 +705,7 @@ const WarHistory: React.FC<Props> = ({ canEdit, weaponSets, onClose, onChanged }
                         {[
                           { key: 'name', label: 'Miembro', right: false },
                           { key: 'side', label: 'Bando', right: false },
+                          { key: 'lane', label: 'Línea', right: false },
                           { key: 'impact', label: 'Impacto', right: true },
                           ...FIGURES.map((f) => ({ key: f.key, label: f.label, right: true })),
                         ].map((column) => (
@@ -671,10 +738,39 @@ const WarHistory: React.FC<Props> = ({ canEdit, weaponSets, onClose, onChanged }
                                 ))}
                               </span>
                               {p.name}
+                              {/* Quien no peleó la guerra entera lo dice aquí:
+                                  sus cifras son de menos minutos que las del
+                                  resto, y compararlas sin saberlo engaña. */}
+                              {p.leftAt && (
+                                <i
+                                  className="fa-solid fa-arrow-right-from-bracket text-red-500/70 text-[10px]"
+                                  title="Se salió antes de que acabara"
+                                ></i>
+                              )}
+                              {p.joinedAt && (
+                                <i
+                                  className="fa-solid fa-arrow-right-to-bracket text-emerald-500/70 text-[10px]"
+                                  title="Entró a mitad de la guerra"
+                                ></i>
+                              )}
                             </span>
                           </td>
                           <td className="py-1 pr-3 text-[11px] text-slate-500">
                             {WAR_SIDE_LABELS[p.side]}
+                          </td>
+                          {/* La línea se guardaba desde siempre y no se
+                              enseñaba en ninguna parte, que es exactamente lo
+                              que se va a mirar de una guerra de hace meses. */}
+                          <td className="py-1 pr-3 text-[11px] whitespace-nowrap">
+                            {p.lane ? (
+                              <span style={{ color: WAR_LANES.find((l) => l.id === p.lane)?.colour }}>
+                                {WAR_LANES.find((l) => l.id === p.lane)?.label}
+                              </span>
+                            ) : (
+                              <span className="text-slate-700" title="No consta">
+                                —
+                              </span>
+                            )}
                           </td>
                           <td
                             className="py-1 pr-3 text-right font-bold tabular-nums"
@@ -700,6 +796,21 @@ const WarHistory: React.FC<Props> = ({ canEdit, weaponSets, onClose, onChanged }
             </>
           )}
       </div>
+
+      {importing && (
+        <ImportWar
+          players={players}
+          onClose={() => setImporting(false)}
+          onImported={async (id) => {
+            setImporting(false);
+            setWars(await api<WarRow[]>('/war/wars').catch(() => wars));
+            // Se abre la recién cargada: es donde se comprueba que quedó bien,
+            // y buscarla en una lista de cien no es comprobar nada.
+            setChosen(id);
+            setMessage({ text: 'Guerra cargada.', ok: true });
+          }}
+        />
+      )}
 
       {reading && detail && (
         <ResultsReader

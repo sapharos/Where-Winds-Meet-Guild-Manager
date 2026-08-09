@@ -341,7 +341,7 @@ export async function currentWar() {
 export async function listWars() {
   const { rows } = await pool.query(
     `SELECT w.id, w.name, w.started_at AS "startedAt", w.ended_at AS "endedAt",
-            w.outcome, w.notes, w.match_type AS "matchType",
+            w.outcome, w.notes, w.match_type AS "matchType", w.imported,
             (SELECT count(*)::int FROM war_participants p WHERE p.war_id = w.id) AS "participants",
             (SELECT count(*)::int FROM war_images i WHERE i.war_id = w.id) AS "images"
        FROM wars w WHERE w.guild_id = $1 ORDER BY w.started_at DESC LIMIT 100`,
@@ -373,7 +373,7 @@ const CARRIED = `
 export async function warDetail(id) {
   const war = await pool.query(
     `SELECT id, name, started_at AS "startedAt", ended_at AS "endedAt", outcome, notes, plans,
-            match_type AS "matchType"
+            match_type AS "matchType", imported
        FROM wars WHERE id = $1 AND guild_id = $2`,
     [id, GUILD_ID],
   );
@@ -384,7 +384,8 @@ export async function warDetail(id) {
   const participants = await pool.query(
     `SELECT p.player_id AS "playerId", COALESCE(m.name, p.player_id) AS name,
             p.side, p.lane, p.unit_ids AS "unitIds", p.build_id AS "buildId",
-            p.contribution, p.stats, COALESCE(carried.weapons, '[]'::jsonb) AS weapons
+            p.contribution, p.stats, p.left_at AS "leftAt", p.joined_at AS "joinedAt",
+            COALESCE(carried.weapons, '[]'::jsonb) AS weapons
        FROM war_participants p
        LEFT JOIN players m ON m.guild_id = $2 AND m.id = p.player_id
        LEFT JOIN LATERAL (${CARRIED}) carried ON true
@@ -488,6 +489,22 @@ export async function removeWarImage(warId, imageId) {
 // The columns the results screen actually reports, in its own order.
 const FIGURES = ['kills', 'assists', 'deaths', 'coin', 'damage', 'taken', 'healing', 'siege'];
 
+/**
+ * Las cifras de una fila, quedándose sólo con las columnas que existen.
+ *
+ * Enteros y nunca negativos: lo que llega puede venir de un lector de imágenes,
+ * y una curación de menos tres es una lectura mala, no un dato.
+ */
+function cleanStats(raw) {
+  const stats = {};
+  for (const figure of FIGURES) {
+    const value = raw?.[figure];
+    if (value === null || value === undefined || value === '') continue;
+    stats[figure] = Math.max(0, Math.round(Number(value) || 0));
+  }
+  return stats;
+}
+
 /** Record what one member did. Absent figures are left as they were. */
 export async function setContribution(warId, playerId, body) {
   const { rows } = await pool.query(
@@ -521,6 +538,271 @@ export async function setContribution(warId, playerId, body) {
     ],
   );
   return { stats };
+}
+
+/**
+ * Un cambio con la guerra en marcha: sale uno, entra otro.
+ *
+ * Es la única escritura que atraviesa el bloqueo de las formaciones a
+ * propósito. El bloqueo existe para que la formación no se mueva sola mientras
+ * se pelea, y sigue haciendo su trabajo: aquí no se arrastra a nadie, se
+ * declara un hecho que ya ocurrió -- alguien se salió del juego -- y el
+ * registro se limita a alcanzarlo. Sin esto, el acta dice que peleó quien se
+ * fue en el minuto cinco y no menciona a quien cubrió los veinticinco
+ * restantes, y el lector de resultados no tiene con quién emparejar su fila.
+ *
+ * Quien sale no se borra: se le pone la hora. Peleó lo que peleó, sus cifras
+ * salen en el pantallazo y el bando le sigue contando. Quien entra hereda el
+ * sitio entero -- bando, línea y unidades tácticas -- porque lo que se hereda
+ * es el puesto, no la persona: el trabajo de la línea sigue siendo el mismo.
+ * La build no se hereda, que es de quien la armó; se resuelve la suya.
+ *
+ * Con `inPlayerId` nulo es una baja sin relevo, que también hay que poder
+ * decir: se quedaron veintinueve y el hueco es parte de lo que pasó.
+ */
+export async function substitute(warId, outPlayerId, inPlayerId) {
+  const war = await pool.query(
+    `SELECT id FROM wars WHERE id = $1 AND guild_id = $2 AND ended_at IS NULL`,
+    [warId, GUILD_ID],
+  );
+  if (!war.rows.length) {
+    throw Object.assign(new Error('esa guerra no esta en curso'), { status: 404 });
+  }
+
+  const leaving = await pool.query(
+    `SELECT side, lane, unit_ids AS "unitIds", left_at AS "leftAt"
+       FROM war_participants WHERE war_id = $1 AND player_id = $2`,
+    [warId, outPlayerId],
+  );
+  if (!leaving.rows.length) {
+    throw Object.assign(new Error('ese miembro no esta en esta guerra'), { status: 404 });
+  }
+  if (leaving.rows[0].leftAt) {
+    throw Object.assign(new Error('ese miembro ya habia salido'), { status: 409 });
+  }
+  const { side, lane, unitIds } = leaving.rows[0];
+
+  if (inPlayerId) {
+    if (inPlayerId === outPlayerId) {
+      throw Object.assign(new Error('no se puede sustituir a alguien por si mismo'), { status: 400 });
+    }
+    const member = await pool.query(
+      `SELECT is_active AS "isActive" FROM players WHERE guild_id = $1 AND id = $2`,
+      [GUILD_ID, inPlayerId],
+    );
+    if (!member.rows.length) throw Object.assign(new Error('no such member'), { status: 404 });
+    if (member.rows[0].isActive === false) {
+      throw Object.assign(new Error('ese miembro ya no esta en el gremio'), { status: 409 });
+    }
+    // Ya peleó esta guerra: puede ser que siga dentro, o que saliera antes y
+    // ahora vuelva. Lo segundo es legítimo pero no cabe en una fila por
+    // persona, y contarlo mal sería peor que no contarlo.
+    const already = await pool.query(
+      `SELECT 1 FROM war_participants WHERE war_id = $1 AND player_id = $2`,
+      [warId, inPlayerId],
+    );
+    if (already.rows.length) {
+      throw Object.assign(new Error('ese miembro ya esta registrado en esta guerra'), { status: 409 });
+    }
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    await client.query(
+      `UPDATE war_participants SET left_at = now() WHERE war_id = $1 AND player_id = $2`,
+      [warId, outPlayerId],
+    );
+
+    // El puesto en el tablero se hereda con su sitio en la línea: quien entra
+    // ocupa el hueco del que salió, no el final de la fila. El orden de una
+    // línea es quién entra primero, y un relevo no cambia eso.
+    const spot = await client.query(
+      `DELETE FROM war_deployments
+        WHERE guild_id = $1 AND side = $2 AND player_id = $3
+        RETURNING position, is_lane_leader AS "isLaneLeader"`,
+      [GUILD_ID, side, outPlayerId],
+    );
+
+    if (inPlayerId) {
+      await client.query(
+        `INSERT INTO war_participants (war_id, player_id, side, lane, unit_ids, joined_at)
+         VALUES ($1, $2, $3, $4, $5, now())`,
+        [warId, inPlayerId, side, lane, JSON.stringify(unitIds ?? [])],
+      );
+      if (lane) {
+        await client.query(
+          `INSERT INTO war_deployments (guild_id, side, lane, player_id, position, unit_ids, is_lane_leader)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)
+           ON CONFLICT (guild_id, side, player_id)
+             DO UPDATE SET lane = EXCLUDED.lane, position = EXCLUDED.position,
+                           unit_ids = EXCLUDED.unit_ids, is_lane_leader = EXCLUDED.is_lane_leader`,
+          [
+            GUILD_ID,
+            side,
+            lane,
+            inPlayerId,
+            spot.rows[0]?.position ?? 0,
+            JSON.stringify(unitIds ?? []),
+            spot.rows[0]?.isLaneLeader ?? false,
+          ],
+        );
+      }
+    }
+
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+
+  return { out: outPlayerId, in: inPlayerId ?? null, side, lane };
+}
+
+/**
+ * Dónde suele jugar cada uno, leído de las guerras que ya se registraron.
+ *
+ * Existe para el importador: la pantalla de resultados dice quién peleó, nunca
+ * dónde estaba, y repartir a treinta personas a mano por tres líneas es
+ * exactamente el trabajo que hace que las guerras antiguas no se carguen
+ * nunca. Con esto, la mayoría llega ya colocada donde siempre juega y sólo hay
+ * que corregir a los pocos que ese día se movieron.
+ *
+ * La línea más repetida, y a igualdad la más reciente: quien lleva un mes en
+ * la roja después de un año en la azul está en la roja, y una racha empatada
+ * se resuelve por lo que se hizo la última vez.
+ */
+export async function usualLanes() {
+  const { rows } = await pool.query(
+    `SELECT DISTINCT ON ("playerId") "playerId", side, lane, games
+       FROM (
+         SELECT p.player_id AS "playerId", p.side, p.lane,
+                count(*)::int AS games, max(w.started_at) AS last
+           FROM war_participants p
+           JOIN wars w ON w.id = p.war_id AND w.guild_id = $1
+          WHERE p.lane IS NOT NULL
+          GROUP BY p.player_id, p.side, p.lane
+       ) tally
+      ORDER BY "playerId", games DESC, last DESC`,
+    [GUILD_ID],
+  );
+  return rows;
+}
+
+/**
+ * Reconstruir una guerra que ya pasó, a partir de lo único que quedó de ella.
+ *
+ * De las guerras viejas no hay tablero ni plan: hay un pantallazo de la
+ * pantalla final y la memoria de quien estuvo. Lo que no se carga se pierde, y
+ * un historial con seis meses en blanco no responde la pregunta para la que
+ * existe -- quién viene rindiendo y quién no.
+ *
+ * Se separa de `startWar` en vez de darle parámetros porque no comparten casi
+ * nada: aquí no hay despliegue del que copiar, no hay formaciones que exigir
+ * bloqueadas, la fecha es del pasado y la línea puede faltar. Mezclarlas
+ * habría dejado a la que se usa cada semana llena de ramas para el caso raro.
+ *
+ * Que haya una guerra en curso no lo impide: cargar el historial atrasado un
+ * martes por la tarde no tiene por qué esperar a que nadie esté peleando.
+ */
+export async function importWar({ name, matchType, outcome, startedAt, participants } = {}) {
+  if (!MATCH_TYPES.includes(matchType)) {
+    throw Object.assign(new Error('elige que tipo de partida fue: liga, ranked o personalizada'), {
+      status: 400,
+    });
+  }
+  if (outcome !== null && outcome !== undefined && !OUTCOMES.includes(outcome)) {
+    throw Object.assign(new Error('resultado invalido'), { status: 400 });
+  }
+
+  const when = Date.parse(startedAt ?? '');
+  if (!Number.isFinite(when)) {
+    throw Object.assign(new Error('pon la fecha en que se jugo esa guerra'), { status: 400 });
+  }
+  // Un margen de un día por delante y no cero: quien carga una guerra de
+  // anoche desde otro huso escribe una hora que aquí todavía no ha llegado, y
+  // rechazársela sería un error de reloj disfrazado de error suyo.
+  if (when > Date.now() + 24 * 60 * 60 * 1000) {
+    throw Object.assign(new Error('esa fecha esta en el futuro'), { status: 400 });
+  }
+
+  const wanted = Array.isArray(participants) ? participants : [];
+  if (!wanted.length) {
+    throw Object.assign(new Error('no hay nadie en esa guerra'), { status: 400 });
+  }
+
+  // Los inactivos entran: media guerra de hace seis meses la jugó gente que ya
+  // no está, y dejarlos fuera vaciaría justo las guerras que se quieren
+  // recuperar. Lo que no puede entrar es alguien que no existe en el gremio.
+  const known = new Set(
+    (await pool.query(`SELECT id FROM players WHERE guild_id = $1`, [GUILD_ID])).rows.map(
+      (r) => r.id,
+    ),
+  );
+
+  const rows = [];
+  const seen = new Set();
+  for (const one of wanted) {
+    const playerId = one?.playerId;
+    if (!playerId || seen.has(playerId)) continue;
+    if (!known.has(playerId)) {
+      throw Object.assign(new Error(`«${playerId}» no es un miembro del gremio`), { status: 400 });
+    }
+    if (!SIDES.includes(one.side)) {
+      throw Object.assign(new Error('cada fila necesita bando: ataque o defensa'), { status: 400 });
+    }
+    const lane = one.lane ?? null;
+    if (lane !== null && !LANES.includes(lane)) {
+      throw Object.assign(new Error('linea desconocida'), { status: 400 });
+    }
+    seen.add(playerId);
+    rows.push({ playerId, side: one.side, lane, stats: cleanStats(one.stats) });
+  }
+  if (rows.length > WAR_CAPACITY * 2) {
+    throw Object.assign(new Error(`una guerra no tiene mas de ${WAR_CAPACITY * 2} filas`), {
+      status: 400,
+    });
+  }
+
+  const id = randomUUID();
+  const opened = new Date(when).toISOString();
+  const closed = new Date(when + WAR_MINUTES * 60 * 1000).toISOString();
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      `INSERT INTO wars (id, guild_id, name, match_type, outcome, started_at, ended_at, imported)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, true)`,
+      [
+        id,
+        GUILD_ID,
+        String(name ?? '').trim() || 'Guerra de gremio',
+        matchType,
+        outcome ?? null,
+        opened,
+        closed,
+      ],
+    );
+    for (const row of rows) {
+      await client.query(
+        `INSERT INTO war_participants (war_id, player_id, side, lane, stats)
+         VALUES ($1, $2, $3, $4, $5::jsonb)`,
+        [id, row.playerId, row.side, row.lane, JSON.stringify(row.stats)],
+      );
+    }
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+
+  return { id, participants: rows.length };
 }
 
 /**

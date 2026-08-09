@@ -408,6 +408,12 @@ ALTER TABLE wars ADD COLUMN IF NOT EXISTS plans JSONB NOT NULL DEFAULT '{}'::jso
 -- igual que side y lane.
 ALTER TABLE wars ADD COLUMN IF NOT EXISTS match_type TEXT NOT NULL DEFAULT 'custom';
 
+-- Si la guerra se reconstruyó a partir de sus pantallazos en vez de haberse
+-- arbitrado en vivo. Se marca porque cambia lo que se puede esperar del
+-- registro: no hay plan, las líneas pueden faltar y las cifras las tecleó o
+-- las leyó alguien meses después. Quien mire el historial merece saberlo.
+ALTER TABLE wars ADD COLUMN IF NOT EXISTS imported BOOLEAN NOT NULL DEFAULT false;
+
 CREATE TABLE IF NOT EXISTS war_participants (
   war_id       TEXT NOT NULL REFERENCES wars(id) ON DELETE CASCADE,
   player_id    TEXT NOT NULL,
@@ -427,6 +433,24 @@ ALTER TABLE war_participants ADD COLUMN IF NOT EXISTS build_id TEXT;
 -- the results screen reports more than anyone thought to name in advance, and a
 -- column per figure would mean a migration every time the game adds one.
 ALTER TABLE war_participants ADD COLUMN IF NOT EXISTS stats JSONB NOT NULL DEFAULT '{}'::jsonb;
+
+-- Los cambios a mitad de guerra: cuándo dejó el sitio quien lo dejó y cuándo lo
+-- ocupó quien entró. Nulo en los dos es lo corriente -- casi todo el mundo
+-- empieza y termina la guerra -- y por eso son marcas y no una tabla aparte.
+--
+-- Quien se sale sigue siendo participante en vez de borrarse: peleó veinte
+-- minutos, sus cifras salen en el pantallazo final y su línea estuvo cubierta
+-- por él hasta que dejó de estarlo. Borrarlo sería decir que no estuvo.
+ALTER TABLE war_participants ADD COLUMN IF NOT EXISTS left_at TIMESTAMPTZ;
+ALTER TABLE war_participants ADD COLUMN IF NOT EXISTS joined_at TIMESTAMPTZ;
+
+-- La línea deja de ser obligatoria por las guerras que se cargan desde el
+-- pantallazo final: la pantalla de resultados dice quién peleó y cuánto hizo,
+-- pero no dónde estaba, y meses después nadie lo recuerda. Nulo es «no consta»,
+-- que es la verdad, y vale más que repartir a treinta personas al azar entre
+-- tres líneas para satisfacer una restricción. El puntaje de impacto no lee la
+-- línea -- sólo el bando -- así que una guerra sin líneas se puntúa entera.
+ALTER TABLE war_participants ALTER COLUMN lane DROP NOT NULL;
 
 -- The results screens, pasted in after the fight. More than one because the
 -- game shows them a page at a time, and kept whole so they can be read again
