@@ -24,18 +24,14 @@ interface UsualLane {
   games: number;
 }
 
-/** Una captura a la espera de ser leída, con el bando al que pertenece. */
-interface Shot {
-  image: string;
-  side: WarSide;
-}
-
 /** Una fila de la guerra que se está reconstruyendo. */
 interface Row {
   playerId: string;
   side: WarSide;
   lane: WarLane | null;
   stats: Record<string, number>;
+  /** Por qué se le puso ese bando, para poder decirlo en pantalla. */
+  why: 'siege' | 'usual' | 'guess' | 'manual';
 }
 
 interface Props {
@@ -72,12 +68,16 @@ const brief = (value: number | undefined) => {
  * historial con huecos no contesta la única pregunta para la que sirve: quién
  * viene rindiendo y quién no.
  *
- * Va en tres pasos porque son tres cosas distintas: lo que fue la guerra, lo
- * que dice la pantalla de resultados, y dónde estaba cada uno. Los dos
- * primeros los resuelve la máquina -- el lector ya existe y se reaprovecha
- * entero. El tercero no lo sabe nadie más que quien estuvo, así que se le da
- * hecho lo más probable, la línea en la que ese jugador juega siempre, y sólo
- * tiene que corregir a los pocos que ese día se movieron.
+ * Va en dos pasos porque son dos cosas distintas: lo que fue la guerra, y
+ * quién la peleó y desde dónde. Lo primero lo escribe quien la recuerda; lo
+ * segundo lo resuelve la máquina y él sólo corrige.
+ *
+ * Ni el bando ni la línea vienen en la captura -- el juego lista a los
+ * miembros con sus cifras y nada más --, así que los dos se deducen. La línea,
+ * de dónde juega siempre esa persona. El bando, del daño de asedio, que sólo
+ * lo puede haber hecho quien atacaba: derribar puertas es objetivo de ataque y
+ * la defensa no tiene manera de producir esa cifra. Lo que la evidencia no
+ * alcanza cae en lo más probable, y lo probable se corrige de un toque.
  */
 const ImportWar: React.FC<Props> = ({ players, onClose, onImported }) => {
   const [step, setStep] = useState<'datos' | 'filas'>('datos');
@@ -87,15 +87,10 @@ const ImportWar: React.FC<Props> = ({ players, onClose, onImported }) => {
   const [matchType, setMatchType] = useState<WarMatchType>('league');
   const [outcome, setOutcome] = useState<WarOutcome | null>(null);
 
-  const [shots, setShots] = useState<Shot[]>([]);
-  // El bando que se le pone a lo que se suba ahora. Cada captura es de una
-  // batalla, y una guerra son dos: no se puede deducir de la imagen.
-  const [tagging, setTagging] = useState<WarSide>('attack');
-
-  // La cola de lectura: el lector abre una vez por bando, porque las filas de
-  // cada pantalla pertenecen a esa batalla y perder eso sería perder el bando.
-  const [queue, setQueue] = useState<WarSide[]>([]);
-  const [reading, setReading] = useState<WarSide | null>(null);
+  // Las capturas, sin más: no se les pregunta de qué bando son porque la
+  // pantalla del juego no lo dice y quien sube la imagen tampoco lo sabe.
+  const [shots, setShots] = useState<string[]>([]);
+  const [reading, setReading] = useState(false);
 
   const [rows, setRows] = useState<Row[]>([]);
   const [usual, setUsual] = useState<Map<string, UsualLane>>(new Map());
@@ -115,13 +110,33 @@ const ImportWar: React.FC<Props> = ({ players, onClose, onImported }) => {
   const attach = async (blobs: Blob[]) => {
     setError(null);
     try {
-      const added = await Promise.all(
-        blobs.map(async (blob) => ({ image: await shrink(blob), side: tagging })),
-      );
+      const added = await Promise.all(blobs.map((blob) => shrink(blob)));
       setShots((prev) => [...prev, ...added]);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo leer la imagen');
     }
+  };
+
+  /**
+   * De qué bando peleó alguien, que la captura no dice.
+   *
+   * El daño de asedio es prueba y no indicio: derribar puertas es un objetivo
+   * de ataque y la defensa no tiene forma de producir esa cifra, así que
+   * cualquier número ahí sitúa a esa persona en ataque sin lugar a duda.
+   *
+   * Sin asedio no hay prueba, sólo probabilidad: puede ser un defensor o un
+   * atacante que no llegó a tocar la puerta. Se recurre entonces al bando en
+   * el que esa persona suele jugar, y a falta de historial se supone defensa,
+   * que es lo que queda cuando no hay ni rastro de ataque.
+   */
+  const sideOf = (
+    playerId: string,
+    stats: Record<string, number>,
+  ): { side: WarSide; why: Row['why'] } => {
+    if ((stats.siege ?? 0) > 0) return { side: 'attack', why: 'siege' };
+    const known = usual.get(playerId);
+    if (known) return { side: known.side, why: 'usual' };
+    return { side: 'defense', why: 'guess' };
   };
 
   // Pegar es como llega de verdad una captura: se hace con el teclado y se
@@ -142,50 +157,44 @@ const ImportWar: React.FC<Props> = ({ players, onClose, onImported }) => {
     };
     window.addEventListener('paste', onPaste);
     return () => window.removeEventListener('paste', onPaste);
-  }, [step, tagging]);
-
-  /** Empieza la lectura por el primer bando que tenga capturas. */
-  const read = () => {
-    const pending = SIDES.filter((s) => shots.some((shot) => shot.side === s));
-    if (!pending.length) return;
-    setRows([]);
-    setQueue(pending.slice(1));
-    setReading(pending[0]);
-  };
+  }, [step]);
 
   /**
-   * Lo leído de un bando, ya emparejado con el gremio, pasa a ser filas.
+   * Lo leído, ya emparejado con el gremio, pasa a ser filas.
    *
-   * La línea se propone aquí y no en el paso siguiente para que llegue
-   * colocada: el paso siguiente es para corregir, no para repartir. Quien no
-   * tenga historial se queda sin línea, que es lo honesto -- adivinarle una
-   * sería inventar un dato que nadie podrá distinguir de uno real.
+   * Todas las capturas se leen de una vez y no una por una: son páginas de una
+   * misma tabla, y lo que separa a unos de otros no es en qué imagen salieron
+   * sino lo que hicieron. El lector ya deduplica por persona entre imágenes.
+   *
+   * El bando y la línea se proponen aquí y no en el paso siguiente para que
+   * lleguen puestos: el paso siguiente es para corregir, no para repartir.
+   * Quien no tenga historial se queda sin línea, que es lo honesto -- inventarle
+   * una sería un dato que nadie podrá distinguir después de uno real.
    */
-  const collect = async (side: WarSide, found: ReadRow[]) => {
-    setRows((prev) => {
-      const already = new Set(prev.map((r) => r.playerId));
-      const fresh = found
-        .filter((r) => r.playerId && !already.has(r.playerId))
-        .map((r) => ({
-          playerId: r.playerId as string,
-          side,
-          lane: usual.get(r.playerId as string)?.lane ?? null,
-          stats: r.figures,
-        }));
-      return [...prev, ...fresh];
-    });
-
-    const next = queue[0] ?? null;
-    setQueue((rest) => rest.slice(1));
-    setReading(next);
-    if (!next) setStep('filas');
+  const collect = async (found: ReadRow[]) => {
+    setRows(
+      found
+        .filter((r) => r.playerId)
+        .map((r) => {
+          const playerId = r.playerId as string;
+          const { side, why } = sideOf(playerId, r.figures);
+          return { playerId, side, why, lane: usual.get(playerId)?.lane ?? null, stats: r.figures };
+        }),
+    );
+    setReading(false);
+    setStep('filas');
   };
 
   const setLane = (playerId: string, lane: WarLane | null) =>
     setRows((prev) => prev.map((r) => (r.playerId === playerId ? { ...r, lane } : r)));
 
+  // Cambiado a mano deja de ser deducido, incluso si contradice al asedio:
+  // quien estuvo ahí sabe más que la cifra, y la marca de "seguro" no puede
+  // seguir puesta sobre algo que ya no dice lo que decía la prueba.
   const setSide = (playerId: string, side: WarSide) =>
-    setRows((prev) => prev.map((r) => (r.playerId === playerId ? { ...r, side } : r)));
+    setRows((prev) =>
+      prev.map((r) => (r.playerId === playerId ? { ...r, side, why: 'manual' as const } : r)),
+    );
 
   const drop = (playerId: string) =>
     setRows((prev) => prev.filter((r) => r.playerId !== playerId));
@@ -194,12 +203,31 @@ const ImportWar: React.FC<Props> = ({ players, onClose, onImported }) => {
   const resetLanes = () =>
     setRows((prev) => prev.map((r) => ({ ...r, lane: usual.get(r.playerId)?.lane ?? null })));
 
+  /**
+   * Todos al mismo bando de un toque.
+   *
+   * Está aquí por si la captura resultó ser de una sola de las dos batallas:
+   * entonces todas sus filas son del mismo bando, y deducirlas una a una las
+   * habría repartido entre los dos. Se respeta a quien tenga asedio, que es el
+   * único dato duro de la pantalla y no una suposición que convenga pisar.
+   */
+  const allTo = (side: WarSide) =>
+    setRows((prev) =>
+      prev.map((r) => (r.why === 'siege' ? r : { ...r, side, why: 'manual' as const })),
+    );
+
   const add = (playerId: string) => {
     if (!playerId || rows.some((r) => r.playerId === playerId)) return;
     const known = usual.get(playerId);
     setRows((prev) => [
       ...prev,
-      { playerId, side: known?.side ?? 'attack', lane: known?.lane ?? null, stats: {} },
+      {
+        playerId,
+        side: known?.side ?? 'defense',
+        why: known ? ('usual' as const) : ('guess' as const),
+        lane: known?.lane ?? null,
+        stats: {},
+      },
     ]);
   };
 
@@ -224,7 +252,7 @@ const ImportWar: React.FC<Props> = ({ players, onClose, onImported }) => {
       for (const shot of shots) {
         await api(`/war/wars/${id}/images`, {
           method: 'POST',
-          body: JSON.stringify({ image: shot.image, caption: WAR_SIDE_LABELS[shot.side] }),
+          body: JSON.stringify({ image: shot }),
         }).catch(() => undefined);
       }
       onImported(id);
@@ -236,6 +264,8 @@ const ImportWar: React.FC<Props> = ({ players, onClose, onImported }) => {
 
   const ready = Boolean(when) && rows.length > 0;
   const missing = rows.filter((r) => !r.lane).length;
+  // A cuántos les consta el bando por prueba y no por conjetura.
+  const sure = rows.filter((r) => r.why === 'siege').length;
 
   /* ------------------------------------------------------------- capturas */
 
@@ -324,31 +354,11 @@ const ImportWar: React.FC<Props> = ({ players, onClose, onImported }) => {
             </div>
           </div>
 
-          {/* Cada captura es de una batalla, y una guerra son dos. Cuál es cuál
-              no está en la imagen, así que se dice al subirla. */}
+          {/* No se pregunta de qué bando es cada captura: la pantalla del juego
+              lista a los miembros con sus cifras y no lo dice, así que
+              preguntarlo era pedir un dato que nadie tiene. Se deduce después,
+              del daño de asedio, y se corrige en el paso siguiente. */}
           <div className="pt-3 border-t border-slate-800">
-            <div className="flex items-center gap-3 flex-wrap mb-2">
-              <span className="text-[11px] uppercase tracking-wider text-slate-500">
-                Estas capturas son de
-              </span>
-              <div className="flex gap-1">
-                {SIDES.map((s) => (
-                  <button
-                    key={s}
-                    type="button"
-                    onClick={() => setTagging(s)}
-                    className={`min-h-tap px-4 text-sm font-bold rounded border transition-all ${
-                      tagging === s
-                        ? 'border-amber-500 text-amber-400 bg-amber-500/10'
-                        : 'border-slate-800 text-slate-400 hover:border-slate-600'
-                    }`}
-                  >
-                    {WAR_SIDE_LABELS[s]}
-                  </button>
-                ))}
-              </div>
-            </div>
-
             <input
               ref={file}
               type="file"
@@ -366,38 +376,22 @@ const ImportWar: React.FC<Props> = ({ players, onClose, onImported }) => {
               className="w-full min-h-tap border border-dashed border-slate-700 hover:border-amber-700 rounded-lg text-sm text-slate-400 hover:text-amber-500 transition-all flex items-center justify-center gap-2 py-4"
             >
               <i className="fa-solid fa-image"></i>
-              Añadir capturas de {WAR_SIDE_LABELS[tagging]} — o pégalas con Ctrl+V
+              Añadir las capturas de resultados — o pégalas con Ctrl+V
             </button>
 
             {shots.length > 0 && (
               <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2">
                 {shots.map((shot, at) => (
                   <figure key={at} className="relative rounded overflow-hidden border border-slate-800">
-                    <img src={shot.image} alt={`Captura ${at + 1}`} className="w-full h-20 object-cover" />
-                    <figcaption className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-slate-950/85 px-1.5 py-0.5">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setShots((prev) =>
-                            prev.map((s, i) =>
-                              i === at ? { ...s, side: s.side === 'attack' ? 'defense' : 'attack' } : s,
-                            ),
-                          )
-                        }
-                        title="Cambiar de bando"
-                        className="text-[10px] uppercase tracking-wider text-amber-400 hover:text-amber-300"
-                      >
-                        {WAR_SIDE_LABELS[shot.side]}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setShots((prev) => prev.filter((_, i) => i !== at))}
-                        aria-label="Quitar la captura"
-                        className="text-slate-500 hover:text-red-400"
-                      >
-                        <i className="fa-solid fa-xmark text-[10px]"></i>
-                      </button>
-                    </figcaption>
+                    <img src={shot} alt={`Captura ${at + 1}`} className="w-full h-20 object-cover" />
+                    <button
+                      type="button"
+                      onClick={() => setShots((prev) => prev.filter((_, i) => i !== at))}
+                      aria-label={`Quitar la captura ${at + 1}`}
+                      className="absolute top-0 right-0 min-h-tap min-w-tap flex items-center justify-center text-slate-400 hover:text-red-400 bg-slate-950/70 rounded-bl"
+                    >
+                      <i className="fa-solid fa-xmark text-xs"></i>
+                    </button>
                   </figure>
                 ))}
               </div>
@@ -416,7 +410,7 @@ const ImportWar: React.FC<Props> = ({ players, onClose, onImported }) => {
             </button>
             <button
               type="button"
-              onClick={read}
+              onClick={() => setReading(true)}
               disabled={!shots.length || !when}
               className="min-h-tap bg-amber-600 hover:bg-amber-500 disabled:bg-slate-800 disabled:text-slate-600 text-white text-sm font-bold px-6 rounded transition-all flex items-center gap-2"
             >
@@ -428,16 +422,13 @@ const ImportWar: React.FC<Props> = ({ players, onClose, onImported }) => {
 
         {reading && (
           <ResultsReader
-            images={shots.filter((s) => s.side === reading).map((s) => s.image)}
+            images={shots}
             participants={players.map((p) => ({ playerId: p.id, name: p.name }))}
-            title={`Leer ${WAR_SIDE_LABELS[reading]}`}
-            subtitle="Los nombres se emparejan contra el gremio entero. Corrige lo que la lectura entendió mal antes de seguir."
+            title="Leer los resultados"
+            subtitle="Los nombres se emparejan contra el gremio entero, bajas incluidas. Corrige lo que la lectura entendió mal antes de seguir."
             applyLabel="Aceptar"
-            onClose={() => {
-              setReading(null);
-              setQueue([]);
-            }}
-            onApply={(found) => collect(reading, found)}
+            onClose={() => setReading(false)}
+            onApply={collect}
           />
         )}
       </Sheet>
@@ -451,11 +442,7 @@ const ImportWar: React.FC<Props> = ({ players, onClose, onImported }) => {
   return (
     <Sheet
       title="Dónde estaba cada uno"
-      subtitle={
-        usual.size > 0
-          ? 'Cada uno llega en la línea en la que juega siempre, según las guerras ya registradas. Corrige a los que ese día se movieron.'
-          : 'Todavía no hay guerras registradas de las que deducir dónde juega cada uno, así que las líneas van en blanco.'
-      }
+      subtitle="Ni el bando ni la línea vienen en la captura, así que van deducidos. Quien hizo daño de asedio estaba atacando y eso es seguro; el resto llega donde suele jugar. Corrige lo que no cuadre."
       size="xl"
       onClose={onClose}
       footer={
@@ -525,6 +512,30 @@ const ImportWar: React.FC<Props> = ({ players, onClose, onImported }) => {
           )}
         </div>
 
+        {/* Si la captura resultó ser de una sola de las dos batallas, todas sus
+            filas son del mismo bando y deducirlas una a una las habrá repartido
+            entre los dos. Un toque lo arregla, y quien tenga asedio se queda
+            donde está: es lo único que la pantalla dice sin lugar a duda. */}
+        {rows.length > 0 && (
+          <div className="flex items-center gap-2 flex-wrap text-[11px] text-slate-500">
+            <span>
+              {sure} con asedio, en Ataque seguro.{' '}
+              {rows.length - sure > 0 && `Los otros ${rows.length - sure}, a lo más probable:`}
+            </span>
+            {rows.length - sure > 0 &&
+              SIDES.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => allTo(s)}
+                  className="min-h-tap px-3 rounded border border-slate-800 text-slate-400 hover:border-amber-700 hover:text-amber-500 transition-all"
+                >
+                  Todos a {WAR_SIDE_LABELS[s]}
+                </button>
+              ))}
+          </div>
+        )}
+
         {rows.length === 0 && (
           <p className="text-sm text-slate-500 py-4 text-center">
             Nadie todavía. Añádelos abajo.
@@ -548,12 +559,28 @@ const ImportWar: React.FC<Props> = ({ players, onClose, onImported }) => {
                 </p>
               </div>
 
+              {/* El bando, con de dónde salió. Un dato deducido que se
+                  presenta igual que uno sabido es un dato en el que se acaba
+                  confiando de más, y de éste depende el puntaje de impacto. */}
               <button
                 type="button"
                 onClick={() => setSide(row.playerId, row.side === 'attack' ? 'defense' : 'attack')}
-                title="Cambiar de bando"
-                className="min-h-tap px-2 text-[11px] uppercase tracking-wider rounded border border-slate-800 text-slate-400 hover:border-amber-700 hover:text-amber-500 transition-all"
+                title={
+                  row.why === 'siege'
+                    ? 'Hizo daño de asedio, así que estaba atacando'
+                    : row.why === 'usual'
+                      ? 'El bando en el que suele jugar'
+                      : row.why === 'manual'
+                        ? 'Puesto a mano'
+                        : 'Supuesto: ni hay asedio ni hay historial'
+                }
+                className={`min-h-tap px-2 text-[11px] uppercase tracking-wider rounded border transition-all ${
+                  row.why === 'siege'
+                    ? 'border-amber-800/70 text-amber-500/90 hover:border-amber-600'
+                    : 'border-dashed border-slate-700 text-slate-500 hover:border-amber-700 hover:text-amber-500'
+                }`}
               >
+                {row.why === 'siege' && <i className="fa-solid fa-tower-observation mr-1"></i>}
                 {WAR_SIDE_LABELS[row.side]}
               </button>
 
