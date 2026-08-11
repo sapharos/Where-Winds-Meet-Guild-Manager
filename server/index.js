@@ -1194,9 +1194,12 @@ app.post('/api/war/wars/:id/end', requireAuth, requirePermission('war.edit'), as
   res.json(await endWar(req.params.id, req.body?.outcome));
 }));
 
-// Un cambio con la guerra en marcha. Sin `in` es una baja sin relevo.
+// Un cambio: en la guerra en marcha, o corrigiendo un acta ya cerrada. Sin
+// `in` es una baja sin relevo; sin `out`, un alta suelta, que necesita `side`.
 app.post('/api/war/wars/:id/substitute', requireAuth, requirePermission('war.edit'), asHandler(async (req, res) => {
-  res.json(await substitute(req.params.id, req.body?.out, req.body?.in ?? null));
+  res.json(
+    await substitute(req.params.id, req.body?.out ?? null, req.body?.in ?? null, req.body?.side),
+  );
 }));
 
 // Una guerra que ya pasó, reconstruida desde sus pantallazos.

@@ -558,29 +558,70 @@ export async function setContribution(warId, playerId, body) {
  * La build no se hereda, que es de quien la armó; se resuelve la suya.
  *
  * Con `inPlayerId` nulo es una baja sin relevo, que también hay que poder
- * decir: se quedaron veintinueve y el hueco es parte de lo que pasó.
+ * decir: se quedaron veintinueve y el hueco es parte de lo que pasó. Con
+ * `outPlayerId` nulo es lo contrario, un alta suelta: alguien que peleó y a
+ * quien el acta no menciona, sin que conste a quién relevó.
+ *
+ * Sirve igual con la guerra ya cerrada, y ése es el caso corriente: el cambio
+ * se hace en el juego y se olvida aquí, y no se descubre hasta que la captura
+ * enseña a alguien que en el acta no está. Negarse entonces sería condenar esa
+ * guerra a estar mal para siempre, que es peor que corregirla tarde. Con la
+ * guerra cerrada no hay tablero que tocar -- las formaciones se soltaron al
+ * finalizarla -- así que sólo se escribe el acta.
  */
-export async function substitute(warId, outPlayerId, inPlayerId) {
+export async function substitute(warId, outPlayerId, inPlayerId, sideWanted) {
+  if (!outPlayerId && !inPlayerId) {
+    throw Object.assign(new Error('un cambio necesita a alguien que entre o que salga'), {
+      status: 400,
+    });
+  }
+  // Sin nadie a quien relevar no hay puesto del que heredar el bando, así que
+  // hay que decirlo. Se pide en vez de suponerlo porque el bando decide contra
+  // quién se puntúa a esa persona, y un ataque contado como defensa mide mal.
+  if (!outPlayerId && !SIDES.includes(sideWanted)) {
+    throw Object.assign(new Error('di de que bando fue: ataque o defensa'), { status: 400 });
+  }
+
   const war = await pool.query(
-    `SELECT id FROM wars WHERE id = $1 AND guild_id = $2 AND ended_at IS NULL`,
+    `SELECT id, started_at AS "startedAt", ended_at AS "endedAt"
+       FROM wars WHERE id = $1 AND guild_id = $2`,
     [warId, GUILD_ID],
   );
   if (!war.rows.length) {
-    throw Object.assign(new Error('esa guerra no esta en curso'), { status: 404 });
+    throw Object.assign(new Error('esa guerra no existe'), { status: 404 });
   }
+  const live = war.rows[0].endedAt === null;
+  // Cuándo pasó. Con la guerra en marcha es ahora, que es la verdad. Corregida
+  // después, nadie recuerda el minuto, así que se apunta el comienzo de la
+  // guerra: la marca contesta «hubo cambio», no «a qué hora», y fecharla hoy
+  // diría que alguien entró en una guerra que llevaba semanas terminada.
+  //
+  // Va como parámetro y no cosido al SQL -- `COALESCE($n, now())` -- para que
+  // la consulta sea siempre la misma cadena y no haya dos versiones de ella
+  // que puedan separarse.
+  const when = live ? null : war.rows[0].startedAt;
 
-  const leaving = await pool.query(
-    `SELECT side, lane, unit_ids AS "unitIds", left_at AS "leftAt"
-       FROM war_participants WHERE war_id = $1 AND player_id = $2`,
-    [warId, outPlayerId],
-  );
-  if (!leaving.rows.length) {
-    throw Object.assign(new Error('ese miembro no esta en esta guerra'), { status: 404 });
+  // El bando y la línea salen del puesto que se libera. Sin relevado, el bando
+  // viene dicho y la línea se queda sin constar, que es la verdad: de alguien a
+  // quien el acta no menciona nadie sabe en qué línea estuvo.
+  let side = sideWanted ?? null;
+  let lane = null;
+  let unitIds = [];
+
+  if (outPlayerId) {
+    const leaving = await pool.query(
+      `SELECT side, lane, unit_ids AS "unitIds", left_at AS "leftAt"
+         FROM war_participants WHERE war_id = $1 AND player_id = $2`,
+      [warId, outPlayerId],
+    );
+    if (!leaving.rows.length) {
+      throw Object.assign(new Error('ese miembro no esta en esta guerra'), { status: 404 });
+    }
+    if (leaving.rows[0].leftAt) {
+      throw Object.assign(new Error('ese miembro ya habia salido'), { status: 409 });
+    }
+    ({ side, lane, unitIds } = leaving.rows[0]);
   }
-  if (leaving.rows[0].leftAt) {
-    throw Object.assign(new Error('ese miembro ya habia salido'), { status: 409 });
-  }
-  const { side, lane, unitIds } = leaving.rows[0];
 
   if (inPlayerId) {
     if (inPlayerId === outPlayerId) {
@@ -591,7 +632,9 @@ export async function substitute(warId, outPlayerId, inPlayerId) {
       [GUILD_ID, inPlayerId],
     );
     if (!member.rows.length) throw Object.assign(new Error('no such member'), { status: 404 });
-    if (member.rows[0].isActive === false) {
+    // Que ya no esté en el gremio sólo impide entrar a una guerra en marcha.
+    // En una cerrada hace meses es corriente: peleó, y luego se fue.
+    if (live && member.rows[0].isActive === false) {
       throw Object.assign(new Error('ese miembro ya no esta en el gremio'), { status: 409 });
     }
     // Ya peleó esta guerra: puede ser que siga dentro, o que saliera antes y
@@ -610,28 +653,35 @@ export async function substitute(warId, outPlayerId, inPlayerId) {
   try {
     await client.query('BEGIN');
 
-    await client.query(
-      `UPDATE war_participants SET left_at = now() WHERE war_id = $1 AND player_id = $2`,
-      [warId, outPlayerId],
-    );
+    let spot = { rows: [] };
+    if (outPlayerId) {
+      await client.query(
+        `UPDATE war_participants SET left_at = COALESCE($3::timestamptz, now())
+          WHERE war_id = $1 AND player_id = $2`,
+        [warId, outPlayerId, when],
+      );
 
-    // El puesto en el tablero se hereda con su sitio en la línea: quien entra
-    // ocupa el hueco del que salió, no el final de la fila. El orden de una
-    // línea es quién entra primero, y un relevo no cambia eso.
-    const spot = await client.query(
-      `DELETE FROM war_deployments
-        WHERE guild_id = $1 AND side = $2 AND player_id = $3
-        RETURNING position, is_lane_leader AS "isLaneLeader"`,
-      [GUILD_ID, side, outPlayerId],
-    );
+      // El puesto en el tablero se hereda con su sitio en la línea: quien entra
+      // ocupa el hueco del que salió, no el final de la fila. El orden de una
+      // línea es quién entra primero, y un relevo no cambia eso. Sólo mientras
+      // se pelea: una guerra cerrada ya no tiene tablero que rehacer.
+      if (live) {
+        spot = await client.query(
+          `DELETE FROM war_deployments
+            WHERE guild_id = $1 AND side = $2 AND player_id = $3
+            RETURNING position, is_lane_leader AS "isLaneLeader"`,
+          [GUILD_ID, side, outPlayerId],
+        );
+      }
+    }
 
     if (inPlayerId) {
       await client.query(
         `INSERT INTO war_participants (war_id, player_id, side, lane, unit_ids, joined_at)
-         VALUES ($1, $2, $3, $4, $5, now())`,
-        [warId, inPlayerId, side, lane, JSON.stringify(unitIds ?? [])],
+         VALUES ($1, $2, $3, $4, $5, COALESCE($6::timestamptz, now()))`,
+        [warId, inPlayerId, side, lane, JSON.stringify(unitIds ?? []), when],
       );
-      if (lane) {
+      if (live && lane) {
         await client.query(
           `INSERT INTO war_deployments (guild_id, side, lane, player_id, position, unit_ids, is_lane_leader)
            VALUES ($1, $2, $3, $4, $5, $6, $7)

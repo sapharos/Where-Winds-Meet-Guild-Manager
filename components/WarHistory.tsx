@@ -14,7 +14,8 @@ import {
   WeaponSet,
 } from '../types';
 import ImportWar from './ImportWar';
-import ResultsReader from './ResultsReader';
+import MissedSwaps from './MissedSwaps';
+import ResultsReader, { ReadRow } from './ResultsReader';
 import FigureCell from './FigureCell';
 import { SetBadge } from './BuildEditor';
 import Sheet from './Sheet';
@@ -133,6 +134,9 @@ const WarHistory: React.FC<Props> = ({ canEdit, weaponSets, players, onClose, on
   const [zoom, setZoom] = useState<number | null>(null);
   const [reading, setReading] = useState(false);
   const [importing, setImporting] = useState(false);
+  // Lo leído, esperando a que se decidan los cambios que nadie apuntó. No se
+  // guarda nada hasta entonces: media lectura escrita sería peor que ninguna.
+  const [pending, setPending] = useState<ReadRow[] | null>(null);
   // Impact first, because a results table nobody ordered is read top to bottom
   // looking for who mattered, and that is the column that answers it.
   const [sort, setSort] = useState<{ key: string; desc: boolean }>({ key: 'impact', desc: true });
@@ -317,6 +321,26 @@ const WarHistory: React.FC<Props> = ({ canEdit, weaponSets, players, onClose, on
     } catch (err) {
       setMessage({ text: err instanceof Error ? err.message : 'No se pudo borrar', ok: false });
     }
+  };
+
+  /**
+   * Las cifras leídas, escritas una a una.
+   *
+   * Sale del lector para poder llamarse dos veces: directamente cuando todas
+   * las filas son de gente que ya figura, y después de registrar los cambios
+   * cuando no. Recarga al final porque los cambios habrán movido el acta, y
+   * porque el puntaje de impacto se recalcula sobre todo el reparto.
+   */
+  const saveRows = async (rows: ReadRow[]) => {
+    for (const row of rows) {
+      if (!row.playerId) continue;
+      await api(`/war/wars/${chosen}/participants/${row.playerId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ stats: row.figures }),
+      }).catch(() => undefined);
+    }
+    if (chosen) await load(chosen);
+    setMessage({ text: `${rows.length} filas guardadas.`, ok: true });
   };
 
   const setFigure = async (playerId: string, key: string, value: number | null) => {
@@ -816,18 +840,48 @@ const WarHistory: React.FC<Props> = ({ canEdit, weaponSets, players, onClose, on
         <ResultsReader
           images={detail.images.map((i) => i.image)}
           participants={detail.participants.map((p) => ({ playerId: p.playerId, name: p.name }))}
+          others={players
+            .filter((p) => !detail.participants.some((q) => q.playerId === p.id))
+            .map((p) => ({ playerId: p.id, name: p.name }))}
           onClose={() => setReading(false)}
           onApply={async (rows) => {
-            for (const row of rows) {
-              if (!row.playerId) continue;
-              await api(`/war/wars/${chosen}/participants/${row.playerId}`, {
-                method: 'PATCH',
-                body: JSON.stringify({ stats: row.figures }),
-              }).catch(() => undefined);
-            }
+            const known = new Set(detail.participants.map((p) => p.playerId));
+            const extras = rows.filter((r) => r.playerId && !known.has(r.playerId));
             setReading(false);
-            if (chosen) await load(chosen);
-            setMessage({ text: `${rows.length} filas guardadas.`, ok: true });
+            // Alguien a quien el acta no menciona no puede recibir sus cifras
+            // todavía: primero hay que decir por quién entró, que es lo que le
+            // da bando y línea. Las filas esperan a que se decida.
+            if (extras.length) {
+              setPending(rows);
+              return;
+            }
+            await saveRows(rows);
+          }}
+        />
+      )}
+
+      {pending && detail && (
+        <MissedSwaps
+          extras={pending
+            .filter((r) => r.playerId && !detail.participants.some((p) => p.playerId === r.playerId))
+            .map((r) => ({
+              playerId: r.playerId as string,
+              name: players.find((p) => p.id === r.playerId)?.name ?? r.read,
+            }))}
+          absent={detail.participants
+            .filter((p) => !pending.some((r) => r.playerId === p.playerId))
+            .map((p) => ({ playerId: p.playerId, name: p.name, side: p.side }))}
+          onClose={() => setPending(null)}
+          onConfirm={async (swaps) => {
+            for (const swap of swaps) {
+              await api(`/war/wars/${chosen}/substitute`, {
+                method: 'POST',
+                body: JSON.stringify({ out: swap.out, in: swap.in, side: swap.side }),
+              });
+            }
+            const rows = pending;
+            setPending(null);
+            await saveRows(rows);
           }}
         />
       )}

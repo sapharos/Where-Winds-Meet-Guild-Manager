@@ -209,6 +209,49 @@ const store: Store = {
   ],
 };
 
+/**
+ * Lo que se le añade a una guerra ya cerrada, encima de lo que trae el gremio
+ * inventado: capturas subidas, cambios que nadie apuntó, y cifras corregidas.
+ *
+ * Sin esto el historial era de sólo lectura en el banco -- `warDetail` se
+ * recalcula de los datos de fábrica en cada petición --, y justo la pantalla
+ * que se apoya en subir una imagen y leerla no se podía probar entera.
+ */
+const anexos: Record<
+  string,
+  {
+    images: { id: string; image: string; caption: string | null }[];
+    extras: { playerId: string; side: string; lane: string | null; joinedAt: string }[];
+    left: Record<string, string>;
+    stats: Record<string, Record<string, number>>;
+  }
+> = {};
+
+const anexoDe = (warId: string) =>
+  (anexos[warId] ??= { images: [], extras: [], left: {}, stats: {} });
+
+/** El detalle de fábrica con encima lo que se haya hecho en esta sesión. */
+const detalleConAnexos = (warId: string) => {
+  const base = fake.warDetail(warId) as Record<string, unknown> | null;
+  if (!base) return null;
+  const anexo = anexoDe(warId);
+  const participants = [
+    ...(base.participants as Record<string, unknown>[]),
+    ...anexo.extras.map((e) => ({
+      ...e,
+      name: store.players.find((p) => p.id === e.playerId)?.name ?? e.playerId,
+      leftAt: null,
+      stats: {},
+      weapons: [],
+    })),
+  ].map((p) => ({
+    ...p,
+    leftAt: anexo.left[p.playerId as string] ?? (p.leftAt ?? null),
+    stats: anexo.stats[p.playerId as string] ?? p.stats ?? {},
+  }));
+  return { ...base, images: [...(base.images as unknown[]), ...anexo.images], participants };
+};
+
 const json = (body: unknown, status = 200) =>
   new Response(status === 204 ? null : JSON.stringify(body), {
     status,
@@ -472,7 +515,7 @@ const GET: [RegExp, Ruta][] = [
     () => store.deployments.map((d) => ({ playerId: d.playerId, side: d.side, lane: d.lane, games: 3 })),
   ],
   [/^\/war\/wars$/, () => fake.warRows],
-  [/^\/war\/wars\/([^/]+)$/, (m) => fake.warDetail(m[1])],
+  [/^\/war\/wars\/([^/]+)$/, (m) => detalleConAnexos(m[1])],
   [/^\/players\/([^/]+)\/scans$/, (m) => fake.scansOf(m[1])],
   [/^\/players\/([^/]+)\/builds$/, (m) => store.builds.filter((b) => b.playerId === m[1])],
   [/^\/players\/([^/]+)\/wars$/, (m) => fake.warsOf(m[1])],
@@ -948,16 +991,47 @@ const ESCRITURAS: [string, RegExp, Ruta][] = [
     store.current = null;
     return { ok: true };
   }],
-  // El cambio en caliente: quien sale deja el tablero y quien entra ocupa su
-  // sitio, con su línea y su puesto. Es lo que se ve al hacerlo de verdad.
-  ['POST', /^\/war\/wars\/([^/]+)\/substitute$/, (_m, _req, body) => {
-    const sale = store.deployments.find((d) => d.playerId === body.out);
-    if (!sale) return { ok: false };
-    store.deployments = [
-      ...store.deployments.filter((d) => d.playerId !== body.out),
-      ...(body.in ? [{ ...sale, playerId: body.in as string }] : []),
-    ];
-    return { out: body.out, in: body.in ?? null, side: sale.side, lane: sale.lane };
+  // El cambio. Con la guerra en marcha mueve el tablero: quien sale lo deja y
+  // quien entra ocupa su sitio con su línea. Sobre un acta ya cerrada no hay
+  // tablero que tocar, así que sólo se anota en el anexo de esa guerra.
+  ['POST', /^\/war\/wars\/([^/]+)\/substitute$/, (m, _req, body) => {
+    const enCurso = store.current?.id === m[1];
+    const sale = enCurso ? store.deployments.find((d) => d.playerId === body.out) : undefined;
+
+    if (enCurso && sale) {
+      store.deployments = [
+        ...store.deployments.filter((d) => d.playerId !== body.out),
+        ...(body.in ? [{ ...sale, playerId: body.in as string }] : []),
+      ];
+      return { out: body.out, in: body.in ?? null, side: sale.side, lane: sale.lane };
+    }
+
+    const anexo = anexoDe(m[1]);
+    const acta = (fake.warDetail(m[1])?.participants ?? []) as Record<string, unknown>[];
+    const relevado = acta.find((p) => p.playerId === body.out);
+    const side = (relevado?.side as string) ?? body.side ?? 'attack';
+    const lane = (relevado?.lane as string | null) ?? null;
+    if (body.out) anexo.left[body.out as string] = new Date().toISOString();
+    if (body.in) {
+      anexo.extras.push({
+        playerId: body.in as string,
+        side,
+        lane,
+        joinedAt: new Date().toISOString(),
+      });
+    }
+    return { out: body.out ?? null, in: body.in ?? null, side, lane };
+  }],
+  ['POST', /^\/war\/wars\/([^/]+)\/images$/, (m, _req, body) => {
+    const anexo = anexoDe(m[1]);
+    const id = `img-${anexo.images.length + 1}`;
+    anexo.images.push({ id, image: body.image as string, caption: (body.caption as string) ?? null });
+    return { id };
+  }],
+  ['PATCH', /^\/war\/wars\/([^/]+)\/participants\/([^/]+)$/, (m, _req, body) => {
+    const anexo = anexoDe(m[1]);
+    anexo.stats[m[2]] = { ...(anexo.stats[m[2]] ?? {}), ...((body.stats as Record<string, number>) ?? {}) };
+    return { stats: anexo.stats[m[2]] };
   }],
   // Cargar una guerra pasada. Devuelve un identificador porque la pantalla se
   // va derecha a ella; lo demás no se guarda, que para eso está el aviso.

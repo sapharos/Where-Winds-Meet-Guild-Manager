@@ -267,6 +267,17 @@ interface Props {
    * misma comparación difusa, sobre una lista más larga.
    */
   participants: { playerId: string; name: string }[];
+  /**
+   * El resto del gremio, ofrecido sólo para corregir a mano.
+   *
+   * Queda fuera del emparejamiento automático a propósito: contra treinta
+   * nombres una lectura sucia acierta, y contra ochenta empieza a asignarle la
+   * fila de alguien a un parecido que ni estuvo en la guerra. Pero la lista
+   * corta tiene su propio agujero -- quien entró de cambio y nadie apuntó no
+   * está en el acta, así que su fila no tiene a quién apuntar --, y ése se tapa
+   * dejando elegir del gremio entero cuando la máquina ya ha fallado.
+   */
+  others?: { playerId: string; name: string }[];
   onClose: () => void;
   onApply: (rows: ReadRow[]) => Promise<void>;
   /** Lo que se está leyendo, cuando no es «los resultados de esta guerra». */
@@ -279,6 +290,7 @@ interface Props {
 const ResultsReader: React.FC<Props> = ({
   images,
   participants,
+  others = [],
   onClose,
   onApply,
   title = 'Leer resultados',
@@ -541,6 +553,15 @@ const ResultsReader: React.FC<Props> = ({
                             {p.name}
                           </option>
                         ))}
+                        {others.length > 0 && (
+                          <optgroup label="No figuran en esta guerra">
+                            {others.map((p) => (
+                              <option key={p.playerId} value={p.playerId}>
+                                {p.name}
+                              </option>
+                            ))}
+                          </optgroup>
+                        )}
                       </select>
                     </label>
 
@@ -615,6 +636,15 @@ const ResultsReader: React.FC<Props> = ({
                                 {p.name}
                               </option>
                             ))}
+                            {others.length > 0 && (
+                              <optgroup label="No figuran en esta guerra">
+                                {others.map((p) => (
+                                  <option key={p.playerId} value={p.playerId}>
+                                    {p.name}
+                                  </option>
+                                ))}
+                              </optgroup>
+                            )}
                           </select>
                         </td>
                         {FIGURES.map((f) => (
