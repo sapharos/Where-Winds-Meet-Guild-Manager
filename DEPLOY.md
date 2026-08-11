@@ -236,6 +236,44 @@ place, keeping whatever filter it was drawn with; the line above says when it
 was last looked at, and Discord keeps counting that up on its own, so a stale
 board says so without anyone pressing anything.
 
+`/historial` is the other half of `/impacto`: that one answers "how am I doing",
+this one answers "what happened in that war". It opens on the last ten wars, one
+line each — date, name, outcome, headcount, and who topped it — and a dropdown
+opens any of the last twenty-five. The `guerra` option autocompletes by name and
+reaches further back than the dropdown can, which is the only way to a war from
+a year ago.
+
+Opening one gives the whole record: when it was fought, how long it lasted, the
+match type, the result, how many stood on each side, and then every participant
+ranked by Impact Score. A second dropdown re-sorts that table by any figure the
+results screen reports — damage, healing, kills, damage taken, siege, assists,
+coin, deaths — and the number in the left column stays the impact placing while
+it does, exactly as the web's table behaves: somebody can be first in damage and
+seventh in the war, and both are true. A figure nobody wrote down sorts to the
+bottom rather than the top, because a gap is not a zero.
+
+Underneath, **Lo mejor de la noche** names who led each axis and by how much —
+the thing a single impact ranking cannot tell you, since the score says how much
+you weighed, not at what.
+
+Wars nobody has pasted results into are listed too, marked *sin cifras*: an empty
+war is precisely the thing worth seeing, because it means somebody still has to
+upload the screenshots. Opening one says so and still lists who fought. A war
+rebuilt from its screenshots months later says that as well — it has no plan, it
+may have no lanes, and somebody typed its figures in by hand, which is worth
+knowing before reading it as gospel.
+
+The ranking of a thirty-two person war does not fit in one embed field, so it is
+split across as many as it needs, broken on whole rows. Dates are Discord
+timestamps, so everyone reads them on their own clock — except inside the table
+and the dropdowns, where Discord substitutes nothing and they are written out in
+the guild's own timezone (`AGENDA_TIMEZONE`).
+
+It asks for *Ver la War Room*, the same permission as `/guerra`, because on the
+web the history lives inside it. The permission is re-checked on every press, not
+just when the command is typed: a public message can be clicked by anyone on the
+server, including people with no account at all.
+
 `/build` is each member's own primary build: its name, weapons, role, notes, the
 weapon set the game groups those weapons under, and the names of whatever other
 builds they have saved. Three dropdowns underneath change it — which of their

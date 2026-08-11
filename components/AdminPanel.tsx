@@ -750,6 +750,7 @@ const AdminPanel: React.FC<Props> = ({
             Los comandos <code className="text-slate-400">/perfil</code>,{' '}
             <code className="text-slate-400">/impacto</code>,{' '}
             <code className="text-slate-400">/guerra</code>,{' '}
+            <code className="text-slate-400">/historial</code>,{' '}
             <code className="text-slate-400">/agenda</code> y{' '}
             <code className="text-slate-400">/build</code> los ve todo el servidor, pero el bot sólo
             le contesta a quien lleve uno de estos roles. Sin ninguno marcado atiende a cualquiera

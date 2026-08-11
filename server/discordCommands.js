@@ -64,6 +64,7 @@ import {
   marcarAvisado,
   sinContestar,
   AVISO_HORAS,
+  ZONA,
 } from './agenda.js';
 
 const API = 'https://discord.com/api/v10';
@@ -266,6 +267,29 @@ const COMMANDS = [
       },
       {
         type: 5, // booleano
+        name: 'publico',
+        description: 'Enseñarlo en el canal en vez de sólo a ti',
+        required: false,
+      },
+    ],
+  },
+  {
+    name: 'historial',
+    default_member_permissions: LOS_VE_TODO_EL_MUNDO,
+    description: 'Las últimas guerras y el acta de cada una, con su ranking',
+    options: [
+      // Con autocompletado y no como lista cerrada: las listas de opciones se
+      // fijan al registrar el comando, y las guerras nacen cada semana. El
+      // desplegable del mensaje llega a las 25 últimas; esto llega a todas.
+      {
+        type: 3,
+        name: 'guerra',
+        description: 'Abrir una en concreto, buscándola por su nombre',
+        required: false,
+        autocomplete: true,
+      },
+      {
+        type: 5,
         name: 'publico',
         description: 'Enseñarlo en el canal en vez de sólo a ti',
         required: false,
@@ -1729,7 +1753,33 @@ async function comandoPerfil(interaction) {
 /** La media, con un decimal: a entero, media tabla empata y parece un error. */
 const media1 = new Intl.NumberFormat('es', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
-const fecha = new Intl.DateTimeFormat('es', { day: 'numeric', month: 'short', year: '2-digit' });
+/**
+ * Una fecha en el reloj de quien la lee.
+ *
+ * Discord sustituye esto por la hora local de cada cual, que es la misma razón
+ * por la que el tablero de `/guerra` marca así el comienzo de la guerra: el
+ * gremio no está todo en el mismo huso, y el contenedor va en UTC, así que una
+ * hora formateada aquí estaría mal para todo el mundo, incluido quien la
+ * escribió. `d` es la fecha corta y `f` la fecha con hora.
+ *
+ * No sirve dentro de un bloque de código ni en un desplegable: ahí Discord no
+ * sustituye nada y se leería el `<t:...>` en crudo. Para esos dos sitios está
+ * `fechaEnZona`.
+ */
+const cuando = (iso, estilo) => `<t:${Math.floor(Date.parse(iso) / 1000)}:${estilo}>`;
+
+/**
+ * La fecha escrita, para donde Discord no sabe poner la hora de cada uno.
+ *
+ * En la zona del gremio y no en la del contenedor, que va en UTC: son las
+ * mismas horas que usa la agenda, y por eso sale de la misma constante.
+ */
+const fechaEnZona = new Intl.DateTimeFormat('es', {
+  timeZone: ZONA,
+  day: 'numeric',
+  month: 'short',
+  year: '2-digit',
+});
 
 const RESULTADOS = { win: 'Victoria', loss: 'Derrota' };
 
@@ -1755,10 +1805,6 @@ function barra(fraccion) {
   const llenas = Math.round(Math.min(1, Math.max(0, fraccion)) * 10);
   return '█'.repeat(llenas) + '░'.repeat(10 - llenas);
 }
-
-/** Recorta un nombre para que la columna no la decida el más largo. */
-const corto = (texto, largo) =>
-  String(texto ?? '').length > largo ? `${String(texto).slice(0, largo - 1)}…` : String(texto ?? '');
 
 /**
  * El historial de guerra de un miembro como embed.
@@ -1848,8 +1894,8 @@ export function impactoEmbed({
         `\`${String(noche.score).padStart(3)}\``,
         `${noche.puesto}.º de ${noche.de}`,
         RESULTADOS[noche.war.outcome] ?? 'sin marcar',
-        fecha.format(new Date(noche.war.startedAt)),
-        corto(noche.war.name, 22),
+        cuando(noche.war.startedAt, 'd'),
+        recortar(noche.war.name, 22),
       ];
       return partes.join(' · ');
     });
@@ -1874,7 +1920,7 @@ export function impactoEmbed({
     const ancho = Math.max(...filas.map((f) => String(f.puesto).length));
     const dibujo = filas.map((fila) => {
       const yo = fila.playerId === player.playerId;
-      return `${yo ? '›' : ' '}${String(fila.puesto).padStart(ancho)}  ${corto(fila.name, 16).padEnd(16)}${media1.format(fila.media).padStart(5)}  (${fila.guerras})`;
+      return `${yo ? '›' : ' '}${String(fila.puesto).padStart(ancho)}  ${recortar(fila.name, 16).padEnd(16)}${media1.format(fila.media).padStart(5)}  (${fila.guerras})`;
     });
     // El salto entre la cabeza y la vecindad, cuando no son contiguas: sin él,
     // un tercero seguido de un noveno se lee como que faltan filas por un fallo.
@@ -1980,6 +2026,467 @@ async function comandoImpacto(interaction) {
       ...(opcion(interaction, 'publico') === true ? {} : { flags: EPHEMERAL }),
     },
   };
+}
+
+/* --------------------------------------------------------------- historial */
+
+/**
+ * Los tipos de partida, copiados de WAR_MATCH_TYPE_LABELS en types.ts.
+ *
+ * La misma duplicación que `ETIQUETAS` y por la misma razón: el catálogo vive
+ * en TypeScript y este servidor es JavaScript sin compilar. Tres cadenas no
+ * justifican meter un paso de compilación en la API entera.
+ */
+const TIPOS_DE_PARTIDA = { league: 'Liga', ranked: 'Ranked', custom: 'Reto' };
+
+/**
+ * Cómo acabó, en color.
+ *
+ * Los mismos peldaños de rampa que pinta la web: `--s-700` para la victoria y
+ * `--d-700` para la derrota, en el tema claro, que es donde vive `COLOR_BANDO`
+ * por lo mismo -- un embed tiene un color y no dos, y Discord no dice con qué
+ * tema lo está leyendo cada uno. Sin marcar, el latón de la grapa.
+ */
+const COLOR_RESULTADO = { win: 0x204a36, loss: 0x74251a };
+
+/** Cuántas guerras lista la vista de entrada. */
+const EN_LA_LISTA = 10;
+
+/** Lo que cabe en el valor de un campo de embed, con holgura para las vallas. */
+const TOPE_CAMPO = 1000;
+
+/** Por qué se puede ordenar el acta: el impacto, y cada cifra del marcador. */
+const ORDENES = [
+  { value: 'impact', label: 'Impacto' },
+  ...WEIGHTS.map((axis) => ({ value: axis.key, label: axis.label })),
+];
+
+/** Lo que ocupan unos renglones dentro de un bloque de código, vallas incluidas. */
+const mide = (lineas) => lineas.reduce((n, l) => n + l.length + 1, 0) + 8;
+
+/**
+ * Una tabla repartida en tantos campos como haga falta.
+ *
+ * Un campo de embed admite 1024 caracteres y una guerra puede llevar sesenta
+ * filas, así que la tabla no cabe en uno. Se parte por renglones enteros -- una
+ * fila cortada por la mitad es peor que ninguna -- y a partes iguales, no
+ * llenando cada campo hasta reventar: repartiendo a lo bruto, una tabla de
+ * sesenta se iba en 29 + 29 + 1 y ese último campo de una sola fila se lee como
+ * si algo se hubiera roto por el camino.
+ *
+ * La cabecera se repite en cada trozo. Discord separa los campos visiblemente,
+ * así que sin ella el segundo y el tercero son tres columnas de números sin
+ * decir de qué; con ella, cada trozo se sostiene solo.
+ *
+ * Los campos siguientes van con un espacio de ancho cero por nombre, que es lo
+ * único que Discord acepta como título vacío: así la tabla se lee como una sola
+ * aunque sean tres.
+ */
+function camposEnBloque(nombre, cabecera, filas) {
+  if (!filas.length) return [];
+
+  let trozos = 1;
+  let partes = [filas];
+  // Sube el número de trozos hasta que todos quepan. Termina siempre: con un
+  // trozo por fila, una fila y su cabecera están muy por debajo del tope.
+  while (
+    trozos < filas.length &&
+    partes.some((parte) => mide([cabecera, ...parte]) > TOPE_CAMPO)
+  ) {
+    trozos += 1;
+    const porTrozo = Math.ceil(filas.length / trozos);
+    partes = [];
+    for (let i = 0; i < filas.length; i += porTrozo) partes.push(filas.slice(i, i + porTrozo));
+  }
+
+  return partes.map((parte, at) => ({
+    name: at ? '​' : nombre,
+    value: `\`\`\`\n${[cabecera, ...parte].join('\n')}\n\`\`\``,
+    inline: false,
+  }));
+}
+
+/** Cómo se resume una guerra en una línea: cuándo, qué fue y cómo acabó. */
+function resumenDe(war) {
+  return [
+    TIPOS_DE_PARTIDA[war.matchType] ?? war.matchType,
+    RESULTADOS[war.outcome] ?? 'sin marcar',
+    `${war.participants.length} ${war.participants.length === 1 ? 'persona' : 'personas'}`,
+    war.imported ? 'reconstruida' : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+}
+
+/**
+ * Los desplegables que llevan de una guerra a otra y cambian el orden.
+ *
+ * El de guerras va en las dos vistas: desde la lista abre una, y desde un acta
+ * salta a otra sin volver atrás, que es como se compara una noche con la
+ * anterior. El de orden sólo tiene sentido con un acta delante.
+ *
+ * El id lleva dentro lo que la pulsación no puede decir por sí sola: el
+ * desplegable de guerras manda una guerra y necesita saber el orden en vigor,
+ * y el de orden manda una cifra y necesita saber de qué guerra. Así cada
+ * pulsación se basta y ningún mensaje depende de un estado guardado en el
+ * servidor que un reinicio se llevaría.
+ */
+function mandosDeHistorial({ recientes, elegida, por }) {
+  const componentes = [];
+
+  if (recientes.length) {
+    componentes.push({
+      type: 1,
+      components: [
+        {
+          type: 3,
+          custom_id: `historial:guerra:${por}`,
+          placeholder: elegida ? 'Mira otra guerra' : 'Abre una guerra',
+          options: recientes.slice(0, MAX_OPCIONES).map((war) => ({
+            label: recortar(war.name, 100),
+            value: war.id,
+            // Escrita y no `<t:...>`: un desplegable no sustituye marcas de
+            // tiempo, y ahí dentro se leería el código en crudo.
+            description: recortar(
+              `${fechaEnZona.format(new Date(war.startedAt))} · ${resumenDe(war)}`,
+              100,
+            ),
+            default: war.id === elegida,
+          })),
+        },
+      ],
+    });
+  }
+
+  if (elegida) {
+    componentes.push({
+      type: 1,
+      components: [
+        {
+          type: 3,
+          custom_id: `historial:orden:${elegida}`,
+          placeholder: 'Ordenar por',
+          options: ORDENES.map((o) => ({ ...o, default: o.value === por })),
+        },
+      ],
+    });
+    componentes.push({
+      type: 1,
+      components: [
+        { type: 2, style: 2, custom_id: 'historial:lista', label: 'Volver a la lista' },
+      ],
+    });
+  }
+
+  return componentes;
+}
+
+/**
+ * Las últimas guerras, una línea cada una.
+ *
+ * Se listan todas, incluidas las que nadie ha rellenado todavía: que una guerra
+ * esté sin cifras es justamente lo que hay que ver -- significa que alguien
+ * tiene que subir la pantalla de resultados -- y esconderla sería dejar el
+ * hueco donde nadie lo mira.
+ *
+ * Pura y exportada, como los demás embeds, para poder corregirla sin un Discord
+ * delante.
+ */
+export function listaDeGuerras({ guerras, puntuadas, guildName }) {
+  const rankedDe = new Map(puntuadas.map(({ war, ranked }) => [war.id, ranked]));
+  const recientes = guerras.slice(0, MAX_OPCIONES);
+
+  if (!guerras.length) {
+    return {
+      embeds: [
+        {
+          author: { name: guildName ?? 'Zona Zero' },
+          title: 'Historial de guerras',
+          description: 'Todavía no hay ninguna guerra registrada.',
+          color: LATON,
+        },
+      ],
+      components: [],
+    };
+  }
+
+  const lineas = guerras.slice(0, EN_LA_LISTA).map((war) => {
+    const ranked = rankedDe.get(war.id);
+    const mejor = ranked?.[0];
+    return [
+      cuando(war.startedAt, 'd'),
+      `**${recortar(war.name, 40)}**`,
+      RESULTADOS[war.outcome] ?? 'sin marcar',
+      `${war.participants.length} ${war.participants.length === 1 ? 'persona' : 'personas'}`,
+      // Sin cifras no hay a quién señalar, y decirlo es más útil que callarlo:
+      // significa que alguien todavía tiene que subir los pantallazos.
+      mejor ? `★ ${mejor.name}` : '*sin cifras*',
+    ].join(' · ');
+  });
+
+  const conCifras = puntuadas.length;
+  return {
+    embeds: [
+      {
+        author: { name: guildName ?? 'Zona Zero' },
+        title: 'Historial de guerras',
+        description:
+          `Las ${Math.min(EN_LA_LISTA, guerras.length)} últimas de **${guerras.length}** registradas` +
+          `${conCifras < guerras.length ? `, ${guerras.length - conCifras} de ellas sin cifras` : ''}.\n\n` +
+          lineas.join('\n'),
+        color: LATON,
+        footer: { text: 'Elige una abajo para ver su acta y su ranking' },
+      },
+    ],
+    components: mandosDeHistorial({ recientes, elegida: null, por: 'impact' }),
+  };
+}
+
+/**
+ * El acta de una guerra: quién estuvo, qué hizo y en qué orden quedó.
+ *
+ * El puesto que se enseña es siempre el del impacto, se ordene por lo que se
+ * ordene -- igual que en la web. Cambiar la cifra reordena la lista, no
+ * renumera el ranking: se puede ser el primero en daño y el séptimo de la
+ * guerra, y las dos cosas son ciertas a la vez.
+ */
+export function actaDeGuerra({ war, ranked, por = 'impact', recientes = [], guildName }) {
+  const embed = {
+    author: { name: guildName ?? 'Zona Zero' },
+    title: recortar(war.name, 256),
+    color: COLOR_RESULTADO[war.outcome] ?? LATON,
+    fields: [],
+  };
+
+  const minutos = war.endedAt
+    ? Math.max(1, Math.round((Date.parse(war.endedAt) - Date.parse(war.startedAt)) / 60000))
+    : null;
+  const porBando = SIDES.map((side) => ({
+    side,
+    cuantos: war.participants.filter((p) => p.side === side).length,
+  })).filter((b) => b.cuantos);
+
+  embed.description = [
+    [
+      cuando(war.startedAt, 'f'),
+      minutos ? `${minutos} min` : 'en curso',
+      TIPOS_DE_PARTIDA[war.matchType] ?? war.matchType,
+      war.outcome ? `**${RESULTADOS[war.outcome]}**` : 'sin marcar',
+    ].join('  ·  '),
+    porBando.map((b) => `${b.cuantos} en ${WAR_SIDES[b.side].toLowerCase()}`).join('  ·  '),
+    // El esquema lo guarda por algo: una guerra reconstruida meses después no
+    // tiene plan, puede no tener líneas, y las cifras las tecleó alguien. Quien
+    // lee el acta merece saber qué clase de registro está leyendo.
+    war.imported ? '*Reconstruida a partir de sus pantallazos.*' : null,
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  const mandos = mandosDeHistorial({ recientes, elegida: war.id, por });
+
+  if (!ranked.length) {
+    embed.fields.push({
+      name: 'Sin cifras',
+      value:
+        'Nadie ha subido todavía la pantalla de resultados de esta guerra, así que no hay ' +
+        'ranking que enseñar. Se cargan en la web, en la Sala de Guerra.',
+      inline: false,
+    });
+    // Quiénes estuvieron sí se sabe, y es la mitad del acta.
+    const gente = war.participants
+      .map((p) => p.name)
+      .sort((a, b) => a.localeCompare(b, 'es'));
+    if (gente.length) {
+      embed.fields.push({
+        name: `Quiénes pelearon (${gente.length})`,
+        value: recortar(gente.join(' · '), TOPE_CAMPO),
+        inline: false,
+      });
+    }
+    return { embeds: [embed], components: mandos };
+  }
+
+  const filas = new Map(war.participants.map((p) => [p.playerId, p]));
+  const puesto = new Map(ranked.map((entrada, at) => [entrada.playerId, at + 1]));
+
+  const valor = (entrada) =>
+    por === 'impact' ? entrada.score : (filas.get(entrada.playerId)?.stats?.[por] ?? null);
+
+  const ordenados = [...ranked].sort((a, b) => {
+    const x = valor(a);
+    const y = valor(b);
+    // Quien no tiene esa cifra anotada va al final, no al principio: un hueco
+    // no es un cero. La misma regla que la tabla de la web.
+    if (x === null && y === null) return 0;
+    if (x === null) return 1;
+    if (y === null) return -1;
+    return y - x;
+  });
+
+  // La columna del bando sólo cuando hay dos: en una guerra de un solo frente
+  // repite treinta veces la misma palabra y se come el ancho del nombre.
+  const dosBandos = porBando.length > 1;
+  const etiqueta = ORDENES.find((o) => o.value === por)?.label ?? 'Impacto';
+  const cifras = ordenados.map((e) => {
+    const v = valor(e);
+    return v === null ? '—' : miles.format(v);
+  });
+  const ancho = Math.max(etiqueta.length, ...cifras.map((c) => c.length));
+
+  const cabecera = `  # ${'Miembro'.padEnd(16)}${etiqueta.padStart(ancho)}${dosBandos ? '  Bando' : ''}`;
+  const renglones = ordenados.map((entrada, at) => {
+    const fila = filas.get(entrada.playerId);
+    return (
+      `${String(puesto.get(entrada.playerId)).padStart(3)} ` +
+      `${recortar(entrada.name, 16).padEnd(16)}` +
+      `${cifras[at].padStart(ancho)}` +
+      `${dosBandos ? `  ${fila?.side === 'attack' ? 'Ata' : 'Def'}` : ''}`
+    );
+  });
+
+  embed.fields.push(
+    ...camposEnBloque(`Ranking · ordenado por ${etiqueta.toLowerCase()}`, cabecera, renglones),
+  );
+
+  // Lo mejor de la noche: quién lideró cada eje y con cuánto. Es lo que un
+  // ranking por impacto deja de contar -- el puntaje dice cuánto pesaste, no en
+  // qué --, y es además lo que la gente recuerda de una guerra.
+  const mejores = WEIGHTS.filter((axis) => axis.weight > 0)
+    .map((axis) => {
+      let quien = null;
+      let tope = 0;
+      for (const p of war.participants) {
+        const cifra = Number(p.stats?.[axis.key]) || 0;
+        // El asedio sólo lo gana el atacante, igual que en el cálculo: dárselo
+        // a un defensor sería premiar una cifra que su bando no puede producir.
+        if (axis.key === 'siege' && p.side !== 'attack') continue;
+        if (cifra > tope) {
+          tope = cifra;
+          quien = p;
+        }
+      }
+      return quien ? `**${axis.label}** · ${quien.name} — ${miles.format(tope)}` : null;
+    })
+    .filter(Boolean);
+
+  if (mejores.length) {
+    embed.fields.push({
+      name: 'Lo mejor de la noche',
+      value: mejores.join('\n'),
+      inline: false,
+    });
+  }
+
+  embed.footer = {
+    text: 'El impacto compara cada aporte con el mejor de esta misma guerra, dentro de su bando',
+  };
+  embed.timestamp = new Date(war.startedAt).toISOString();
+
+  return { embeds: [embed], components: mandos };
+}
+
+/**
+ * El historial, conteste al comando o a un desplegable.
+ *
+ * Una sola función por lo mismo que en `/guerra`: lo único que cambia entre las
+ * dos entradas es si se manda un mensaje nuevo o se reescribe el que ya está.
+ * El permiso se vuelve a comprobar en cada pulsación y no se da por hecho -- un
+ * mensaje público lo puede pulsar cualquiera del servidor, incluido quien no
+ * tenga cuenta.
+ *
+ * Pide `war.view`, que es el permiso que abre la Sala de Guerra en la web, y
+ * dentro de ella vive el historial. La misma regla, no una nueva.
+ */
+async function respuestaHistorial({ usuario, warId, por, publico, tipo }) {
+  if (!usuario?.id) return aviso('No he podido saber quién eres. Inténtalo otra vez.');
+
+  const quienPregunta = await cuentaDe(usuario.id);
+  const negativa = vetado(quienPregunta);
+  if (negativa) return negativa;
+
+  const permisos = await permissionsFor(quienPregunta.cuentaRol);
+  if (!permisos.includes('war.view')) {
+    return aviso('Tu cuenta no tiene permiso para ver la Sala de Guerra, que es donde vive el historial.');
+  }
+
+  const [guerras, weaponSets] = await Promise.all([historialCompleto(), listWeaponSets()]);
+  const puntuadas = puntuarGuerras(guerras, weaponSets);
+
+  let vista;
+  if (warId) {
+    const war = guerras.find((g) => g.id === warId);
+    // Pudo borrarse desde la web con el mensaje abierto. Se dice, y se enseña
+    // la lista, que es lo que esa persona iba buscando de todas formas.
+    if (!war) {
+      return aviso('Esa guerra ya no existe. Vuelve a escribir `/historial` para ver las que hay.');
+    }
+    vista = actaDeGuerra({
+      war,
+      ranked: puntuadas.find((p) => p.war.id === warId)?.ranked ?? [],
+      por,
+      recientes: guerras,
+      guildName: process.env.GUILD_NAME || 'Zona Zero',
+    });
+  } else {
+    vista = listaDeGuerras({
+      guerras,
+      puntuadas,
+      guildName: process.env.GUILD_NAME || 'Zona Zero',
+    });
+  }
+
+  return {
+    type: tipo,
+    data: {
+      ...vista,
+      // El nombre de una guerra y el de un miembro los escribe una persona, y
+      // un «@everyone» ahí dentro avisaría al servidor entero desde un comando
+      // que sólo consulta.
+      allowed_mentions: { parse: [] },
+      // Al reescribir un mensaje no se toca su visibilidad: ya nació público o
+      // privado, y repetir el flag sólo puede contradecirlo.
+      ...(tipo === UPDATE_MESSAGE || publico ? {} : { flags: EPHEMERAL }),
+    },
+  };
+}
+
+/** `/historial [guerra]` -- la lista, o el acta de una en concreto. */
+function comandoHistorial(interaction) {
+  const pedida = opcion(interaction, 'guerra');
+  return respuestaHistorial({
+    usuario: interaction.member?.user ?? interaction.user,
+    warId: pedida ? String(pedida) : null,
+    por: 'impact',
+    publico: opcion(interaction, 'publico') === true,
+    tipo: MESSAGE,
+  });
+}
+
+/** Los desplegables y el botón del historial. */
+function menuHistorial(interaction) {
+  const [, qué, resto] = String(interaction.data?.custom_id ?? '').split(':');
+  const elegido = interaction.data?.values?.[0];
+  const usuario = interaction.member?.user ?? interaction.user;
+
+  if (qué === 'lista') {
+    return respuestaHistorial({ usuario, warId: null, por: 'impact', tipo: UPDATE_MESSAGE });
+  }
+  if (qué === 'orden') {
+    return respuestaHistorial({
+      usuario,
+      warId: resto,
+      // Un orden que ya no existe -- de un mensaje de una versión anterior --
+      // se deja caer en el de siempre en vez de no enseñar nada.
+      por: ORDENES.some((o) => o.value === elegido) ? elegido : 'impact',
+      tipo: UPDATE_MESSAGE,
+    });
+  }
+  return respuestaHistorial({
+    usuario,
+    warId: elegido ?? null,
+    por: ORDENES.some((o) => o.value === resto) ? resto : 'impact',
+    tipo: UPDATE_MESSAGE,
+  });
 }
 
 /**
@@ -2285,6 +2792,65 @@ async function autocompletarNombre(interaction) {
   };
 }
 
+/**
+ * La lista de guerras que Discord ofrece mientras se escribe en `guerra`.
+ *
+ * Pide `war.view` por lo mismo que el buscador de nombres pide `roster.view`:
+ * sin la comprobación, el autocompletado sería una forma de leer el historial
+ * entero sin tener permiso para abrirlo.
+ *
+ * Una sola consulta, y flaca, por la misma razón de siempre: esto se dispara
+ * por cada tecla y es lo único que no se puede diferir. El permiso se comprueba
+ * dentro de la propia consulta contra `role_permissions` -- vale porque
+ * `war.view` tampoco está entre los permisos fijos de `LOCKED`, igual que
+ * `roster.view`.
+ */
+async function autocompletarGuerra(interaction) {
+  const vacio = { type: CHOICES, data: { choices: [] } };
+  const usuario = interaction.member?.user ?? interaction.user;
+  if (!usuario?.id) return vacio;
+
+  const escrito = String(
+    interaction.data?.options?.find((o) => o.focused)?.value ?? '',
+  ).trim();
+
+  const { rows } = await pool.query(
+    `SELECT w.id, w.name, w.started_at AS "startedAt", w.outcome,
+            (SELECT count(*)::int FROM war_participants p WHERE p.war_id = w.id) AS "cuantos"
+       FROM wars w
+      WHERE w.guild_id = $1 AND ($2 = '' OR w.name ILIKE '%' || $2 || '%')
+        AND EXISTS (
+          SELECT 1 FROM users u
+            JOIN role_permissions rp
+              ON rp.guild_id = u.guild_id AND rp.role = u.role
+           WHERE u.guild_id = w.guild_id AND u.discord_id = $3
+             AND u.disabled = false AND rp.permission = 'war.view'
+             -- La misma baja que mira vetado(), en SQL porque esto no puede
+             -- permitirse una segunda consulta.
+             AND NOT EXISTS (
+               SELECT 1 FROM players yo
+                WHERE yo.guild_id = u.guild_id AND yo.id = u.player_id
+                  AND COALESCE(yo.is_active, true) = false))
+      ORDER BY w.started_at DESC
+      LIMIT 25`,
+    [GUILD_ID, escrito, usuario.id],
+  );
+
+  return {
+    type: CHOICES,
+    data: {
+      choices: rows.map((w) => ({
+        // Escrita, como en el desplegable: el autocompletado tampoco sustituye
+        // marcas de tiempo.
+        name: `${w.name} · ${fechaEnZona.format(new Date(w.startedAt))} · ${
+          RESULTADOS[w.outcome] ?? 'sin marcar'
+        } · ${w.cuantos}`.slice(0, 100),
+        value: w.id,
+      })),
+    },
+  };
+}
+
 /** Acuse de recibo: «pensando…» para un comando, «ya lo reescribo» para un botón. */
 const DEFERRED_MESSAGE = 5;
 const DEFERRED_UPDATE = 6;
@@ -2391,15 +2957,18 @@ export async function handleInteraction(body) {
     // Lo único que no se puede diferir: Discord quiere las opciones dentro de
     // los tres segundos o no hay lista que enseñar. Por eso es una sola
     // consulta y por eso no pasa por aquí abajo.
-    return body.data?.name === 'perfil' || body.data?.name === 'impacto'
-      ? autocompletarNombre(body)
-      : { type: CHOICES, data: { choices: [] } };
+    if (body.data?.name === 'perfil' || body.data?.name === 'impacto') {
+      return autocompletarNombre(body);
+    }
+    if (body.data?.name === 'historial') return autocompletarGuerra(body);
+    return { type: CHOICES, data: { choices: [] } };
   }
 
   if (body?.type === MESSAGE_COMPONENT) {
     // Botones y desplegables llegan igual; los distingue el id que llevan.
     const id = String(body.data?.custom_id ?? '');
     if (id.startsWith('guerra:')) return diferir(body, () => botonGuerra(body));
+    if (id.startsWith('historial:')) return diferir(body, () => menuHistorial(body));
     if (id.startsWith('evento:')) return diferir(body, () => botonEvento(body));
     if (id.startsWith('build:')) return diferir(body, () => menuBuild(body));
     return aviso('Ese botón es de una versión anterior del bot. Vuelve a escribir el comando.');
@@ -2414,13 +2983,15 @@ export async function handleInteraction(body) {
       return diferir(body, () => comandoImpacto(body));
     case 'guerra':
       return diferir(body, () => comandoGuerra(body));
+    case 'historial':
+      return diferir(body, () => comandoHistorial(body));
     case 'agenda':
       return diferir(body, () => comandoAgenda(body));
     case 'build':
       return diferir(body, () => comandoBuild(body));
     default:
       return aviso(
-        'Ese comando ya no existe. Prueba con `/perfil`, `/impacto`, `/guerra`, `/agenda` o `/build`.',
+        'Ese comando ya no existe. Prueba con `/perfil`, `/impacto`, `/guerra`, `/historial`, `/agenda` o `/build`.',
       );
   }
 }

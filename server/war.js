@@ -425,7 +425,7 @@ async function guerrasConGente(playerId, limite) {
     // are spelled apart on purpose: called the same thing, the driver keeps
     // whichever came last and the war silently takes a member's name.
     `WITH elegidas AS (
-       SELECT w.id, w.name, w.started_at, w.ended_at, w.match_type, w.outcome
+       SELECT w.id, w.name, w.started_at, w.ended_at, w.match_type, w.outcome, w.imported
          FROM wars w
         WHERE w.guild_id = $2
           AND ($1::text IS NULL OR EXISTS (
@@ -435,7 +435,7 @@ async function guerrasConGente(playerId, limite) {
         LIMIT $3
      )
      SELECT w.id, w.name AS "warName", w.started_at AS "startedAt",
-            w.ended_at AS "endedAt", w.match_type AS "matchType", w.outcome,
+            w.ended_at AS "endedAt", w.match_type AS "matchType", w.outcome, w.imported,
             p.player_id AS "playerId", COALESCE(m.name, p.player_id) AS "playerName",
             p.side, p.lane, p.stats, COALESCE(carried.weapons, '[]'::jsonb) AS weapons,
             -- De alta en el roster. Una ficha borrada del todo no es lo mismo
@@ -462,6 +462,7 @@ async function guerrasConGente(playerId, limite) {
         endedAt: row.endedAt,
         matchType: row.matchType,
         outcome: row.outcome,
+        imported: row.imported,
         participants: [],
       };
       wars.set(row.id, war);
