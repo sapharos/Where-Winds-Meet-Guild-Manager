@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { pool, GUILD_ID } from './db.js';
+import { TUNABLE_AXES } from './impact.js';
 
 // Only a starting point. The sets live in the database because the game keeps
 // adding weapons, and a guild should not wait on a code change to record what
@@ -21,9 +22,13 @@ const MAX_ICON = 96 * 1024;
 
 // The axes a set may be given an allowance on. Deliberately not all of them:
 // monedas is about taking objectives rather than what you carry, and muertes is
-// a penalty, where an allowance would pay people for dying. Keep in step with
-// WEIGHTS in services/impact.ts.
-const TUNABLE = ['damage', 'healing', 'kills', 'assists', 'taken', 'siege'];
+// a penalty, where an allowance would pay people for dying.
+//
+// Leída de la propia tabla de pesos y no escrita a mano: estuvo copiada aquí
+// mientras el cálculo vivía en TypeScript y no había forma de importarlo, con
+// un comentario pidiendo que se mantuvieran a la par. Ahora que el cálculo está
+// en `./impact.js` no hay nada que mantener.
+const TUNABLE = TUNABLE_AXES.map((axis) => axis.key);
 
 // Below a third, an allowance stops being a correction and starts being a
 // different scoring system for one set. Above 1 it is a handicap, which is

@@ -171,6 +171,46 @@ Looking at someone else is the same act as opening the roster on the web, so it
 asks for the same permission — *Ver el roster*, which members have by default —
 rather than inventing a Discord-only rule. Your own profile never needs it.
 
+`/impacto` is the war record: how much someone has weighed across every war the
+guild has figures for, and where that leaves them against everybody else. Three
+answers in one embed —
+
+- **The average and the placing.** Their mean Impact Score, and their position
+  among the members who qualify. A mean rather than a total, because a total
+  measures how long you have been here; the number of wars it averages over sits
+  next to it so a high mean over two nights cannot pass for one over thirty.
+- **Where they weigh.** A bar per axis — damage, healing, kills, damage taken,
+  siege, assists, coin — averaged across their wars. Two people with the same
+  mean can be doing completely different jobs, and this is where that shows.
+- **The table.** The top three, plus their own neighbourhood when they are not
+  in it, so the placing has faces attached to it.
+
+Underneath that, their last eight wars one line each: score, place that night,
+outcome, date and the war's name.
+
+Three rules decide what counts, and all three exist to keep a gap in the records
+from reading as a verdict on a person. A war nobody pasted results into is
+skipped entirely rather than scoring everyone zero. A member with no figures in a
+war that does have them is skipped for that war — the results screen never lists
+anyone blank, so that is a transcription gap, and counting it would make a missed
+row a permanent penalty. And the table needs three wars to enter (fewer only
+while the guild has not played three), because a ranking headed by whoever had
+one good night is not a ranking; below that it says how many are missing instead
+of showing a placing.
+
+People who have left the guild keep their scores — deleting them would change the
+result of wars that were actually fought — but they are left out of the table:
+comparing yourself against somebody who left eight months ago does not answer
+"how am I doing against the guild".
+
+It takes the same `miembro` / `nombre` / `publico` options as `/perfil`, under
+the same permission: looking at someone else's record is the same act as opening
+their history on the web, so it asks for *Ver el roster*. Your own never needs it.
+
+The arithmetic is the one documented in [PUNTAJE-IMPACTO.md](PUNTAJE-IMPACTO.md)
+and it is not a Discord copy of it: the web and the bot import the same
+`server/impact.js`, so a weight that changes moves both at once.
+
 `/guerra` shows the board one card per side and lane. Each side opens with a
 brass header — ⚔ ATAQUE, 🛡 DEFENSA, with its own count and whether it is
 settled — and its three lanes follow in their own colours, everyone grouped by

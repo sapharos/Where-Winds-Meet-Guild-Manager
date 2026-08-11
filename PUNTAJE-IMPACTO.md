@@ -2,7 +2,9 @@
 
 Cómo la plataforma mide lo que cada quien aportó en una guerra de gremio, sin mirar qué rol tenía asignado en el roster.
 
-Este documento describe la versión actual del cálculo, tal y como vive en [`services/impact.ts`](services/impact.ts). Si el peso de una estadística cambia, este archivo debe actualizarse con él — es la explicación oficial que se le da al gremio.
+Este documento describe la versión actual del cálculo, tal y como vive en [`server/impact.js`](server/impact.js). Si el peso de una estadística cambia, este archivo debe actualizarse con él — es la explicación oficial que se le da al gremio.
+
+Hay un solo cálculo y está en ese archivo. La web lo importa a través de [`services/impact.ts`](services/impact.ts), que es sólo la envoltura con los tipos, y el bot de Discord lo importa directamente para contestar `/impacto`. Vive en `server/` por una razón de empaquetado y no de diseño: la imagen de la API se construye con ese directorio como contexto y no alcanza nada de fuera, mientras que la web se construye desde la raíz y sí llega ahí. Es el único sitio que ven los dos lados, y que lo vean los dos es lo que impide que a alguien le salga un 74 en la web y un 71 en Discord.
 
 ## El problema que resuelve
 

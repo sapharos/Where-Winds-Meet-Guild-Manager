@@ -404,32 +404,51 @@ export async function warDetail(id) {
 }
 
 /**
- * The wars one member fought, each with everyone who fought it.
+ * Guerras con todo el mundo que las peleó dentro.
  *
- * The whole line-up comes with every war and not just their own row, because
- * what a figure means is decided by the rest of the war: twenty million damage
- * is a good night or an ordinary one depending on what everybody else did.
+ * La alineación entera viene con cada guerra y no sólo la fila de quien
+ * pregunta, porque lo que significa una cifra lo decide el resto de la guerra:
+ * veinte millones de daño es una buena noche o una del montón según lo que
+ * hiciera todo el mundo esa vez.
+ *
+ * El recorte va en SQL y no después de agrupar en JavaScript, que es como
+ * estaba: agrupando fuera se traían todos los participantes de todas las
+ * guerras de la historia para quedarse con los de treinta, y eso crece sin
+ * techo mientras el gremio siga jugando.
+ *
+ * @param {string | null} playerId Sólo las que peleó esta persona; null, todas.
+ * @param {number} limite Cuántas guerras, de la más reciente hacia atrás.
  */
-export async function warsFor(playerId) {
+async function guerrasConGente(playerId, limite) {
   const { rows } = await pool.query(
     // A war has a name and so does a member, and this row carries both. They
     // are spelled apart on purpose: called the same thing, the driver keeps
     // whichever came last and the war silently takes a member's name.
-    `SELECT w.id, w.name AS "warName", w.started_at AS "startedAt",
+    `WITH elegidas AS (
+       SELECT w.id, w.name, w.started_at, w.ended_at, w.match_type, w.outcome
+         FROM wars w
+        WHERE w.guild_id = $2
+          AND ($1::text IS NULL OR EXISTS (
+                SELECT 1 FROM war_participants mine
+                 WHERE mine.war_id = w.id AND mine.player_id = $1))
+        ORDER BY w.started_at DESC
+        LIMIT $3
+     )
+     SELECT w.id, w.name AS "warName", w.started_at AS "startedAt",
             w.ended_at AS "endedAt", w.match_type AS "matchType", w.outcome,
             p.player_id AS "playerId", COALESCE(m.name, p.player_id) AS "playerName",
-            p.side, p.lane, p.stats, COALESCE(carried.weapons, '[]'::jsonb) AS weapons
-       FROM wars w
+            p.side, p.lane, p.stats, COALESCE(carried.weapons, '[]'::jsonb) AS weapons,
+            -- De alta en el roster. Una ficha borrada del todo no es lo mismo
+            -- que una dada de baja, pero para lo que esto sirve -- decidir a
+            -- quién tiene sentido comparar con el gremio de hoy -- las dos
+            -- respuestas son la misma: a ésa no.
+            (m.id IS NOT NULL AND COALESCE(m.is_active, true)) AS activo
+       FROM elegidas w
        JOIN war_participants p ON p.war_id = w.id
        LEFT JOIN players m ON m.guild_id = $2 AND m.id = p.player_id
        LEFT JOIN LATERAL (${CARRIED}) carried ON true
-      WHERE w.guild_id = $2
-        AND EXISTS (
-          SELECT 1 FROM war_participants mine
-           WHERE mine.war_id = w.id AND mine.player_id = $1
-        )
       ORDER BY w.started_at DESC, "playerName"`,
-    [playerId, GUILD_ID],
+    [playerId, GUILD_ID, limite],
   );
 
   const wars = new Map();
@@ -454,9 +473,57 @@ export async function warsFor(playerId) {
       lane: row.lane,
       stats: row.stats ?? {},
       weapons: row.weapons ?? [],
+      activo: row.activo,
     });
   }
-  return [...wars.values()].slice(0, 30);
+  return [...wars.values()];
+}
+
+/** Las guerras que peleó un miembro, para «Mis guerras» en la web. */
+export const warsFor = (playerId) => guerrasConGente(playerId, 30);
+
+/**
+ * Cuántas guerras entran en las medias del gremio.
+ *
+ * Todas, en la práctica: doscientas son más de dos años a una guerra por
+ * semana, y el día que se pasen de ahí lo que se pierde es lo más antiguo, que
+ * es lo que menos dice de cómo está el gremio hoy.
+ */
+const TOPE_HISTORIAL = 200;
+
+/**
+ * Cuánto vale el historial completo antes de volver a pedirlo.
+ *
+ * Es la consulta más cara que hace el bot -- todas las guerras con todos sus
+ * participantes y las armas de cada uno -- y contesta lo mismo a todo el mundo,
+ * así que la noche en que treinta personas escriban `/impacto` seguidas se hace
+ * una vez. Medio minuto de retraso no se nota: una guerra tarda más que eso en
+ * cerrarse, y las cifras se pegan mucho después.
+ */
+const VIGENCIA = 30_000;
+
+let cacheHistorial = null;
+
+/** Todas las guerras del gremio con su gente, para promediar y ordenar. */
+export async function historialCompleto() {
+  if (cacheHistorial && Date.now() - cacheHistorial.cuando < VIGENCIA) {
+    return cacheHistorial.guerras;
+  }
+  const guerras = await guerrasConGente(null, TOPE_HISTORIAL);
+  cacheHistorial = { cuando: Date.now(), guerras };
+  return guerras;
+}
+
+/**
+ * Tira la copia guardada.
+ *
+ * La llama todo lo que cambia una guerra o sus cifras. Es la mitad que se
+ * olvida de una caché: sin esto, quien acaba de pegar los resultados los ve en
+ * la web al instante y en Discord medio minuto después, y esa media cuenta a
+ * alguien que algo falla.
+ */
+export function olvidarHistorial() {
+  cacheHistorial = null;
 }
 
 export async function addWarImage(warId, image, caption) {
@@ -537,6 +604,7 @@ export async function setContribution(warId, playerId, body) {
       playerId,
     ],
   );
+  olvidarHistorial();
   return { stats };
 }
 
@@ -709,6 +777,7 @@ export async function substitute(warId, outPlayerId, inPlayerId, sideWanted) {
     client.release();
   }
 
+  olvidarHistorial();
   return { out: outPlayerId, in: inPlayerId ?? null, side, lane };
 }
 
@@ -852,6 +921,7 @@ export async function importWar({ name, matchType, outcome, startedAt, participa
     client.release();
   }
 
+  olvidarHistorial();
   return { id, participants: rows.length };
 }
 
@@ -915,6 +985,7 @@ export async function startWar(name, matchType) {
     client.release();
   }
 
+  olvidarHistorial();
   return { id, participants: deployed.length };
 }
 
@@ -936,6 +1007,7 @@ export async function endWar(id, outcome) {
   if (!rowCount) throw Object.assign(new Error('esa guerra no esta en curso'), { status: 404 });
 
   await pool.query(`DELETE FROM app_settings WHERE key = ANY($1)`, [SIDES.map(lockKey)]);
+  olvidarHistorial();
   return { ended: id };
 }
 
@@ -970,6 +1042,7 @@ export async function updateWar(id, { name, matchType, outcome } = {}) {
     ],
   );
   if (!rowCount) throw Object.assign(new Error('esa guerra no existe'), { status: 404 });
+  olvidarHistorial();
   return { ok: true };
 }
 
@@ -997,6 +1070,7 @@ export async function deleteWar(id) {
   if (rows[0].endedAt === null) {
     await pool.query(`DELETE FROM app_settings WHERE key = ANY($1)`, [SIDES.map(lockKey)]);
   }
+  olvidarHistorial();
   return { deleted: id };
 }
 

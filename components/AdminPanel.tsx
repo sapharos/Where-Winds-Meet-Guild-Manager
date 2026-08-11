@@ -748,6 +748,7 @@ const AdminPanel: React.FC<Props> = ({
           </div>
           <p className="text-xs text-slate-500 mb-4">
             Los comandos <code className="text-slate-400">/perfil</code>,{' '}
+            <code className="text-slate-400">/impacto</code>,{' '}
             <code className="text-slate-400">/guerra</code>,{' '}
             <code className="text-slate-400">/agenda</code> y{' '}
             <code className="text-slate-400">/build</code> los ve todo el servidor, pero el bot sólo

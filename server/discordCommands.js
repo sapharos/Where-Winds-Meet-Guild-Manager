@@ -29,7 +29,16 @@ import { SCAN_FIELDS } from './scans.js';
 import { listBuilds, saveBuilds, MAX_WEAPONS } from './builds.js';
 import { listWeaponSets } from './weapons.js';
 import { permissionsFor } from './auth.js';
-import { LANE_INFO, LANE_CAPACITY, WAR_CAPACITY, SIDES, getBoard, listStrategies } from './war.js';
+import {
+  LANE_INFO,
+  LANE_CAPACITY,
+  WAR_CAPACITY,
+  SIDES,
+  getBoard,
+  listStrategies,
+  historialCompleto,
+} from './war.js';
+import { WEIGHTS, impactShade, puntuarGuerras, trayectorias, nochesDe } from './impact.js';
 import {
   getEvent,
   myEvents,
@@ -228,6 +237,35 @@ const COMMANDS = [
       },
       {
         type: 5,
+        name: 'publico',
+        description: 'Enseñarlo en el canal en vez de sólo a ti',
+        required: false,
+      },
+    ],
+  },
+  {
+    name: 'impacto',
+    default_member_permissions: LOS_VE_TODO_EL_MUNDO,
+    description: 'Tu historial de guerras, tu impacto medio y tu puesto en el gremio',
+    // Las mismas dos formas de nombrar a otro que `/perfil`, por lo mismo: por
+    // mención sólo aparece quien tenga cuenta vinculada, y por nombre aparece
+    // cualquiera que haya peleado alguna vez, aunque ya no esté en el gremio.
+    options: [
+      {
+        type: 6, // usuario de Discord
+        name: 'miembro',
+        description: 'De quién, si tiene su Discord vinculado',
+        required: false,
+      },
+      {
+        type: 3, // texto
+        name: 'nombre',
+        description: 'De quién, buscándolo en el roster por su nombre',
+        required: false,
+        autocomplete: true,
+      },
+      {
+        type: 5, // booleano
         name: 'publico',
         description: 'Enseñarlo en el canal en vez de sólo a ti',
         required: false,
@@ -1686,6 +1724,264 @@ async function comandoPerfil(interaction) {
   };
 }
 
+/* ----------------------------------------------------------------- impacto */
+
+/** La media, con un decimal: a entero, media tabla empata y parece un error. */
+const media1 = new Intl.NumberFormat('es', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+
+const fecha = new Intl.DateTimeFormat('es', { day: 'numeric', month: 'short', year: '2-digit' });
+
+const RESULTADOS = { win: 'Victoria', loss: 'Derrota' };
+
+/** Cuántas guerras se listan una por una antes de que la lista sea un muro. */
+const ULTIMAS = 8;
+
+/** Cuántos de la cabeza se enseñan siempre, aunque quien pregunta esté lejos. */
+const CABEZA = 3;
+
+/** Cuántos vecinos por arriba y por abajo, para saber a quién se tiene cerca. */
+const VECINOS = 2;
+
+/**
+ * Una barra de diez celdas.
+ *
+ * Dentro de un bloque de código y no con emoji: es la única forma de que las
+ * siete filas queden alineadas en Discord, que compone el texto normal con una
+ * tipografía de ancho variable y convierte una columna de porcentajes en un
+ * zigzag. Cuesta el color -- un bloque de código no lo admite -- y a cambio se
+ * lee de un vistazo, que es lo que se venía a hacer.
+ */
+function barra(fraccion) {
+  const llenas = Math.round(Math.min(1, Math.max(0, fraccion)) * 10);
+  return '█'.repeat(llenas) + '░'.repeat(10 - llenas);
+}
+
+/** Recorta un nombre para que la columna no la decida el más largo. */
+const corto = (texto, largo) =>
+  String(texto ?? '').length > largo ? `${String(texto).slice(0, largo - 1)}…` : String(texto ?? '');
+
+/**
+ * El historial de guerra de un miembro como embed.
+ *
+ * Pura y exportada por lo mismo que `perfilEmbed`: es la parte que hay que
+ * poder mirar y corregir sin un Discord delante ni una base de datos detrás.
+ *
+ * Contesta a tres cosas, en este orden: cuánto pesas de media, en qué lo pesas,
+ * y dónde te deja eso respecto al gremio. La lista de guerras va después de la
+ * media a propósito -- la media es la respuesta, y el historial es de dónde
+ * sale -- y sólo las últimas: treinta renglones no son un historial, son un
+ * archivo, y para eso está la web.
+ */
+export function impactoEmbed({
+  player,
+  noches,
+  trayectoria,
+  tabla,
+  minimo,
+  guerrasDelGremio,
+  avatarUrl,
+  guildName,
+  ajeno = false,
+}) {
+  const quien = ajeno ? player.name : 'Tú';
+  const embed = {
+    author: { name: guildName ?? 'Zona Zero' },
+    title: `${player.name} · impacto`,
+    color: comoEntero(impactShade(trayectoria?.media ?? 0)),
+    fields: [],
+    footer: { text: 'El impacto compara cada aporte con el mejor de esa misma guerra' },
+  };
+  if (avatarUrl) embed.thumbnail = { url: avatarUrl };
+
+  // Nada que promediar. Se distinguen los dos motivos porque piden cosas
+  // distintas de quien lo lee: apuntarse a la próxima, o pedir que alguien
+  // suba los pantallazos de las que ya se pelearon.
+  if (!trayectoria) {
+    embed.description = guerrasDelGremio
+      ? ajeno
+        ? `${player.name} no tiene cifras en ninguna de las ${guerrasDelGremio} guerras registradas.`
+        : `Todavía no tienes cifras en ninguna guerra registrada. Aparecerás aquí en cuanto pelees una y alguien suba la pantalla de resultados.`
+      : 'El gremio todavía no tiene ninguna guerra con cifras cargadas.';
+    return embed;
+  }
+
+  const { media, guerras, mejor, victorias, derrotas, puesto } = trayectoria;
+  const rankeados = tabla.filter((t) => t.puesto !== null);
+
+  // El titular. El puesto va aquí y no en un campo aparte porque es la mitad de
+  // la pregunta: una media sin con quién compararla no dice nada.
+  const sitio =
+    puesto !== null
+      ? `**${puesto}.º de ${rankeados.length}** en el gremio`
+      : guerras < minimo
+        ? `sin puesto todavía: ${minimo === 1 ? 'hace falta una guerra' : `hacen falta ${minimo} guerras`} y ${ajeno ? 'lleva' : 'llevas'} ${guerras}`
+        : 'fuera de la tabla, por estar de baja en el roster';
+
+  const marcador = [
+    `${guerras} ${guerras === 1 ? 'guerra' : 'guerras'}`,
+    victorias || derrotas ? `${victorias}V · ${derrotas}D` : null,
+    `mejor noche ${mejor}`,
+  ]
+    .filter(Boolean)
+    .join('  ·  ');
+
+  embed.description = `**${media1.format(media)}** de impacto medio  ·  ${sitio}\n${marcador}`;
+
+  // Dónde pesa. Es la respuesta a «mi contribución promedio» con el detalle que
+  // una sola cifra no puede dar: dos personas con la misma media pueden estar
+  // haciendo trabajos distintos, y eso es lo que se ve aquí.
+  const ejes = WEIGHTS.filter((axis) => axis.weight > 0)
+    .map((axis) => {
+      const parte = trayectoria.partes[axis.key] ?? 0;
+      return `${axis.label.padEnd(15)}${barra(parte)} ${String(Math.round(parte * 100)).padStart(3)} %`;
+    })
+    .join('\n');
+  embed.fields.push({
+    name: ajeno ? 'Dónde pesa' : 'Dónde pesas',
+    value: `\`\`\`\n${ejes}\n\`\`\``,
+    inline: false,
+  });
+
+  if (noches.length) {
+    const lineas = noches.slice(0, ULTIMAS).map((noche) => {
+      const partes = [
+        `\`${String(noche.score).padStart(3)}\``,
+        `${noche.puesto}.º de ${noche.de}`,
+        RESULTADOS[noche.war.outcome] ?? 'sin marcar',
+        fecha.format(new Date(noche.war.startedAt)),
+        corto(noche.war.name, 22),
+      ];
+      return partes.join(' · ');
+    });
+    if (noches.length > ULTIMAS) {
+      lineas.push(`*y ${noches.length - ULTIMAS} más, en la web*`);
+    }
+    embed.fields.push({
+      name: ajeno ? 'Sus últimas guerras' : 'Tus últimas guerras',
+      value: lineas.join('\n'),
+      inline: false,
+    });
+  }
+
+  // La tabla: la cabeza siempre, y la vecindad de quien pregunta cuando está
+  // lejos de ella. Enseñar treinta renglones para señalar uno es hacer buscar;
+  // enseñar sólo el suyo no contesta «respecto a quién».
+  if (rankeados.length) {
+    const at = rankeados.findIndex((t) => t.playerId === player.playerId);
+    const cerca = at < 0 ? [] : rankeados.slice(Math.max(CABEZA, at - VECINOS), at + VECINOS + 1);
+    const filas = [...rankeados.slice(0, CABEZA), ...cerca];
+
+    const ancho = Math.max(...filas.map((f) => String(f.puesto).length));
+    const dibujo = filas.map((fila) => {
+      const yo = fila.playerId === player.playerId;
+      return `${yo ? '›' : ' '}${String(fila.puesto).padStart(ancho)}  ${corto(fila.name, 16).padEnd(16)}${media1.format(fila.media).padStart(5)}  (${fila.guerras})`;
+    });
+    // El salto entre la cabeza y la vecindad, cuando no son contiguas: sin él,
+    // un tercero seguido de un noveno se lee como que faltan filas por un fallo.
+    if (cerca.length && cerca[0].puesto > CABEZA + 1) dibujo.splice(CABEZA, 0, ' ⋯');
+
+    // La leyenda va en el nombre del campo y no de cabecera dentro del bloque:
+    // ahí dentro cada palabra cuesta ancho, y el ancho es lo que decide si esto
+    // se lee en un móvil o se parte en dos.
+    embed.fields.push({
+      name: 'La tabla del gremio  ·  media y guerras',
+      value: `\`\`\`\n${dibujo.join('\n')}\n\`\`\``,
+      inline: false,
+    });
+  }
+
+  embed.footer = {
+    text:
+      `Media sobre ${guerrasDelGremio} guerras con cifras · mínimo ${minimo} para entrar en la tabla · ` +
+      'el impacto compara cada aporte con el mejor de esa misma guerra',
+  };
+  if (noches[0]) embed.timestamp = new Date(noches[0].war.startedAt).toISOString();
+
+  return embed;
+}
+
+/**
+ * `/impacto` -- el historial de guerra de un miembro y su sitio en el gremio.
+ *
+ * Mismas dos formas de nombrar a otro que `/perfil`, y el mismo permiso:
+ * `roster.view`, porque mirar lo que hizo otro en una guerra es lo mismo que
+ * abrir su historial en la web. Un permiso propio de Discord sería una regla
+ * más que mantener y una más que puede contradecir a la web.
+ *
+ * Todo el cálculo sale de `server/impact.js`, que es el mismo módulo que puntúa
+ * la web. No hay una versión de Discord del puntaje.
+ */
+async function comandoImpacto(interaction) {
+  const usuario = interaction.member?.user ?? interaction.user;
+  if (!usuario?.id) return aviso('No he podido saber quién eres. Inténtalo otra vez.');
+
+  const quienPregunta = await cuentaDe(usuario.id);
+  const negativa = vetado(quienPregunta);
+  if (negativa) return negativa;
+
+  const mencionado = opcion(interaction, 'miembro');
+  const escrito = opcion(interaction, 'nombre');
+  if (mencionado && escrito) {
+    return aviso('Elige una de las dos: o `miembro`, o `nombre`.');
+  }
+
+  let ficha = quienPregunta;
+  let avatar = avatarDe(usuario);
+
+  if (mencionado) {
+    const suya = await cuentaDe(mencionado);
+    if (!suya?.playerId) {
+      return aviso(
+        'Ese miembro no tiene su Discord vinculado a una ficha del roster. Búscalo por nombre con la opción `nombre`.',
+      );
+    }
+    ficha = suya;
+    avatar = avatarDe(interaction.data?.resolved?.users?.[mencionado]);
+  } else if (escrito) {
+    const suya = await fichaPorTexto(String(escrito));
+    if (!suya) return aviso(`No encuentro a nadie llamado «${escrito}» en el roster.`);
+    ficha = suya;
+    avatar = null;
+  }
+
+  const esOtro = ficha.playerId !== quienPregunta.playerId;
+  if (esOtro) {
+    const permisos = await permissionsFor(quienPregunta.cuentaRol);
+    if (!permisos.includes('roster.view')) {
+      return aviso('Tu cuenta no tiene permiso para ver el roster, así que sólo puedes mirar el tuyo.');
+    }
+  } else if (!ficha.playerId || !ficha.name) {
+    return aviso('Tu cuenta todavía no está unida a una ficha del roster. Avisa a un líder.');
+  }
+
+  const [guerras, weaponSets] = await Promise.all([historialCompleto(), listWeaponSets()]);
+  const puntuadas = puntuarGuerras(guerras, weaponSets);
+  const { tabla, guerras: cuantas, minimo } = trayectorias(puntuadas);
+
+  return {
+    type: MESSAGE,
+    data: {
+      embeds: [
+        impactoEmbed({
+          player: ficha,
+          noches: nochesDe(puntuadas, ficha.playerId),
+          trayectoria: tabla.find((t) => t.playerId === ficha.playerId) ?? null,
+          tabla,
+          minimo,
+          guerrasDelGremio: cuantas,
+          avatarUrl: avatar,
+          guildName: process.env.GUILD_NAME || 'Zona Zero',
+          ajeno: esOtro,
+        }),
+      ],
+      // Los nombres del roster los escribe el gremio, y uno de ellos podría ser
+      // un «@everyone» a la espera de que un comando de consulta lo dispare.
+      allowed_mentions: { parse: [] },
+      ...(opcion(interaction, 'publico') === true ? {} : { flags: EPHEMERAL }),
+    },
+  };
+}
+
 /**
  * `/build` -- la tuya, y sólo la tuya.
  *
@@ -2095,7 +2391,7 @@ export async function handleInteraction(body) {
     // Lo único que no se puede diferir: Discord quiere las opciones dentro de
     // los tres segundos o no hay lista que enseñar. Por eso es una sola
     // consulta y por eso no pasa por aquí abajo.
-    return body.data?.name === 'perfil'
+    return body.data?.name === 'perfil' || body.data?.name === 'impacto'
       ? autocompletarNombre(body)
       : { type: CHOICES, data: { choices: [] } };
   }
@@ -2114,6 +2410,8 @@ export async function handleInteraction(body) {
   switch (body.data?.name) {
     case 'perfil':
       return diferir(body, () => comandoPerfil(body));
+    case 'impacto':
+      return diferir(body, () => comandoImpacto(body));
     case 'guerra':
       return diferir(body, () => comandoGuerra(body));
     case 'agenda':
@@ -2121,6 +2419,8 @@ export async function handleInteraction(body) {
     case 'build':
       return diferir(body, () => comandoBuild(body));
     default:
-      return aviso('Ese comando ya no existe. Prueba con `/perfil`, `/guerra`, `/agenda` o `/build`.');
+      return aviso(
+        'Ese comando ya no existe. Prueba con `/perfil`, `/impacto`, `/guerra`, `/agenda` o `/build`.',
+      );
   }
 }
