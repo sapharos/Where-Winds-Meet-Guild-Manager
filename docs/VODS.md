@@ -311,6 +311,20 @@ CIFS acepta `uid=` y `gid=` como opciones de montaje, o sea que **el problema
 desaparece de un plumazo**. Es algo más lento que NFS, pero un stream son ~1 MB/s
 y el cuello está muy lejos.
 
+**Por qué `0664`/`0775` y no `0770`:** aquí escribe uno y lee otro. tusd y ffmpeg
+escriben como root, pero **quien sirve los bytes es nginx, cuyos procesos de
+trabajo corren como el usuario `nginx`**, no como root. Con `0770` nginx no puede
+abrir los ficheros y devuelve **403** — que además despista, porque parece un
+problema de permisos de la aplicación cuando es del sistema de ficheros. Lo que
+se sirve tiene que poder leerlo cualquiera; escribirlo, sólo el dueño.
+
+Se pagó el 2026-08-23, con el primer VOD real ya subido y remuxado. La firma en
+los logs de `web` es inconfundible:
+
+```
+open() "/vods/hls/<id>/origen.m3u8" failed (13: Permission denied)
+```
+
 ## 1.4 — Montar en el host de Proxmox
 
 En la consola del **host** (no del contenedor):
@@ -340,7 +354,7 @@ mkdir -p /mnt/vods
 ```
 
 ```bash
-mount -t cifs //192.168.1.200/vods /mnt/vods -o credentials=/etc/cifs-vods.cred,uid=100000,gid=100000,file_mode=0770,dir_mode=0770,vers=3.0,iocharset=utf8
+mount -t cifs //192.168.1.200/vods /mnt/vods -o credentials=/etc/cifs-vods.cred,uid=100000,gid=100000,file_mode=0664,dir_mode=0775,vers=3.0,iocharset=utf8
 ```
 
 **Comprobación:**
@@ -359,7 +373,7 @@ párate ahí.
 Persistir en `/etc/fstab` (una sola línea):
 
 ```
-//192.168.1.200/vods /mnt/vods cifs credentials=/etc/cifs-vods.cred,uid=100000,gid=100000,file_mode=0770,dir_mode=0770,vers=3.0,iocharset=utf8,_netdev,nofail 0 0
+//192.168.1.200/vods /mnt/vods cifs credentials=/etc/cifs-vods.cred,uid=100000,gid=100000,file_mode=0664,dir_mode=0775,vers=3.0,iocharset=utf8,_netdev,nofail 0 0
 ```
 
 `_netdev` espera a que haya red; `nofail` evita que el host se quede colgado en el
