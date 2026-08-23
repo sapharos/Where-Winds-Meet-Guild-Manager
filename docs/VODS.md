@@ -215,10 +215,41 @@ Sólo reproduce un miembro con sesión y `war.view`.
 | | Qué | Estado |
 |---|---|---|
 | **1** | Infraestructura: NAS montado y visible desde el LXC 180 | **hecha 2026-08-23** |
-| **2** | Subida + aprobación + reproductor simple | ← siguiente |
-| **3** | Recorte, OCR del cronómetro, retención automática | |
+| **2** | Subida + aprobación + reproductor simple | **hecha 2026-08-23** |
+| **3** | Recorte, OCR del cronómetro, sincronía | ← siguiente |
 | **4** | Multistream sincronizado | |
 | **5** | QuickSync, correlación de audio, respaldo a B2 | opcional |
+
+---
+
+# Fase 2 — Puesta en marcha
+
+El código está desplegable, pero **la funcionalidad nace apagada**: sin
+`VODS_HOOK_SECRET` el gancho responde 503 y no se puede subir nada. Para
+encenderla, en las variables del stack de Portainer:
+
+```
+VODS_HOOK_SECRET=<openssl rand -hex 32>
+VODS_HOST_DIR=/mnt/vods
+VODS_MAX_BYTES=6442450944
+VODS_RETENTION_DAYS=90
+```
+
+Y después del redespliegue, comprobar por este orden:
+
+1. `docker ps` — tiene que aparecer un contenedor `wwm-guild-manager-tusd`
+   nuevo. Si entra en bucle de reinicio, `docker logs` de ese contenedor.
+2. `curl -s <PUBLIC_URL>/api/health` — la API sigue en pie.
+3. `curl -o /dev/null -w '%{http_code}' -X POST <PUBLIC_URL>/api/vods/hook/x`
+   → **404**. Cualquier otra cosa significa que nginx no está tapando el gancho.
+4. Abrir un acta de guerra en la web: tiene que salir la sección
+   «Grabaciones» con el botón de subir.
+5. Subir una grabación de verdad. Es la única prueba que vale para el
+   pipeline entero, porque el banco simula tusd y ffmpeg.
+
+Si la subida falla con un error de permisos, revisar que `tusd` lleva
+`user: "0:0"` — es el fallo esperado y el más despistante, porque la misma
+ruta se escribe sin problema desde una consola del contenedor.
 
 ---
 
