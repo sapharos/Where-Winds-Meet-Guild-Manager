@@ -85,7 +85,18 @@ async function crear(fichero: File, metadatos: Record<string, string>): Promise<
   }
   const url = res.headers.get('Location');
   if (!url) throw new Error('El servidor no dijo dónde subir.');
-  return new URL(url, location.href).toString();
+
+  // Sólo la ruta, descartando el esquema y el host que venga en `Location`.
+  //
+  // No es tiquismiquis: tusd construye esa URL a partir de las cabeceras
+  // `X-Forwarded-*`, y en este despliegue el TLS termina en un proxy de
+  // delante, así que el nginx de dentro ve `$scheme` = http y tusd acaba
+  // diciendo `http://…`. Desde una página https el navegador bloquea eso como
+  // contenido mixto y la subida muere justo después de crearse. Quedándonos con
+  // la ruta y resolviéndola contra el origen actual, ninguna combinación de
+  // proxies mal configurados puede mandarnos al sitio equivocado.
+  const partes = new URL(url, location.href);
+  return `${partes.pathname}${partes.search}`;
 }
 
 /** Por dónde iba. `null` si esa subida ya no existe y hay que empezar otra. */
@@ -182,8 +193,18 @@ export async function subir({ fichero, metadatos, alProgresar, señal }: Opcione
       // una respuesta perdida en el camino de vuelta ya lo había guardado, y
       // reenviarlo desde el sitio equivocado corrompe el fichero.
       await new Promise((r) => setTimeout(r, 1000 * fallos));
-      const donde = await desplazamiento(url).catch(() => null);
-      if (donde === null) throw new Error('La subida se perdió; hay que empezarla de nuevo.');
+      let causa: unknown = null;
+      const donde = await desplazamiento(url).catch((e) => {
+        causa = e;
+        return null;
+      });
+      if (donde === null) {
+        // Con el motivo delante. Sin él, este mensaje decía «se perdió» y
+        // dejaba a quien lo lee sin saber si fue la red, el proxy, el tamaño o
+        // que la subida caducó -- que son arreglos distintos.
+        const detalle = causa instanceof Error ? causa.message : (err as Error)?.message;
+        throw new Error(`La subida se perdió y hay que empezarla de nuevo. Causa: ${detalle}`);
+      }
       enviados = donde;
     }
   }
