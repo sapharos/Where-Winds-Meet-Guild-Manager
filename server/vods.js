@@ -448,6 +448,84 @@ export async function barrerAbandonados() {
   return { borrados };
 }
 
+// --- Marcas -----------------------------------------------------------------
+
+/**
+ * Los momentos señalados de una guerra, en tiempo de guerra.
+ *
+ * No se filtran por grabación a propósito: quien está viendo el VOD de uno
+ * quiere ver también lo que marcó el que jugaba en la otra línea. Es lo que
+ * convierte cuatro revisiones sueltas en una sola lectura de la guerra.
+ */
+export async function marcasDeLaGuerra(warId) {
+  const { rows } = await pool.query(
+    `SELECT m.id, m.war_id AS "warId", m.vod_id AS "vodId", m.autor_id AS "autorId",
+            m.t_ms AS "tMs", m.texto, m.hito, m.creada_en AS "creadaEn",
+            u.username AS autor
+       FROM war_marcas m
+       JOIN wars w ON w.id = m.war_id
+       LEFT JOIN users u ON u.id = m.autor_id
+      WHERE m.war_id = $1 AND w.guild_id = $2
+      ORDER BY m.t_ms`,
+    [warId, GUILD_ID],
+  );
+  return rows;
+}
+
+const TEXTO_MAX = 280;
+
+/**
+ * Marcar un momento. El instante llega ya en tiempo de guerra: lo convierte
+ * quien lo crea, que es el único que sabe desde qué grabación y con qué offset
+ * estaba mirando.
+ */
+export async function crearMarca({ warId, vodId, autorId, tMs, texto, hito }) {
+  if (!Number.isInteger(tMs)) return null;
+  const limpio = String(texto ?? '').trim().slice(0, TEXTO_MAX);
+  if (!limpio) return null;
+
+  const { rows: guerra } = await pool.query(
+    `SELECT 1 FROM wars WHERE id = $1 AND guild_id = $2`,
+    [warId, GUILD_ID],
+  );
+  if (!guerra.length) return null;
+
+  const id = `mrc_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  await pool.query(
+    `INSERT INTO war_marcas (id, war_id, vod_id, autor_id, t_ms, texto, hito)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    [id, warId, vodId || null, autorId || null, tMs, limpio, Boolean(hito)],
+  );
+  const { rows } = await pool.query(
+    `SELECT m.id, m.war_id AS "warId", m.vod_id AS "vodId", m.autor_id AS "autorId",
+            m.t_ms AS "tMs", m.texto, m.hito, m.creada_en AS "creadaEn",
+            u.username AS autor
+       FROM war_marcas m LEFT JOIN users u ON u.id = m.autor_id
+      WHERE m.id = $1`,
+    [id],
+  );
+  return rows[0];
+}
+
+/**
+ * Borrar. La suya, cualquiera; la de otro, sólo quien edita la guerra.
+ *
+ * Se resuelve en una sola consulta en vez de leer y luego borrar: entre las dos
+ * cabe que otro la borre, y entonces el borrado «ajeno» se aplicaría a una fila
+ * que ya no es la que se comprobó.
+ */
+export async function borrarMarca(id, userId, puedeEditar) {
+  const { rows } = await pool.query(
+    `DELETE FROM war_marcas m
+      USING wars w
+      WHERE m.id = $1 AND w.id = m.war_id AND w.guild_id = $2
+        AND ($3::boolean OR m.autor_id = $4)
+      RETURNING m.id`,
+    [id, GUILD_ID, Boolean(puedeEditar), userId || null],
+  );
+  return rows[0] ?? null;
+}
+
 // --- Consultas para la interfaz ---------------------------------------------
 
 /** Lo de una guerra. Quien no puede aprobar sólo ve lo aprobado y lo suyo. */

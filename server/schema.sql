@@ -808,3 +808,37 @@ CREATE TABLE IF NOT EXISTS war_vod_renditions (
   creada_en     TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (vod_id, calidad)
 );
+
+-- Los momentos que alguien quiso señalar de una guerra. Ver docs/VODS.md.
+--
+-- Cuelgan de la GUERRA y no de la grabación, y es la decisión importante de
+-- esta tabla: «aquí empujaron por el medio» es un hecho de la guerra en el
+-- minuto T, no del vídeo de quien lo vio. Colgándolas de un VOD, el mismo
+-- momento necesitaría una marca por grabación y no cuadrarían entre sí; en
+-- tiempo de guerra, una sola marca sirve para las cuatro vistas del
+-- multistream a la vez y saltar entre ellas mueve todos los mosaicos.
+--
+-- `t_ms` usa la misma referencia que `war_vods.offset_ms`: milisegundos desde
+-- que empezó la preparación. Situar una marca en una grabación concreta es
+-- entonces `t_ms - offset_ms`, y por eso una grabación sin sincronizar no puede
+-- enseñarlas: no se sabe dónde caen.
+--
+-- `vod_id` es de dónde salió, no dónde vive. Sirve para saber por los ojos de
+-- quién se vio aquello, y se pone a null si esa grabación caduca -- la marca
+-- sobrevive al vídeo que la originó, igual que el acta sobrevive a sus bytes.
+CREATE TABLE IF NOT EXISTS war_marcas (
+  id         TEXT PRIMARY KEY,
+  war_id     TEXT NOT NULL REFERENCES wars(id) ON DELETE CASCADE,
+  vod_id     TEXT REFERENCES war_vods(id) ON DELETE SET NULL,
+  autor_id   TEXT,
+  t_ms       INTEGER NOT NULL,
+  texto      TEXT NOT NULL,
+  -- Un hito es lo que estructura la guerra --cayó la puerta, se perdió el
+  -- boss-- y un comentario es todo lo demás. Se distinguen porque en una
+  -- revisión de media hora quien busca «qué pasó» no quiere leerse treinta
+  -- bromas para encontrar los cuatro momentos que importan.
+  hito       BOOLEAN NOT NULL DEFAULT false,
+  creada_en  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS war_marcas_guerra_idx ON war_marcas (war_id, t_ms);

@@ -102,6 +102,9 @@ import {
   resolverVod,
   fijarVod,
   ajustarSincronia,
+  marcasDeLaGuerra,
+  crearMarca,
+  borrarMarca,
   startVodSweeper,
 } from './vods.js';
 import {
@@ -1295,6 +1298,38 @@ app.get('/api/vods/:id/hls/:fichero', requireAuth, requirePermission('war.view')
 
 app.get('/api/war/wars/:id/vods', requireAuth, requirePermission('war.view'), asHandler(async (req, res) => {
   res.json(await vodsDeLaGuerra(req.params.id, req.user, req.permissions));
+}));
+
+/**
+ * Las marcas de una guerra. Cuelgan de la guerra y no de la grabación porque
+ * señalan un momento de la pelea, no del vídeo de quien lo vio -- así una marca
+ * vale para las cuatro vistas del multistream. Ver docs/VODS.md.
+ *
+ * Marcar lo puede hacer cualquiera que pueda ver la guerra: el valor está en
+ * que lo apunte quien lo vio, y pedir un permiso aparte para eso dejaría la
+ * revisión en manos de tres personas.
+ */
+app.get('/api/war/wars/:id/marcas', requireAuth, requirePermission('war.view'), asHandler(async (req, res) => {
+  res.json(await marcasDeLaGuerra(req.params.id));
+}));
+
+app.post('/api/war/wars/:id/marcas', requireAuth, requirePermission('war.view'), asHandler(async (req, res) => {
+  const marca = await crearMarca({
+    warId: req.params.id,
+    vodId: req.body?.vodId ?? null,
+    autorId: req.user.id,
+    tMs: req.body?.tMs,
+    texto: req.body?.texto,
+    hito: req.body?.hito === true,
+  });
+  if (!marca) return res.status(400).json({ error: 'tMs entero y texto son obligatorios' });
+  res.json(marca);
+}));
+
+app.delete('/api/marcas/:id', requireAuth, requirePermission('war.view'), asHandler(async (req, res) => {
+  const hecho = await borrarMarca(req.params.id, req.user.id, req.permissions.includes('war.edit'));
+  if (!hecho) return res.status(404).json({ error: 'no such mark' });
+  res.json(hecho);
 }));
 
 app.post('/api/vods/:id/resolve', requireAuth, requirePermission('war.vod.approve'), asHandler(async (req, res) => {

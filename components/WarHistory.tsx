@@ -119,6 +119,8 @@ interface Props {
   canPinVod: boolean;
   /** La ficha de quien mira, para saber cuál de las grabaciones es la suya. */
   miPlayerId: string | null;
+  /** Su cuenta, que es lo que firma las marcas de los vídeos. */
+  miUserId: string | null;
   onClose: () => void;
   /**
    * Something changed here that the board behind is also showing. Deleting the
@@ -141,6 +143,7 @@ const WarHistory: React.FC<Props> = ({
   canApproveVod,
   canPinVod,
   miPlayerId,
+  miUserId,
   onClose,
   onChanged,
 }) => {
@@ -647,6 +650,8 @@ const WarHistory: React.FC<Props> = ({
                 warId={detail.id}
                 nombres={Object.fromEntries(players.map((p) => [p.id, p.name]))}
                 miPlayerId={miPlayerId}
+                miUserId={miUserId}
+                puedeEditar={canEdit}
                 puedeSubir={canUploadVod}
                 puedeAprobar={canApproveVod}
                 puedeFijar={canPinVod}

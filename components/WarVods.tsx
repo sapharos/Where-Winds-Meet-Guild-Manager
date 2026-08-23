@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../services/authService';
 import Sheet from './Sheet';
 import PreparaVod from './PreparaVod';
+import Reproductor, { Marca } from './Reproductor';
 import { ProgresoSubida, enBytes, loQueFalta, subir } from '../services/subidaTus';
 
 /**
@@ -38,6 +39,10 @@ interface Props {
   nombres: Record<string, string>;
   /** La ficha de quien mira, para saber cuáles son suyas. */
   miPlayerId: string | null;
+  /** Su cuenta, que es lo que firma las marcas. */
+  miUserId: string | null;
+  /** Editar la guerra deja borrar las marcas de cualquiera. */
+  puedeEditar: boolean;
   puedeSubir: boolean;
   puedeAprobar: boolean;
   puedeFijar: boolean;
@@ -68,13 +73,16 @@ const ETIQUETA: Record<Vod['estado'], { texto: string; clase: string }> = {
   caducado: { texto: 'Caducada', clase: 'text-slate-500' },
 };
 
-const WarVods: React.FC<Props> = ({ warId, nombres, miPlayerId, puedeSubir, puedeAprobar, puedeFijar }) => {
+const WarVods: React.FC<Props> = ({
+  warId, nombres, miPlayerId, miUserId, puedeEditar, puedeSubir, puedeAprobar, puedeFijar,
+}) => {
   const [vods, setVods] = useState<Vod[] | null>(null);
   const [viendo, setViendo] = useState<Vod | null>(null);
   const [subiendo, setSubiendo] = useState(false);
   const [progreso, setProgreso] = useState<ProgresoSubida | null>(null);
   const [aviso, setAviso] = useState<{ texto: string; ok: boolean } | null>(null);
   const [preparando, setPreparando] = useState<File | null>(null);
+  const [marcas, setMarcas] = useState<Marca[]>([]);
   const archivo = useRef<HTMLInputElement>(null);
   const cancelar = useRef<AbortController | null>(null);
 
@@ -82,9 +90,17 @@ const WarVods: React.FC<Props> = ({ warId, nombres, miPlayerId, puedeSubir, pued
     setVods(await api<Vod[]>(`/war/wars/${warId}/vods`).catch(() => []));
   }, [warId]);
 
+  // Las marcas cuelgan de la guerra, no de la grabación: se piden una vez y
+  // sirven para cualquiera que se abra, que es lo que hace que quien mira el
+  // VOD de uno vea también lo que apuntó el que jugaba en la otra línea.
+  const cargarMarcas = useCallback(async () => {
+    setMarcas(await api<Marca[]>(`/war/wars/${warId}/marcas`).catch(() => []));
+  }, [warId]);
+
   useEffect(() => {
     void cargar();
-  }, [cargar]);
+    void cargarMarcas();
+  }, [cargar, cargarMarcas]);
 
   /**
    * Mientras algo se está preparando, preguntar cada pocos segundos. El remux
@@ -166,6 +182,19 @@ const WarVods: React.FC<Props> = ({ warId, nombres, miPlayerId, puedeSubir, pued
   const fijar = async (vod: Vod) => {
     await api(`/vods/${vod.id}/pin`, { method: 'POST', body: JSON.stringify({ fijado: !vod.fijado }) });
     await cargar();
+  };
+
+  const marcar = async (tMs: number, texto: string, hito: boolean, vodId: string) => {
+    await api(`/war/wars/${warId}/marcas`, {
+      method: 'POST',
+      body: JSON.stringify({ tMs, texto, hito, vodId }),
+    });
+    await cargarMarcas();
+  };
+
+  const borrarMarca = async (id: string) => {
+    await api(`/marcas/${id}`, { method: 'DELETE' });
+    await cargarMarcas();
   };
 
   const pendientes = vods?.filter((v) => v.estado === 'listo').length ?? 0;
@@ -345,86 +374,26 @@ const WarVods: React.FC<Props> = ({ warId, nombres, miPlayerId, puedeSubir, pued
           size="xl"
           onClose={() => setViendo(null)}
         >
-          <Reproductor vod={viendo} />
+          <Reproductor
+            // La mejor calidad que haya: el original si está, y si no la de
+            // 360p, que llega antes.
+            src={(() => {
+              const c =
+                viendo.calidades.find((x) => x.calidad === 'origen') ?? viendo.calidades[0];
+              return c ? `/api/vods/${viendo.id}/hls/${c.playlist.split(/[\\/]/).pop()}` : null;
+            })()}
+            offsetMs={viendo.offsetMs}
+            marcas={marcas}
+            onMarcar={(tMs, texto, hito) => void marcar(tMs, texto, hito, viendo.id)}
+            onBorrarMarca={(id) => void borrarMarca(id)}
+            // La suya, cualquiera; la de otro, sólo quien edita la guerra. El
+            // servidor lo vuelve a comprobar: esto sólo decide si se ve el
+            // botón.
+            puedeBorrar={(m) => m.autorId === miUserId || puedeEditar}
+          />
         </Sheet>
       )}
     </section>
-  );
-};
-
-/**
- * HLS sin librería: Safari lo reproduce de fábrica, y el resto necesita hls.js.
- *
- * Se carga desde CDN y sólo al abrir un vídeo, igual que se hace con
- * tesseract en `ResultsReader`: son 150 KB que no tienen por qué estar en el
- * paquete de todo el mundo cuando la mayoría de las visitas no abren ninguna
- * grabación.
- */
-const HLSJS = 'https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js';
-
-const Reproductor: React.FC<{ vod: Vod }> = ({ vod }) => {
-  const video = useRef<HTMLVideoElement>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  // La mejor que haya: el original si está, y si no la de 360p, que llega antes.
-  const fuente =
-    vod.calidades.find((c) => c.calidad === 'origen') ?? vod.calidades[0];
-  const src = fuente ? `/api/vods/${vod.id}/hls/${fuente.playlist.split(/[\\/]/).pop()}` : null;
-
-  useEffect(() => {
-    const el = video.current;
-    if (!el || !src) return;
-
-    if (el.canPlayType('application/vnd.apple.mpegurl')) {
-      el.src = src;
-      return;
-    }
-
-    let hls: { destroy: () => void } | null = null;
-    let vivo = true;
-
-    const arrancar = async () => {
-      const w = window as unknown as { Hls?: any };
-      if (!w.Hls) {
-        await new Promise<void>((resolve, reject) => {
-          const s = document.createElement('script');
-          s.src = HLSJS;
-          s.onload = () => resolve();
-          s.onerror = () => reject(new Error('No se pudo cargar el reproductor.'));
-          document.head.appendChild(s);
-        });
-      }
-      if (!vivo || !w.Hls?.isSupported()) return;
-      const instancia = new w.Hls();
-      hls = instancia;
-      instancia.loadSource(src);
-      instancia.attachMedia(el);
-    };
-
-    arrancar().catch((e) => setError(e.message));
-    return () => {
-      vivo = false;
-      hls?.destroy();
-    };
-  }, [src]);
-
-  if (!src) return <p className="text-sm text-slate-400">Esta grabación ya no tiene vídeo.</p>;
-
-  return (
-    <div className="space-y-2">
-      <video
-        ref={video}
-        controls
-        playsInline
-        className="w-full rounded-lg bg-black aspect-video"
-      />
-      {error && <p className="text-xs text-red-400">{error}</p>}
-      {vod.offsetConfianza === null && (
-        <p className="text-[11px] text-slate-500">
-          Sincronía sin verificar: todavía no se sabe en qué momento de la guerra empieza.
-        </p>
-      )}
-    </div>
   );
 };
 

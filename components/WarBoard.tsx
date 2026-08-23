@@ -65,6 +65,8 @@ interface Props {
   canPinVod: boolean;
   /** La ficha de quien mira, para saber cuál de las grabaciones es la suya. */
   miPlayerId: string | null;
+  /** Su cuenta, que es lo que firma las marcas de los vídeos. */
+  miUserId: string | null;
 }
 
 /**
@@ -137,6 +139,7 @@ const WarBoard: React.FC<Props> = ({
   canApproveVod,
   canPinVod,
   miPlayerId,
+  miUserId,
 }) => {
   const [side, setSide] = useState<WarSide>('attack');
   const [deployments, setDeployments] = useState<Deployment[]>([]);
@@ -2084,6 +2087,7 @@ const WarBoard: React.FC<Props> = ({
           canApproveVod={canApproveVod}
           canPinVod={canPinVod}
           miPlayerId={miPlayerId}
+          miUserId={miUserId}
           onClose={() => setHistory(false)}
           onChanged={() => void load()}
         />

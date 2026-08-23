@@ -50,6 +50,20 @@ interface Store {
   current: ReturnType<typeof fake.board>['current'] | null;
   usuarios: ManagedUser[];
   vods: VodFalso[];
+  marcas: MarcaFalsa[];
+}
+
+/** Ver docs/VODS.md: van en tiempo de guerra, no de grabación. */
+interface MarcaFalsa {
+  id: string;
+  warId: string;
+  vodId: string | null;
+  autorId: string | null;
+  autor: string | null;
+  tMs: number;
+  texto: string;
+  hito: boolean;
+  creadaEn: string;
 }
 
 /**
@@ -260,6 +274,19 @@ const store: Store = {
       offsetConfianza: 'nombre', fijado: false, expiraEn: vencimiento(-4),
       subidoEn: vencimiento(-94), calidades: [],
     },
+  ],
+  // En tiempo de guerra. vod-1 arranca en -281000, asi que estas caen entre
+  // sus segundos 281+ y se pintan sobre su barra.
+  marcas: [
+    { id: 'mrc-1', warId: fake.warRows[0].id, vodId: 'vod-1', autorId: 'u-1',
+      autor: 'jinwei', tMs: 300_000, texto: 'Arranca la partida',
+      hito: true, creadaEn: vencimiento(-27) },
+    { id: 'mrc-2', warId: fake.warRows[0].id, vodId: 'vod-1', autorId: 'u-2',
+      autor: 'mei', tMs: 742_000, texto: 'Nos rompen la puerta del medio, nadie cubria',
+      hito: true, creadaEn: vencimiento(-27) },
+    { id: 'mrc-3', warId: fake.warRows[0].id, vodId: 'vod-2', autorId: 'u-1',
+      autor: 'jinwei', tMs: 1_105_000, texto: 'Aqui el 3v1 que no habia que pelear',
+      hito: false, creadaEn: vencimiento(-26) },
   ],
   usuarios: [
     { ...fake.session.user, disabled: false, createdAt: new Date().toISOString() },
@@ -585,6 +612,8 @@ const GET: [RegExp, Ruta][] = [
   [/^\/war\/wars$/, () => fake.warRows],
   [/^\/war\/wars\/([^/]+)$/, (m) => detalleConAnexos(m[1])],
   [/^\/war\/wars\/([^/]+)\/vods$/, (m) => store.vods.filter((v) => v.warId === m[1])],
+  [/^\/war\/wars\/([^/]+)\/marcas$/, (m) =>
+    store.marcas.filter((x) => x.warId === m[1]).sort((a, b) => a.tMs - b.tMs)],
   [/^\/players\/([^/]+)\/scans$/, (m) => fake.scansOf(m[1])],
   [/^\/players\/([^/]+)\/builds$/, (m) => store.builds.filter((b) => b.playerId === m[1])],
   [/^\/players\/([^/]+)\/wars$/, (m) => fake.warsOf(m[1])],
@@ -1090,6 +1119,23 @@ const ESCRITURAS: [string, RegExp, Ruta][] = [
       });
     }
     return { out: body.out ?? null, in: body.in ?? null, side, lane };
+  }],
+  ['POST', /^\/war\/wars\/([^/]+)\/marcas$/, (m, _req, body) => {
+    const marca: MarcaFalsa = {
+      id: `mrc-${store.marcas.length + 1}-${String(body.tMs)}`,
+      warId: m[1], vodId: (body.vodId as string) ?? null,
+      autorId: fake.session.user.id, autor: fake.session.user.username,
+      tMs: Number(body.tMs), texto: String(body.texto), hito: body.hito === true,
+      creadaEn: new Date().toISOString(),
+    };
+    store.marcas.push(marca);
+    return marca;
+  }],
+  ['DELETE', /^\/marcas\/([^/]+)$/, (m) => {
+    const at = store.marcas.findIndex((x) => x.id === m[1]);
+    if (at < 0) return { error: 'no existe' };
+    store.marcas.splice(at, 1);
+    return { id: m[1] };
   }],
   ['POST', /^\/vods\/([^/]+)\/resolve$/, (m, _req, body) => {
     const vod = store.vods.find((v) => v.id === m[1]);

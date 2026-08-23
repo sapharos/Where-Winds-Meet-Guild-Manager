@@ -584,6 +584,7 @@ const App: React.FC = () => {
             canApproveVod={can('war.vod.approve')}
             canPinVod={can('war.vod.pin')}
             miPlayerId={session.user.playerId ?? null}
+            miUserId={session.user.id}
           />
         )}
       </main>
