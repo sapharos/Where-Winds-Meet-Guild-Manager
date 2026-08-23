@@ -229,14 +229,26 @@ comprobación: **si no da lo que dice, para y no sigas**.
 
 Sustituye a lo largo de todo el documento:
 
-- `NAS_IP` — la IP del Synology en la LAN
+- `192.168.1.200` — la IP del Synology en la LAN
 - `USUARIO_VODS` — el usuario de DSM que se crea en el paso 1.2
 
-## 1.0 — Antes de nada
+## 1.0 — Espacio y cuota
 
-En el DSM, **Panel de control → Información del sistema → Almacenamiento**:
-comprobar que hay **al menos 1,5 TB libres**. Con retención de 3 meses el régimen
-estable es ~1,2 TB y conviene margen.
+**Medido el 2026-08-23:** 3,5 TB de capacidad, 1,9 TB usados, **1,6 TB libres**.
+
+Entra, pero con poco margen: el régimen estable son ~1,2 TB, o sea unos 400 GB de
+colchón, y esa cifra se duplica si la gente sube sin recortar. Por eso la cuota no
+es opcional.
+
+**Panel de control → Carpeta compartida → `vods` → Editar → Cuota: 1,3 TB.**
+
+Si el borrado automático falla algún día, se llena *la cuota* y las subidas
+empiezan a rechazarse, pero **los 1,9 TB que ya había en el NAS siguen intactos**
+y nada más del Synology se rompe. Un volumen lleno del todo es mucho peor que un
+servicio que deja de aceptar vídeos.
+
+Si con datos reales se ve que va justo, bajar la retención a 2 meses deja el
+régimen estable en ~800 GB.
 
 ## 1.1 — Carpeta compartida
 
@@ -297,7 +309,7 @@ mkdir -p /mnt/vods
 ```
 
 ```bash
-mount -t cifs //NAS_IP/vods /mnt/vods -o credentials=/etc/cifs-vods.cred,uid=100000,gid=100000,file_mode=0770,dir_mode=0770,vers=3.0,iocharset=utf8
+mount -t cifs //192.168.1.200/vods /mnt/vods -o credentials=/etc/cifs-vods.cred,uid=100000,gid=100000,file_mode=0770,dir_mode=0770,vers=3.0,iocharset=utf8
 ```
 
 **Comprobación:**
@@ -316,7 +328,7 @@ párate ahí.
 Persistir en `/etc/fstab` (una sola línea):
 
 ```
-//NAS_IP/vods /mnt/vods cifs credentials=/etc/cifs-vods.cred,uid=100000,gid=100000,file_mode=0770,dir_mode=0770,vers=3.0,iocharset=utf8,_netdev,nofail 0 0
+//192.168.1.200/vods /mnt/vods cifs credentials=/etc/cifs-vods.cred,uid=100000,gid=100000,file_mode=0770,dir_mode=0770,vers=3.0,iocharset=utf8,_netdev,nofail 0 0
 ```
 
 `_netdev` espera a que haya red; `nofail` evita que el host se quede colgado en el
