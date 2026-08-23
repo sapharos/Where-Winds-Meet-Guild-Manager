@@ -93,6 +93,16 @@ import {
 } from './discordBot.js';
 import { VOICE_SLOTS, getVoiceChannels, setVoiceChannels, deployVoice, moveUnit } from './voice.js';
 import {
+  vodsHabilitados,
+  secretoValido,
+  manejarGancho,
+  vodsDeLaGuerra,
+  resolverVod,
+  fijarVod,
+  ajustarSincronia,
+  startVodSweeper,
+} from './vods.js';
+import {
   listEvents,
   getEvent,
   saveEvent,
@@ -1236,6 +1246,52 @@ app.get('/api/war/wars/:id', requireAuth, asHandler(async (req, res) => {
   res.json(await warDetail(req.params.id));
 }));
 
+// --- Grabaciones de guerra --------------------------------------------------
+// Ver docs/VODS.md. Sin VODS_HOOK_SECRET todo esto responde 503 y no se puede
+// subir nada, igual que hace DISCORD_PUBLIC_KEY con los comandos.
+
+/**
+ * El gancho de tusd. Lo llama tusd y nadie más: viven en la misma red de Docker
+ * y nginx tapa esta ruta desde fuera.
+ *
+ * Lleva `requireAuth` como cualquier otra ruta porque tusd reenvía la cookie de
+ * quien sube (`-hooks-http-forward-headers=Cookie`), así que la sesión se
+ * comprueba igual que en el resto de la aplicación. Sin sesión válida esto
+ * devuelve 401 y tusd lo entiende como un rechazo, que es lo que queremos.
+ */
+app.post('/api/vods/hook/:secreto', (req, res, next) => {
+  if (!vodsHabilitados()) return res.status(503).json({ error: 'vods disabled' });
+  // 404 y no 403: desde fuera esta ruta no debería ni parecer que existe.
+  if (!secretoValido(req.params.secreto)) return res.status(404).end();
+  next();
+}, requireAuth, asHandler(async (req, res) => {
+  res.json(await manejarGancho(req.body ?? {}, req.user, req.permissions));
+}));
+
+app.get('/api/war/wars/:id/vods', requireAuth, requirePermission('war.view'), asHandler(async (req, res) => {
+  res.json(await vodsDeLaGuerra(req.params.id, req.user, req.permissions));
+}));
+
+app.post('/api/vods/:id/resolve', requireAuth, requirePermission('war.vod.approve'), asHandler(async (req, res) => {
+  const hecho = await resolverVod(req.params.id, req.body?.aprobado === true, req.user.id);
+  if (!hecho) return res.status(404).json({ error: 'no such vod' });
+  res.json(hecho);
+}));
+
+app.post('/api/vods/:id/pin', requireAuth, requirePermission('war.vod.pin'), asHandler(async (req, res) => {
+  const hecho = await fijarVod(req.params.id, req.body?.fijado === true);
+  if (!hecho) return res.status(404).json({ error: 'no such vod' });
+  res.json(hecho);
+}));
+
+// La sincronía la puede ajustar quien edita la guerra: alinear cuatro vídeos es
+// trabajo de quien luego los revisa, no del que subió el suyo y ya se fue.
+app.put('/api/vods/:id/sync', requireAuth, requirePermission('war.edit'), asHandler(async (req, res) => {
+  const hecho = await ajustarSincronia(req.params.id, req.body?.offsetMs, req.body?.confianza);
+  if (!hecho) return res.status(400).json({ error: 'offsetMs must be an integer' });
+  res.json(hecho);
+}));
+
 // A member's own record. Readable by anyone signed in: the guild compares
 // itself, and hiding what one person did while showing the war they did it in
 // would only make the comparison worse informed.
@@ -1422,6 +1478,11 @@ migrate()
     // Las guerras de la semana se crean y se publican solas. Sin bot sigue
     // creándolas: la agenda de la web no depende de Discord.
     startAgendaScheduler();
+    // La retención de las grabaciones. Cada seis horas y no cada noche a una
+    // hora fija: el contenedor va en UTC y se reinicia cuando toca desplegar,
+    // así que «a las 4:00» es una cita a la que se puede faltar. Lo que importa
+    // es que el disco no crezca, y para eso cuatro pasadas al día sobran.
+    startVodSweeper();
     app.listen(PORT, () => console.log(`API listening on ${PORT}`));
   })
   .catch((err) => {

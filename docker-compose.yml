@@ -85,7 +85,10 @@ services:
       - -behind-proxy
       - -base-path=/vods-upload/
       - -max-size=${VODS_MAX_BYTES:-6442450944}
-      - -hooks-http=http://api:3001/api/vods/hook
+      # El secreto va en la ruta y no en una cabecera porque tusd reenvía las
+      # cabeceras *del cliente*, no las suyas: no hay forma de que ponga una
+      # constante nuestra. Esta URL no sale nunca de la red de Docker.
+      - -hooks-http=http://api:3001/api/vods/hook/${VODS_HOOK_SECRET:-desactivado}
       # pre-create es donde la API dice que sí o que no: comprueba la sesión y
       # que quien sube figure en war_participants de esa guerra. Sin reenviar la
       # cookie, el gancho no sabría quién pregunta.
