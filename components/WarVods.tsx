@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../services/authService';
 import Sheet from './Sheet';
+import PreparaVod from './PreparaVod';
 import { ProgresoSubida, enBytes, loQueFalta, subir } from '../services/subidaTus';
 
 /**
@@ -73,6 +74,7 @@ const WarVods: React.FC<Props> = ({ warId, nombres, miPlayerId, puedeSubir, pued
   const [subiendo, setSubiendo] = useState(false);
   const [progreso, setProgreso] = useState<ProgresoSubida | null>(null);
   const [aviso, setAviso] = useState<{ texto: string; ok: boolean } | null>(null);
+  const [preparando, setPreparando] = useState<File | null>(null);
   const archivo = useRef<HTMLInputElement>(null);
   const cancelar = useRef<AbortController | null>(null);
 
@@ -95,12 +97,30 @@ const WarVods: React.FC<Props> = ({ warId, nombres, miPlayerId, puedeSubir, pued
     return () => clearInterval(t);
   }, [vods, cargar]);
 
-  const elegido = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  /**
+   * Elegir el fichero ya no sube: abre la preparación. Ahí se marca el recorte
+   * y se lee el cronómetro, las dos cosas sobre el fichero local y sin gastar
+   * ni un byte de red. Ver docs/VODS.md §4.
+   */
+  const elegido = (e: React.ChangeEvent<HTMLInputElement>) => {
     const fichero = e.target.files?.[0];
     e.target.value = '';
-    if (!fichero) return;
+    if (fichero) {
+      setAviso(null);
+      setPreparando(fichero);
+    }
+  };
 
-    setAviso(null);
+  const enviar = async (
+    fichero: File,
+    extra: {
+      recorteIniMs: number | null;
+      recorteFinMs: number | null;
+      offsetMs: number | null;
+      confianza: string | null;
+    },
+  ) => {
+    setPreparando(null);
     setSubiendo(true);
     setProgreso({ enviados: 0, total: fichero.size, bytesPorSegundo: null });
     cancelar.current = new AbortController();
@@ -108,7 +128,16 @@ const WarVods: React.FC<Props> = ({ warId, nombres, miPlayerId, puedeSubir, pued
     try {
       await subir({
         fichero,
-        metadatos: { warId, filename: fichero.name },
+        // Los metadatos de tus son cadenas siempre; lo que no se sepa no se
+        // manda, para que el servidor distinga «no consta» de «cero».
+        metadatos: {
+          warId,
+          filename: fichero.name,
+          ...(extra.recorteIniMs !== null ? { recorteIniMs: String(extra.recorteIniMs) } : {}),
+          ...(extra.recorteFinMs !== null ? { recorteFinMs: String(extra.recorteFinMs) } : {}),
+          ...(extra.offsetMs !== null ? { offsetMs: String(extra.offsetMs) } : {}),
+          ...(extra.confianza ? { offsetConfianza: extra.confianza } : {}),
+        },
         alProgresar: setProgreso,
         señal: cancelar.current.signal,
       });
@@ -299,6 +328,14 @@ const WarVods: React.FC<Props> = ({ warId, nombres, miPlayerId, puedeSubir, pued
             );
           })}
         </ul>
+      )}
+
+      {preparando && (
+        <PreparaVod
+          fichero={preparando}
+          onCancelar={() => setPreparando(null)}
+          onListo={(datos) => void enviar(preparando, datos)}
+        />
       )}
 
       {viendo && (

@@ -1250,10 +1250,17 @@ function instalarTusFalso(real: typeof window.fetch): void {
         // Terminada del todo: aparece en la lista como recién subida, que es lo
         // que hace el servidor de verdad al cerrar el gancho post-finish.
         if (subida && subida.recibido >= subida.total) {
+          // Con lo que trajeran los metadatos: si el banco se inventara aqui
+          // un offset nulo, la sincronia leida del cronometro pareceria no
+          // haber funcionado cuando si lo hizo.
+          const recorte = Number(subida.meta.recorteIniMs ?? 0);
+          const fin = Number(subida.meta.recorteFinMs ?? 0);
           store.vods.push({
             id, warId: subida.meta.warId ?? fake.warRows[0].id,
             playerId: fake.session.user.playerId, estado: 'procesando',
-            duracionMs: null, offsetMs: null, offsetConfianza: null,
+            duracionMs: fin > recorte ? fin - recorte : null,
+            offsetMs: subida.meta.offsetMs ? Number(subida.meta.offsetMs) : null,
+            offsetConfianza: subida.meta.offsetConfianza ?? null,
             fijado: false, expiraEn: vencimiento(90),
             subidoEn: new Date().toISOString(), calidades: [],
           });

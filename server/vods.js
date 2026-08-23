@@ -112,6 +112,7 @@ export async function manejarGancho(cuerpo, user, permisos) {
       nombreOriginal: meta.filename || meta.nombre || null,
       bytes: subida.Size ?? null,
       recorte: { iniMs: entero(meta.recorteIniMs), finMs: entero(meta.recorteFinMs) },
+      sincronia: { offsetMs: entero(meta.offsetMs), confianza: meta.offsetConfianza },
     });
     return {};
   }
@@ -185,16 +186,27 @@ export async function autorizarSubida({ user, permisos = [], warId, playerId, by
  * medias no deje un registro fantasma que alguien tenga que limpiar. Lo que se
  * abandona en `entrada/` lo recoge la barrida.
  */
-export async function registrarSubida({ id, warId, playerId, nombreOriginal, bytes, recorte }) {
+export async function registrarSubida({
+  id, warId, playerId, nombreOriginal, bytes, recorte, sincronia,
+}) {
   const expira = new Date(Date.now() + DIAS * 24 * 3600 * 1000);
+  // La sincronía llega del navegador, que es donde se leyó el cronómetro del
+  // juego. La confianza se valida contra el catálogo en vez de guardarse tal
+  // cual: viene de fuera, y una etiqueta inventada haría que la interfaz
+  // presentara como verificado algo que no lo está.
+  const offset = Number.isInteger(sincronia?.offsetMs) ? sincronia.offsetMs : null;
+  const confianza =
+    offset !== null && CONFIANZAS.includes(sincronia?.confianza) ? sincronia.confianza : null;
+
   await pool.query(
     `INSERT INTO war_vods (id, war_id, player_id, estado, nombre_original, bytes,
-                           recorte_ini_ms, recorte_fin_ms, expira_en)
-     VALUES ($1, $2, $3, 'subiendo', $4, $5, $6, $7, $8)
+                           recorte_ini_ms, recorte_fin_ms, offset_ms, offset_confianza,
+                           expira_en)
+     VALUES ($1, $2, $3, 'subiendo', $4, $5, $6, $7, $8, $9, $10)
      ON CONFLICT (id) DO NOTHING`,
     [
       id, warId, playerId, nombreOriginal || null, bytes || null,
-      recorte?.iniMs ?? null, recorte?.finMs ?? null, expira,
+      recorte?.iniMs ?? null, recorte?.finMs ?? null, offset, confianza, expira,
     ],
   );
   encolar(id);
