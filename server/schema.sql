@@ -737,3 +737,74 @@ ALTER TABLE guild_events ADD COLUMN IF NOT EXISTS reminder_time TEXT;
 ALTER TABLE event_series ADD COLUMN IF NOT EXISTS reminder_mode TEXT NOT NULL DEFAULT 'channel';
 ALTER TABLE event_series ADD COLUMN IF NOT EXISTS reminder_every_days INT;
 ALTER TABLE event_series ADD COLUMN IF NOT EXISTS reminder_time TEXT;
+
+-- Las grabaciones de una guerra, subidas por quien la jugó. Ver docs/VODS.md.
+--
+-- Los bytes no están aquí ni en este contenedor: viven en el Synology, montado
+-- en /mnt/vods. Esta tabla guarda dónde y en qué estado, y es deliberadamente
+-- la única que sabe la ruta -- si algún día el origen se muda a B2, se cambia
+-- aquí y en nginx, no en la aplicación.
+--
+-- `estado`: pendiente -> procesando -> listo -> aprobado, o rechazado. Nada se
+-- ve hasta que alguien con war.vod.approve lo mira, que es lo que impide que
+-- esto se llene de grabaciones que no son de la guerra. Validado en el servidor
+-- y no con una restricción aquí, igual que side, lane y match_type.
+--
+-- `offset_ms`: milisegundos desde el inicio de la guerra hasta el primer
+-- fotograma. NEGATIVO si empezó a grabar antes de que empezara -- lo normal,
+-- porque casi todos graban desde la preparación -- y positivo si se acordó de
+-- darle a grabar a mitad. Es el número del que depende el multistream: sin él
+-- cuatro vídeos del mismo momento no se pueden poner uno al lado del otro.
+--
+-- `offset_confianza` -- de dónde salió ese número: 'ocr' (leído del cronómetro
+-- del juego, el método bueno), 'nombre' (de la marca de hora del fichero),
+-- 'manual' (lo dijo una persona) o null si nadie lo sabe todavía. Se guarda
+-- porque un multistream mal sincronizado miente de forma convincente, y hay que
+-- poder avisar de que esa alineación no está verificada.
+--
+-- `expira_en`: la retención son 3 meses. Al caducar se borran LOS BYTES, NO LA
+-- FILA -- las guerras son permanentes y el puntaje de impacto lee las de hace
+-- un año, así que el acta tiene que poder decir «hubo VOD, caducó» en vez de
+-- dar un enlace roto. `fijado` es la excepción: lo que un oficial marca como
+-- irrepetible no caduca nunca.
+CREATE TABLE IF NOT EXISTS war_vods (
+  id               TEXT PRIMARY KEY,
+  war_id           TEXT NOT NULL REFERENCES wars(id) ON DELETE CASCADE,
+  player_id        TEXT NOT NULL,
+  estado           TEXT NOT NULL DEFAULT 'pendiente',
+  nombre_original  TEXT,
+  ruta             TEXT,
+  bytes            BIGINT,
+  duracion_ms      INTEGER,
+  offset_ms        INTEGER,
+  offset_confianza TEXT,
+  recorte_ini_ms   INTEGER,
+  recorte_fin_ms   INTEGER,
+  fijado           BOOLEAN NOT NULL DEFAULT false,
+  expira_en        TIMESTAMPTZ,
+  aprobado_por     TEXT,
+  subido_en        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS war_vods_war_idx ON war_vods (war_id, subido_en);
+
+-- Para la tarea de limpieza, que pregunta a diario qué ha caducado. Parcial
+-- porque lo fijado no le interesa nunca y son la mayoría de las filas viejas.
+CREATE INDEX IF NOT EXISTS war_vods_caducados_idx
+  ON war_vods (expira_en) WHERE NOT fijado;
+
+-- Las calidades de un mismo VOD, cada una con su playlist de HLS.
+--
+-- Tabla aparte y no columnas porque no llegan a la vez: el original se
+-- segmenta con `-c copy` en segundos, y la copia de 360p -- la que usan los
+-- mosaicos del multistream, y la única que sobrevive si algún día se recorta la
+-- retención -- sale de una cola de ffmpeg que tarda minutos. Un VOD reproducible
+-- con una sola calidad es un estado normal, no uno a medias.
+CREATE TABLE IF NOT EXISTS war_vod_renditions (
+  vod_id        TEXT NOT NULL REFERENCES war_vods(id) ON DELETE CASCADE,
+  calidad       TEXT NOT NULL,
+  ruta_playlist TEXT NOT NULL,
+  bytes         BIGINT,
+  creada_en     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (vod_id, calidad)
+);

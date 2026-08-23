@@ -23,6 +23,19 @@ export const PERMISSIONS = [
   'war.view',
   'war.edit',
   'war.voice',
+  // Subir la grabación de una guerra. Aparte de `war.edit` porque lo tiene todo
+  // el mundo: el que graba es quien peleó, no quien organiza. Aun así el
+  // servidor sólo acepta la subida si quien la manda figura en
+  // `war_participants` de esa guerra -- el permiso abre la puerta, no la deja
+  // sin portero.
+  'war.vod.upload',
+  // Publicar un VOD subido. Hasta que alguien lo mira no existe para nadie, que
+  // es lo único que impide que esto se llene de grabaciones que no son de la
+  // guerra.
+  'war.vod.approve',
+  // Salvar un VOD de la retención de 3 meses. Aparte de aprobar porque es la
+  // única acción aquí que gasta disco para siempre.
+  'war.vod.pin',
   'events.manage',
   // Borrar todo lo contestado de una encuesta y empezarla de cero. Aparte de
   // programar porque no se deshace: quien organiza corrige la hora a diario,
@@ -47,12 +60,26 @@ export const DEFAULT_PERMISSIONS = {
     'war.view',
     'war.edit',
     'war.voice',
+    'war.vod.upload',
+    'war.vod.approve',
+    'war.vod.pin',
     'events.manage',
     'events.reset',
     'data.export',
   ],
-  officer: ['roster.view', 'war.view', 'war.edit', 'war.voice', 'events.manage', 'data.export'],
-  member: ['roster.view', 'war.view'],
+  officer: [
+    'roster.view',
+    'war.view',
+    'war.edit',
+    'war.voice',
+    'war.vod.upload',
+    'war.vod.approve',
+    'events.manage',
+    'data.export',
+  ],
+  // Subir es de todos: el que graba es el que peleó. Fijar no, que gasta disco
+  // para siempre.
+  member: ['roster.view', 'war.view', 'war.vod.upload'],
 };
 
 // Without this, one careless save could strip the last account able to reach
