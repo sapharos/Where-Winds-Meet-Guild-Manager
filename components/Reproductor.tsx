@@ -65,6 +65,7 @@ const Reproductor: React.FC<Props> = ({
   const [hito, setHito] = useState(false);
   const [escribiendo, setEscribiendo] = useState(false);
   const [ajustando, setAjustando] = useState(false);
+  const [cargado, setCargado] = useState(0);
 
   // --- HLS ------------------------------------------------------------------
   useEffect(() => {
@@ -200,6 +201,25 @@ const Reproductor: React.FC<Props> = ({
     return () => window.removeEventListener('keydown', alPulsar);
   }, [alternar, saltarA, saltarMarca]);
 
+  /**
+   * La marca por la que se está pasando, para asomarla sobre el vídeo.
+   *
+   * Es lo que hace SoundCloud y es la mitad de la gracia: revisando una guerra
+   * se mira el vídeo, no la barra, así que un comentario que sólo existe al
+   * poner el ratón encima de un punto de 4 px no lo lee nadie.
+   *
+   * DERIVADO de la posición, sin temporizador. El primer intento fue un estado
+   * con un `setTimeout` de seis segundos y estaba roto de una forma que no se
+   * ve en una prueba a mano: la limpieza del efecto cancelaba el temporizador
+   * en cada `timeupdate` --cuatro veces por segundo mientras reproduce-- y el
+   * camino de salida temprana no lo volvía a armar, así que el comentario se
+   * quedaba pegado en pantalla para siempre. Así no hay nada que cancelar, y
+   * además se porta bien al retroceder.
+   */
+  const VENTANA_S = 6;
+  const alPaso =
+    visibles.find((x) => posicion >= x.segundo && posicion < x.segundo + VENTANA_S)?.marca ?? null;
+
   const enviarMarca = () => {
     // Igual que arriba: el instante lo dice el vídeo, no el estado.
     const t = aGuerra(video.current?.currentTime ?? posicion);
@@ -225,28 +245,43 @@ const Reproductor: React.FC<Props> = ({
           onPause={() => setSonando(false)}
           onLoadedMetadata={(e) => setDuracion(e.currentTarget.duration)}
           onTimeUpdate={(e) => setPosicion(e.currentTarget.currentTime)}
+          onProgress={(e) => {
+            const b = e.currentTarget.buffered;
+            setCargado(b.length ? b.end(b.length - 1) : 0);
+          }}
           onError={() => setError('No se pudo reproducir el vídeo.')}
           className="w-full aspect-video cursor-pointer"
         />
 
-        {/* Los controles, encima del vídeo y siempre visibles en táctil: en un
-            teléfono no hay hover, y esconderlos ahí los haría inalcanzables. */}
-        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 to-transparent pt-8 px-3 pb-2">
+        {/*
+          Los controles: una pieza OPACA que flota sobre el vídeo, no un
+          degradado encima.
+
+          El degradado era lo que traía antes y no vale aquí: el metraje del
+          juego es brillante, saturado y no para quieto, así que unos iconos
+          semitransparentes sobre él desaparecen -- y desaparecen justo cuando
+          hace falta mirarlos, que es durante una pelea. La regla de la casa ya
+          lo decía para las fichas de miembro: la superficie es del tema y va
+          opaca (docs/DIRECCION_VISUAL.md §2). Aquí es lo mismo con vídeo
+          detrás en vez de color de usuario.
+        */}
+        <div className="absolute inset-x-2 bottom-2 rounded-md border border-slate-700 bg-slate-950/95 shadow-1 px-3 pt-2 pb-1.5">
           <Barra
-            progreso={progreso}
+            posicion={posicion}
             duracion={duracion}
+            cargado={cargado}
             marcas={visibles}
             onSaltar={saltarA}
           />
 
-          <div className="flex items-center gap-1 mt-1">
+          <div className="flex items-center gap-1 mt-1.5">
             <button
               type="button"
               onClick={alternar}
               aria-label={sonando ? 'Pausar' : 'Reproducir'}
-              className="min-w-tap text-slate-100 hover:text-white"
+              className="min-w-tap rounded text-slate-100 hover:bg-slate-800"
             >
-              <i className={`fa-solid ${sonando ? 'fa-pause' : 'fa-play'}`} aria-hidden="true" />
+              <i className={`fa-solid ${sonando ? 'fa-pause' : 'fa-play'} text-base`} aria-hidden="true" />
             </button>
 
             <button
@@ -255,7 +290,7 @@ const Reproductor: React.FC<Props> = ({
               disabled={!visibles.length}
               aria-label="Marca anterior"
               title="Marca anterior (P)"
-              className="min-w-tap text-slate-300 hover:text-white disabled:opacity-30"
+              className="min-w-tap rounded text-slate-300 hover:bg-slate-800 hover:text-white disabled:opacity-25"
             >
               <i className="fa-solid fa-backward-step" aria-hidden="true" />
             </button>
@@ -265,16 +300,24 @@ const Reproductor: React.FC<Props> = ({
               disabled={!visibles.length}
               aria-label="Marca siguiente"
               title="Marca siguiente (N)"
-              className="min-w-tap text-slate-300 hover:text-white disabled:opacity-30"
+              className="min-w-tap rounded text-slate-300 hover:bg-slate-800 hover:text-white disabled:opacity-25"
             >
               <i className="fa-solid fa-forward-step" aria-hidden="true" />
             </button>
 
-            <span className="text-[11px] text-slate-300 tabular-nums px-2">
-              {mmss(posicion)} / {mmss(duracion)}
+            {/* Tabular para que los dígitos no bailen al pasar los segundos. */}
+            <span className="text-xs text-slate-300 tabular-nums px-2">
+              {mmss(posicion)}
+              <span className="text-slate-600"> / {mmss(duracion)}</span>
             </span>
 
             <div className="flex-1" />
+
+            {visibles.length > 0 && (
+              <span className="hidden sm:inline text-[11px] text-slate-500 px-2">
+                {visibles.length} {visibles.length === 1 ? 'marca' : 'marcas'}
+              </span>
+            )}
 
             <button
               type="button"
@@ -285,7 +328,7 @@ const Reproductor: React.FC<Props> = ({
                 setSilenciado(el.muted);
               }}
               aria-label={silenciado ? 'Quitar el silencio' : 'Silenciar'}
-              className="min-w-tap text-slate-300 hover:text-white"
+              className="min-w-tap rounded text-slate-300 hover:bg-slate-800 hover:text-white"
             >
               <i
                 className={`fa-solid ${silenciado ? 'fa-volume-xmark' : 'fa-volume-high'}`}
@@ -297,12 +340,30 @@ const Reproductor: React.FC<Props> = ({
               onClick={() => void caja.current?.requestFullscreen?.().catch(() => {})}
               aria-label="Pantalla completa"
               title="Pantalla completa (F)"
-              className="min-w-tap text-slate-300 hover:text-white"
+              className="min-w-tap rounded text-slate-300 hover:bg-slate-800 hover:text-white"
             >
               <i className="fa-solid fa-expand" aria-hidden="true" />
             </button>
           </div>
         </div>
+
+        {/*
+          La marca por la que se acaba de pasar, asomada arriba unos segundos.
+          Sin esto un comentario sólo existe si alguien pasa el ratón por encima
+          de un punto de 4 px, y revisando una guerra se mira el vídeo, no la
+          barra.
+        */}
+        {alPaso && (
+          <div className="absolute top-2 left-2 right-2 sm:right-auto sm:max-w-[70%] rounded-md border border-slate-700 bg-slate-950/95 shadow-1 px-3 py-2">
+            <p className="text-xs text-slate-200">
+              {alPaso.hito && (
+                <i className="fa-solid fa-flag text-[9px] text-sky-400 mr-1.5" aria-hidden="true" />
+              )}
+              {alPaso.texto}
+              {alPaso.autor && <span className="text-slate-500"> · {alPaso.autor}</span>}
+            </p>
+          </div>
+        )}
       </div>
 
       {error && <p className="text-xs text-red-400">{error}</p>}
@@ -448,58 +509,122 @@ const Reproductor: React.FC<Props> = ({
 /**
  * La barra, con las marcas encima.
  *
- * Es la razón de tener reproductor propio: pintar dónde están los momentos que
- * alguien señaló convierte media hora de arrastrar a ciegas en una lectura de
- * un vistazo.
+ * Es la razón de tener reproductor propio: los controles nativos no admiten
+ * marcas, y pintar dónde están los momentos que alguien señaló convierte media
+ * hora de arrastrar a ciegas en una lectura de un vistazo.
+ *
+ * El modelo es el de SoundCloud: los comentarios viven **sobre la propia
+ * barra**, no en una lista aparte que hay que cruzar mentalmente con el tiempo.
+ * Cada punto se puede pulsar para ir, y al pasar por encima enseña lo que dice
+ * -- porque un punto de 4 px sin texto no informa de nada.
  */
 const Barra: React.FC<{
-  progreso: number;
+  posicion: number;
   duracion: number;
+  cargado: number;
   marcas: { marca: Marca; segundo: number }[];
   onSaltar: (s: number) => void;
-}> = ({ progreso, duracion, marcas, onSaltar }) => {
+}> = ({ posicion, duracion, cargado, marcas, onSaltar }) => {
   const pista = useRef<HTMLDivElement>(null);
+  const [encima, setEncima] = useState<number | null>(null);
+  // El globo lleva SU posición además del texto: sin ella se pintaba encima de
+  // la cabeza lectora y señalaba a un punto de la barra que no era el suyo.
+  const [globo, setGlobo] = useState<{ texto: string; segundo: number } | null>(null);
 
-  const alPulsar = (e: React.MouseEvent) => {
+  const pct = (s: number) => (duracion ? Math.min(100, (s / duracion) * 100) : 0);
+
+  const desdeRaton = (clientX: number) => {
     const caja = pista.current?.getBoundingClientRect();
-    if (!caja || !duracion) return;
-    onSaltar(((e.clientX - caja.left) / caja.width) * duracion);
+    if (!caja || !duracion) return null;
+    return Math.max(0, Math.min(1, (clientX - caja.left) / caja.width)) * duracion;
   };
 
   return (
-    <div
-      ref={pista}
-      onClick={alPulsar}
-      role="slider"
-      tabIndex={0}
-      aria-label="Posición del vídeo"
-      aria-valuenow={Math.round(progreso)}
-      aria-valuemin={0}
-      aria-valuemax={100}
-      // Alto generoso y no los 4 px de costumbre: con el dedo, una barra fina
-      // se falla, y aquí se busca un instante concreto.
-      className="tap-suelto relative h-4 flex items-center cursor-pointer"
-    >
-      <div className="h-1.5 w-full rounded-full bg-white/25 overflow-hidden">
-        <div className="h-full bg-amber-500" style={{ width: `${progreso}%` }} />
-      </div>
+    <div className="relative">
+      {/* La burbuja: la marca que se está señalando, o la hora del punto que se
+          está mirando. Arriba y no abajo, que abajo está la barra de controles. */}
+      {(globo || encima !== null) && (
+        <div
+          className="absolute -top-9 z-10 -translate-x-1/2 max-w-64 truncate rounded border border-slate-700 bg-slate-950 px-2 py-1 text-[11px] text-slate-200 shadow-1 pointer-events-none"
+          style={{ left: `${pct(globo ? globo.segundo : (encima ?? posicion))}%` }}
+        >
+          {globo ? globo.texto : mmss(encima ?? 0)}
+        </div>
+      )}
 
-      {marcas.map(({ marca, segundo }) => (
-        <button
-          key={marca.id}
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onSaltar(segundo);
-          }}
-          title={marca.texto}
-          aria-label={`Ir a ${mmss(segundo)}: ${marca.texto}`}
-          style={{ left: `${duracion ? (segundo / duracion) * 100 : 0}%` }}
-          className={`tap-suelto absolute top-0 h-4 w-1 -translate-x-1/2 rounded-full ${
-            marca.hito ? 'bg-sky-300' : 'bg-white/80'
-          } hover:scale-x-[2.5] transition-transform duration-micro`}
+      <div
+        ref={pista}
+        role="slider"
+        tabIndex={0}
+        aria-label="Posición del vídeo"
+        aria-valuenow={Math.round(posicion)}
+        aria-valuemin={0}
+        aria-valuemax={Math.round(duracion)}
+        onClick={(e) => {
+          const s = desdeRaton(e.clientX);
+          if (s !== null) onSaltar(s);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowLeft') onSaltar(posicion - 5);
+          if (e.key === 'ArrowRight') onSaltar(posicion + 5);
+        }}
+        onMouseMove={(e) => setEncima(desdeRaton(e.clientX))}
+        onMouseLeave={() => setEncima(null)}
+        // Alto generoso y no los 4 px de costumbre: con el dedo, una barra fina
+        // se falla, y aquí se busca un instante concreto.
+        className="tap-suelto group/pista relative h-5 flex items-center cursor-pointer"
+      >
+        <div className="h-1.5 w-full rounded-full bg-white/20 overflow-hidden">
+          {/* Lo descargado, por detrás: sin esto, una pausa para cargar parece
+              que el reproductor se colgó. */}
+          <div className="absolute h-1.5 rounded-full bg-white/25" style={{ width: `${pct(cargado)}%` }} />
+          <div className="relative h-full rounded-full bg-amber-500" style={{ width: `${pct(posicion)}%` }} />
+        </div>
+
+        {/* El tirador. Aparece al acercarse: en reposo la barra se lee mejor
+            limpia, y al ir a arrastrar es cuando hace falta saber dónde agarrar. */}
+        <div
+          className="absolute h-3 w-3 -translate-x-1/2 rounded-full bg-amber-400 opacity-0 group-hover/pista:opacity-100 transition-opacity duration-micro"
+          style={{ left: `${pct(posicion)}%` }}
         />
-      ))}
+
+        {marcas.map(({ marca, segundo }) => (
+          <button
+            key={marca.id}
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onSaltar(segundo);
+            }}
+            onMouseEnter={() => setGlobo({ texto: `${mmss(segundo)} · ${marca.texto}`, segundo })}
+            onMouseLeave={() => setGlobo(null)}
+            onFocus={() => setGlobo({ texto: `${mmss(segundo)} · ${marca.texto}`, segundo })}
+            onBlur={() => setGlobo(null)}
+            aria-label={`Ir a ${mmss(segundo)}: ${marca.texto}`}
+            style={{ left: `${pct(segundo)}%` }}
+            /*
+              El botón mide 20 px y el punto 10: el área de acierto es el doble
+              de lo que se ve, que con el dedo es la diferencia entre dar y no
+              dar.
+              
+              No llega a los 44 px de la casa, y es una excepción con motivo:
+              en 375 px de ancho, cuatro marcas de 44 px se solapan y tapan la
+              barra entera. Por eso lleva `tap-suelto` --la excepción declarada,
+              no supuesta (docs/DIRECCION_VISUAL.md)-- y por eso hay dos
+              caminos táctiles que sí miden: los botones de marca anterior y
+              siguiente, y la lista de abajo. Fallar el punto tampoco es grave:
+              la pista de debajo también salta, y deja cerca.
+            */
+            className="tap-suelto absolute h-5 w-5 -translate-x-1/2 flex items-center justify-center group/marca"
+          >
+            <span
+              className={`h-2.5 w-2.5 rounded-full border border-slate-950 transition-transform duration-micro group-hover/marca:scale-150 ${
+                marca.hito ? 'bg-sky-300' : 'bg-white'
+              }`}
+            />
+          </button>
+        ))}
+      </div>
     </div>
   );
 };
