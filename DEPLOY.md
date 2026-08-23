@@ -23,6 +23,9 @@ WEB_PORT=8085
 AGENDA_TIMEZONE=America/Bogota
 ```
 
+War recordings need four more; they have their own section below, and the
+feature stays off until they are set.
+
 `AGENDA_TIMEZONE` is the guild's own clock: the zone a reminder set for "19:00"
 is read in, and the one a new weekly series starts out on. Any IANA name
 (`Europe/Madrid`, `America/Mexico_City`). Leaving it out means `America/Bogota`,
@@ -552,6 +555,51 @@ a restart mid-war loses, at worst, one shout.
 It needs three more permissions in those voice channels: **Connect**,
 **Speak**, and **Use Soundboard**. The sounds themselves are managed in
 Discord (Server Settings → Soundboard); the app only lists and plays them.
+
+## War recordings (VODs)
+
+Members upload their recording of a war; an officer approves it; it plays back
+inside the war record. The design, the storage maths and the sync contract are
+in [docs/VODS.md](docs/VODS.md) — this section is only what has to be set up.
+
+**The bytes do not live in this stack.** They live on whatever
+`VODS_HOST_DIR` points at, mounted into the containers as `/vods`. In this
+deployment that is a Synology share mounted on the Proxmox host; phase 1 of
+`docs/VODS.md` is the step-by-step for that. Nothing about the app requires a
+NAS specifically — any path with room works, including a plain directory on a
+host with a big disk.
+
+Four variables, and the feature is off until the first one is set:
+
+```
+VODS_HOOK_SECRET=       # openssl rand -hex 32
+VODS_HOST_DIR=/mnt/vods
+VODS_MAX_BYTES=6442450944
+VODS_RETENTION_DAYS=90
+```
+
+`VODS_HOOK_SECRET` is what the upload service presents to the API to register an
+upload. It never reaches a browser — it travels between two containers on the
+same Docker network. **Leave it empty and the whole feature is off**: the hook
+endpoint answers 503 and nothing can be uploaded, the same way an empty
+`DISCORD_PUBLIC_KEY` switches the slash commands off.
+
+`VODS_RETENTION_DAYS` is how long a recording's bytes survive. The row stays
+forever, so an old war says "there was a VOD, it expired" rather than serving a
+broken link, and an officer can pin the handful worth keeping. At 90 days the
+store settles at about 1.2 TB for a guild playing 8-10 wars a week — see the
+maths in `docs/VODS.md` before raising it.
+
+**The directory must be writable by root inside the containers.** The upload
+service is pinned to `user: "0:0"` in `docker-compose.yml` for exactly this
+reason: its official image runs as UID 1000, and against a `0770` mount owned by
+root that fails with a permission error while the same path writes fine from a
+shell in the container — a confusing pair of symptoms worth recognising.
+
+**Do not let anything write to the container's own disk.** `proxy_request_buffering
+off` in `nginx.conf` and the `-upload-dir` under `/vods` are both there to keep a
+2 GB upload off the container filesystem. Removing either fills the container and
+takes down everything running in it.
 
 ## What this does not do yet
 

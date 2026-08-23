@@ -50,6 +50,51 @@ services:
       # what a new weekly series starts out on. Empty is America/Bogota, which
       # is what it was before this was configurable.
       AGENDA_TIMEZONE: ${AGENDA_TIMEZONE:-}
+      # Las grabaciones de guerra. Ver docs/VODS.md. Vacío VODS_HOOK_SECRET y la
+      # funcionalidad queda apagada: el endpoint del gancho responde 503 y tusd
+      # no puede dar de alta nada, igual que hace DISCORD_PUBLIC_KEY con los
+      # comandos.
+      VODS_DIR: /vods
+      VODS_HOOK_SECRET: ${VODS_HOOK_SECRET:-}
+      VODS_MAX_BYTES: ${VODS_MAX_BYTES:-6442450944}
+      VODS_RETENTION_DAYS: ${VODS_RETENTION_DAYS:-90}
+    volumes:
+      # El almacén del NAS, montado en el host. Aquí no se guarda nada en el
+      # disco del contenedor a propósito: son ~18 GiB y un VOD son 2.
+      - ${VODS_HOST_DIR:-/mnt/vods}:/vods
+    restart: unless-stopped
+
+  # Recibe las subidas de VODs, reanudables. Va aparte de la API porque un
+  # fichero de 2 GB no debe pasar por Express, y porque tus resuelve solo lo
+  # único difícil de esto: que alguien pueda cerrar el portátil a mitad de una
+  # subida de nueve minutos y continuarla después.
+  #
+  # No publica puerto: se llega a él por el nginx de `web`, que es quien tiene
+  # el TLS y la sesión.
+  tusd:
+    image: tusproject/tusd:v2.8.0
+    container_name: wwm-guild-manager-tusd
+    # El montaje del NAS es 0770 de root y la imagen oficial corre como UID
+    # 1000, así que sin esto no puede escribir -- con el volumen montado
+    # perfectamente y un «permission denied» que no dice por qué. Ver la nota de
+    # la fase 1 en docs/VODS.md. El 180 es un LXC no privilegiado, así que este
+    # root ya es un usuario sin privilegios en el host.
+    user: "0:0"
+    command:
+      - -upload-dir=/vods/entrada
+      - -behind-proxy
+      - -base-path=/vods-upload/
+      - -max-size=${VODS_MAX_BYTES:-6442450944}
+      - -hooks-http=http://api:3001/api/vods/hook
+      # pre-create es donde la API dice que sí o que no: comprueba la sesión y
+      # que quien sube figure en war_participants de esa guerra. Sin reenviar la
+      # cookie, el gancho no sabría quién pregunta.
+      - -hooks-http-forward-headers=Cookie
+      - -hooks-enabled-events=pre-create,post-finish
+    volumes:
+      - ${VODS_HOST_DIR:-/mnt/vods}:/vods
+    depends_on:
+      - api
     restart: unless-stopped
 
 # The API talks to a PostgreSQL that lives outside this stack. Attach the
