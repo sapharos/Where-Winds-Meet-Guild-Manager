@@ -49,6 +49,29 @@ interface Store {
   locked: Record<WarSide, boolean>;
   current: ReturnType<typeof fake.board>['current'] | null;
   usuarios: ManagedUser[];
+  vods: VodFalso[];
+}
+
+/**
+ * Las grabaciones inventadas. Ver docs/VODS.md.
+ *
+ * Los estados están puestos a mano y no al azar: la lista tiene que enseñar a
+ * la vez lo que ya se ve, lo que espera revisión, lo que se está preparando y
+ * lo que caducó, porque los cuatro se pintan distinto y los cuatro conviven en
+ * un acta de verdad.
+ */
+interface VodFalso {
+  id: string;
+  warId: string;
+  playerId: string;
+  estado: string;
+  duracionMs: number | null;
+  offsetMs: number | null;
+  offsetConfianza: string | null;
+  fijado: boolean;
+  expiraEn: string | null;
+  subidoEn: string;
+  calidades: { calidad: string; playlist: string }[];
 }
 
 /**
@@ -163,6 +186,8 @@ const MIS_ROLES_DISCORD = ['200000000000000001', '200000000000000002'];
 /** A qué roles atiende el bot. Vacío, a todos: el estado de fábrica. */
 let rolesDelBot: string[] = [];
 
+const vencimiento = (dias: number) => new Date(Date.now() + dias * 86400000).toISOString();
+
 const store: Store = {
   players: structuredClone(fake.players),
   ranks: structuredClone(fake.ranks),
@@ -193,6 +218,49 @@ const store: Store = {
   active: { attack: 'st-1', defense: 'st-2' },
   locked: { attack: false, defense: false },
   current: null,
+  // Una guerra del historial con las cuatro situaciones a la vez.
+  vods: [
+    {
+      id: 'vod-1', warId: fake.warRows[0].id, playerId: 'p-3',
+      estado: 'aprobado', duracionMs: 2_116_000, offsetMs: -281_000,
+      offsetConfianza: 'ocr', fijado: false, expiraEn: vencimiento(62),
+      subidoEn: vencimiento(-28),
+      calidades: [
+        { calidad: 'origen', playlist: 'vod-1/origen.m3u8' },
+        { calidad: '360p', playlist: 'vod-1/360p.m3u8' },
+      ],
+    },
+    {
+      // Fijada: la que alguien decidió que no se pierda.
+      id: 'vod-2', warId: fake.warRows[0].id, playerId: 'p-1',
+      estado: 'aprobado', duracionMs: 1_980_000, offsetMs: 1_201_000,
+      offsetConfianza: 'manual', fijado: true, expiraEn: null,
+      subidoEn: vencimiento(-28),
+      calidades: [{ calidad: 'origen', playlist: 'vod-2/origen.m3u8' }],
+    },
+    {
+      // Esperando revisión: es lo que ve un oficial al entrar.
+      id: 'vod-3', warId: fake.warRows[0].id, playerId: 'p-7',
+      estado: 'listo', duracionMs: 2_100_000, offsetMs: null,
+      offsetConfianza: null, fijado: false, expiraEn: vencimiento(89),
+      subidoEn: vencimiento(-1),
+      calidades: [{ calidad: 'origen', playlist: 'vod-3/origen.m3u8' }],
+    },
+    {
+      // A medio preparar: la lista se refresca sola mientras esto exista.
+      id: 'vod-4', warId: fake.warRows[0].id, playerId: 'p-4',
+      estado: 'procesando', duracionMs: null, offsetMs: null,
+      offsetConfianza: null, fijado: false, expiraEn: vencimiento(90),
+      subidoEn: new Date().toISOString(), calidades: [],
+    },
+    {
+      // Caducada: la fila sigue, los bytes no. Sin botón de ver.
+      id: 'vod-5', warId: fake.warRows[1]?.id ?? fake.warRows[0].id, playerId: 'p-2',
+      estado: 'caducado', duracionMs: 2_040_000, offsetMs: -120_000,
+      offsetConfianza: 'nombre', fijado: false, expiraEn: vencimiento(-4),
+      subidoEn: vencimiento(-94), calidades: [],
+    },
+  ],
   usuarios: [
     { ...fake.session.user, disabled: false, createdAt: new Date().toISOString() },
     // Una ya enlazada, para ver la columna con el enlace puesto y poder quitarlo.
@@ -516,6 +584,7 @@ const GET: [RegExp, Ruta][] = [
   ],
   [/^\/war\/wars$/, () => fake.warRows],
   [/^\/war\/wars\/([^/]+)$/, (m) => detalleConAnexos(m[1])],
+  [/^\/war\/wars\/([^/]+)\/vods$/, (m) => store.vods.filter((v) => v.warId === m[1])],
   [/^\/players\/([^/]+)\/scans$/, (m) => fake.scansOf(m[1])],
   [/^\/players\/([^/]+)\/builds$/, (m) => store.builds.filter((b) => b.playerId === m[1])],
   [/^\/players\/([^/]+)\/wars$/, (m) => fake.warsOf(m[1])],
@@ -1022,6 +1091,29 @@ const ESCRITURAS: [string, RegExp, Ruta][] = [
     }
     return { out: body.out ?? null, in: body.in ?? null, side, lane };
   }],
+  ['POST', /^\/vods\/([^/]+)\/resolve$/, (m, _req, body) => {
+    const vod = store.vods.find((v) => v.id === m[1]);
+    if (!vod) return { error: 'no existe' };
+    vod.estado = body.aprobado ? 'aprobado' : 'rechazado';
+    // Rechazar borra los bytes, así que también aquí: si el banco dejara el
+    // botón de ver, estaría enseñando algo que en el servidor ya no existe.
+    if (!body.aprobado) vod.calidades = [];
+    return { id: vod.id, estado: vod.estado };
+  }],
+  ['POST', /^\/vods\/([^/]+)\/pin$/, (m, _req, body) => {
+    const vod = store.vods.find((v) => v.id === m[1]);
+    if (!vod) return { error: 'no existe' };
+    vod.fijado = Boolean(body.fijado);
+    vod.expiraEn = vod.fijado ? null : vencimiento(90);
+    return { id: vod.id, fijado: vod.fijado };
+  }],
+  ['PUT', /^\/vods\/([^/]+)\/sync$/, (m, _req, body) => {
+    const vod = store.vods.find((v) => v.id === m[1]);
+    if (!vod) return { error: 'no existe' };
+    vod.offsetMs = Number(body.offsetMs);
+    vod.offsetConfianza = 'manual';
+    return { id: vod.id, offsetMs: vod.offsetMs, offsetConfianza: vod.offsetConfianza };
+  }],
   ['POST', /^\/war\/wars\/([^/]+)\/images$/, (m, _req, body) => {
     const anexo = anexoDe(m[1]);
     const id = `img-${anexo.images.length + 1}`;
@@ -1052,6 +1144,136 @@ if (!new URLSearchParams(location.search).has('enpaz')) {
   const arranque = fake.board();
   store.current = arranque.current;
   store.locked = arranque.locked;
+}
+
+
+/**
+ * tus de mentira, para que la subida se pueda ver funcionando en el banco.
+ *
+ * Hace falta tocar dos cosas y no una: la creación de la subida va por `fetch`,
+ * pero los trozos van por XHR --que es lo que da progreso-- y ese no pasa por
+ * el `fetch` falso. Sin esto, la barra se quedaría a cero contra un servidor
+ * que no existe, que es justo lo que no se quiere poder demostrar.
+ *
+ * La velocidad simulada es fija y generosa: aquí se viene a mirar la barra, el
+ * tiempo restante y el botón de detener, no a esperar diez minutos.
+ */
+const MBPS_FALSOS = 60 * 1024 * 1024;
+const subidas = new Map<string, { recibido: number; total: number; meta: Record<string, string> }>();
+
+const leerMetadatos = (cabecera: string | null): Record<string, string> => {
+  const salida: Record<string, string> = {};
+  for (const par of (cabecera ?? '').split(',')) {
+    const [clave, valor] = par.trim().split(' ');
+    if (clave && valor) salida[clave] = decodeURIComponent(escape(atob(valor)));
+  }
+  return salida;
+};
+
+function instalarTusFalso(real: typeof window.fetch): void {
+  const fetchAnterior = window.fetch;
+
+  window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+    if (!url.includes('/vods-upload/')) return fetchAnterior(input as RequestInfo, init);
+
+    const metodo = (init?.method ?? 'GET').toUpperCase();
+    const cabeceras = new Headers(init?.headers);
+    await espera();
+
+    if (metodo === 'POST') {
+      const id = `vod-${Math.random().toString(36).slice(2, 8)}`;
+      subidas.set(id, {
+        recibido: 0,
+        total: Number(cabeceras.get('Upload-Length') ?? 0),
+        meta: leerMetadatos(cabeceras.get('Upload-Metadata')),
+      });
+      return new Response(null, { status: 201, headers: { Location: `/vods-upload/${id}` } });
+    }
+
+    if (metodo === 'HEAD') {
+      const id = url.split('/').filter(Boolean).pop()!;
+      const subida = subidas.get(id);
+      if (!subida) return new Response(null, { status: 404 });
+      return new Response(null, { status: 200, headers: { 'Upload-Offset': String(subida.recibido) } });
+    }
+
+    return new Response(null, { status: 405 });
+  };
+
+  // El XHR sólo se sustituye para los PATCH de tus; todo lo demás pasa de largo
+  // al de verdad, que es lo que hay que hacer cuando se secuestra algo global.
+  const XHRReal = window.XMLHttpRequest;
+  class XHRFalso extends XHRReal {
+    private destino = '';
+    private metodo = '';
+    private desde = 0;
+    private falso = false;
+
+    open(metodo: string, url: string | URL, ...resto: unknown[]): void {
+      this.metodo = metodo.toUpperCase();
+      this.destino = String(url);
+      this.falso = this.metodo === 'PATCH' && this.destino.includes('/vods-upload/');
+      if (!this.falso) super.open(metodo, url as string, ...(resto as []));
+    }
+
+    setRequestHeader(nombre: string, valor: string): void {
+      if (!this.falso) return super.setRequestHeader(nombre, valor);
+      if (nombre === 'Upload-Offset') this.desde = Number(valor);
+    }
+
+    send(cuerpo?: Document | XMLHttpRequestBodyInit | null): void {
+      if (!this.falso) return super.send(cuerpo as XMLHttpRequestBodyInit);
+
+      const id = this.destino.split('/').filter(Boolean).pop()!;
+      const subida = subidas.get(id);
+      const tamaño = (cuerpo as Blob)?.size ?? 0;
+      const pasos = 10;
+      let paso = 0;
+
+      const reloj = setInterval(() => {
+        paso++;
+        const enviado = Math.round((tamaño * paso) / pasos);
+        this.upload.dispatchEvent(
+          Object.assign(new ProgressEvent('progress'), { loaded: enviado, total: tamaño }),
+        );
+        if (paso < pasos) return;
+
+        clearInterval(reloj);
+        if (subida) subida.recibido = this.desde + tamaño;
+
+        Object.defineProperty(this, 'status', { value: 204, configurable: true });
+        Object.defineProperty(this, 'readyState', { value: 4, configurable: true });
+        this.getResponseHeader = (n: string) =>
+          n.toLowerCase() === 'upload-offset' ? String(this.desde + tamaño) : null;
+
+        // Terminada del todo: aparece en la lista como recién subida, que es lo
+        // que hace el servidor de verdad al cerrar el gancho post-finish.
+        if (subida && subida.recibido >= subida.total) {
+          store.vods.push({
+            id, warId: subida.meta.warId ?? fake.warRows[0].id,
+            playerId: fake.session.user.playerId, estado: 'procesando',
+            duracionMs: null, offsetMs: null, offsetConfianza: null,
+            fijado: false, expiraEn: vencimiento(90),
+            subidoEn: new Date().toISOString(), calidades: [],
+          });
+        }
+        this.dispatchEvent(new ProgressEvent('load'));
+      }, (tamaño / MBPS_FALSOS) * 1000 / pasos);
+
+      this.addEventListener('abort', () => clearInterval(reloj), { once: true });
+    }
+
+    abort(): void {
+      if (this.falso) {
+        this.dispatchEvent(new ProgressEvent('abort'));
+        return;
+      }
+      super.abort();
+    }
+  }
+  window.XMLHttpRequest = XHRFalso as unknown as typeof XMLHttpRequest;
+  void real;
 }
 
 export function instalarServidorFalso(): void {
@@ -1092,4 +1314,6 @@ export function instalarServidorFalso(): void {
     console.warn(`[banco] sin ruta para GET ${path}`);
     return json({ error: `sin ruta para ${path}` }, 404);
   };
+
+  instalarTusFalso(real);
 }

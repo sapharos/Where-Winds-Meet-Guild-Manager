@@ -19,6 +19,7 @@ import ResultsReader, { ReadRow } from './ResultsReader';
 import FigureCell from './FigureCell';
 import { SetBadge } from './BuildEditor';
 import Sheet from './Sheet';
+import WarVods from './WarVods';
 
 interface WarRow {
   id: string;
@@ -112,6 +113,12 @@ interface Props {
   weaponSets: WeaponSet[];
   /** El gremio, para emparejar los nombres de una guerra que se carga entera. */
   players: Player[];
+  /** Las grabaciones. Ver docs/VODS.md. */
+  canUploadVod: boolean;
+  canApproveVod: boolean;
+  canPinVod: boolean;
+  /** La ficha de quien mira, para saber cuál de las grabaciones es la suya. */
+  miPlayerId: string | null;
   onClose: () => void;
   /**
    * Something changed here that the board behind is also showing. Deleting the
@@ -126,7 +133,17 @@ interface Props {
  * What the wars left behind: who was there, what they did, and the screens the
  * game showed at the end.
  */
-const WarHistory: React.FC<Props> = ({ canEdit, weaponSets, players, onClose, onChanged }) => {
+const WarHistory: React.FC<Props> = ({
+  canEdit,
+  weaponSets,
+  players,
+  canUploadVod,
+  canApproveVod,
+  canPinVod,
+  miPlayerId,
+  onClose,
+  onChanged,
+}) => {
   const [wars, setWars] = useState<WarRow[] | null>(null);
   const [chosen, setChosen] = useState<string | null>(null);
   const [detail, setDetail] = useState<Detail | null>(null);
@@ -619,6 +636,21 @@ const WarHistory: React.FC<Props> = ({ canEdit, weaponSets, players, onClose, on
                   </div>
                 )}
               </section>
+
+              {/*
+                Las grabaciones van entre las capturas y los participantes, y no
+                al final: son la otra cosa que el acta *muestra* de la guerra, y
+                quien abre un acta a mirar cómo fue las quiere junto a los
+                pantallazos, no después de una tabla de treinta filas.
+              */}
+              <WarVods
+                warId={detail.id}
+                nombres={Object.fromEntries(players.map((p) => [p.id, p.name]))}
+                miPlayerId={miPlayerId}
+                puedeSubir={canUploadVod}
+                puedeAprobar={canApproveVod}
+                puedeFijar={canPinVod}
+              />
 
               <section>
                 <h3 className="text-sm font-bold text-slate-300 mb-2">

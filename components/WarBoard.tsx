@@ -59,6 +59,12 @@ interface Props {
   canEdit: boolean;
   /** Puede mandar a la gente a los canales de voz (permiso war.voice). */
   canVoice: boolean;
+  /** Las grabaciones de guerra, que viven dentro del acta. Ver docs/VODS.md. */
+  canUploadVod: boolean;
+  canApproveVod: boolean;
+  canPinVod: boolean;
+  /** La ficha de quien mira, para saber cuál de las grabaciones es la suya. */
+  miPlayerId: string | null;
 }
 
 /**
@@ -121,7 +127,17 @@ const MarcaConvocatoria: React.FC<{ respuesta?: EventResponse }> = ({ respuesta 
   );
 };
 
-const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit, canVoice }) => {
+const WarBoard: React.FC<Props> = ({
+  players,
+  builds,
+  weaponSets,
+  canEdit,
+  canVoice,
+  canUploadVod,
+  canApproveVod,
+  canPinVod,
+  miPlayerId,
+}) => {
   const [side, setSide] = useState<WarSide>('attack');
   const [deployments, setDeployments] = useState<Deployment[]>([]);
   const [strategies, setStrategies] = useState<WarStrategy[]>([]);
@@ -2064,6 +2080,10 @@ const WarBoard: React.FC<Props> = ({ players, builds, weaponSets, canEdit, canVo
           canEdit={canEdit}
           weaponSets={weaponSets}
           players={players}
+          canUploadVod={canUploadVod}
+          canApproveVod={canApproveVod}
+          canPinVod={canPinVod}
+          miPlayerId={miPlayerId}
           onClose={() => setHistory(false)}
           onChanged={() => void load()}
         />

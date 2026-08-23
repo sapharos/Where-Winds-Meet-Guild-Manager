@@ -580,6 +580,10 @@ const App: React.FC = () => {
             weaponSets={weaponSets}
             canEdit={!warLocked}
             canVoice={can('war.voice')}
+            canUploadVod={can('war.vod.upload')}
+            canApproveVod={can('war.vod.approve')}
+            canPinVod={can('war.vod.pin')}
+            miPlayerId={session.user.playerId ?? null}
           />
         )}
       </main>
