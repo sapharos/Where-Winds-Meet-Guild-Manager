@@ -3,6 +3,7 @@ import { api } from '../services/authService';
 import Sheet from './Sheet';
 import PreparaVod from './PreparaVod';
 import Reproductor, { Marca } from './Reproductor';
+import Multistream, { VodEnMosaico } from './Multistream';
 import { ProgresoSubida, enBytes, loQueFalta, subir } from '../services/subidaTus';
 
 /**
@@ -83,6 +84,7 @@ const WarVods: React.FC<Props> = ({
   const [aviso, setAviso] = useState<{ texto: string; ok: boolean } | null>(null);
   const [preparando, setPreparando] = useState<File | null>(null);
   const [marcas, setMarcas] = useState<Marca[]>([]);
+  const [mosaico, setMosaico] = useState(false);
   const archivo = useRef<HTMLInputElement>(null);
   const cancelar = useRef<AbortController | null>(null);
 
@@ -197,6 +199,44 @@ const WarVods: React.FC<Props> = ({
     await cargarMarcas();
   };
 
+  const sincronizar = async (id: string, offsetMs: number) => {
+    await api(`/vods/${id}/sync`, {
+      method: 'PUT',
+      body: JSON.stringify({ offsetMs, confianza: 'manual' }),
+    });
+    await cargar();
+    // La abierta también, o el reproductor seguiría diciendo que no lo está.
+    setViendo((v) => (v && v.id === id ? { ...v, offsetMs, offsetConfianza: 'manual' } : v));
+  };
+
+  const urlDe = (vod: Vod, calidad: string) => {
+    const c = vod.calidades.find((x) => x.calidad === calidad);
+    return c ? `/api/vods/${vod.id}/hls/${c.playlist.split(/[\/]/).pop()}` : null;
+  };
+
+  /**
+   * Las que pueden ir al mosaico: publicadas, con vídeo y **sincronizadas**.
+   * Sin `offsetMs` no hay forma de saber dónde encaja una grabación respecto a
+   * las demás, así que meterla sería alinearla al azar.
+   */
+  const paraMosaico: VodEnMosaico[] = (vods ?? [])
+    .filter((v) => v.estado === 'aprobado' && v.offsetMs !== null && v.duracionMs && v.calidades.length)
+    .slice(0, 4)
+    .map((v) => ({
+      id: v.id,
+      playerId: v.playerId,
+      nombre: nombres[v.playerId] ?? v.playerId,
+      offsetMs: v.offsetMs!,
+      duracionMs: v.duracionMs!,
+      fuentes: v.calidades
+        .map((c) => ({ calidad: c.calidad, url: urlDe(v, c.calidad)! }))
+        .filter((f) => f.url),
+    }));
+
+  const sinSincronizar = (vods ?? []).filter(
+    (v) => v.estado === 'aprobado' && v.offsetMs === null && v.calidades.length,
+  ).length;
+
   const pendientes = vods?.filter((v) => v.estado === 'listo').length ?? 0;
 
   return (
@@ -211,6 +251,22 @@ const WarVods: React.FC<Props> = ({
             </span>
           )}
         </h3>
+
+        {paraMosaico.length >= 2 && (
+          <button
+            type="button"
+            onClick={() => setMosaico(true)}
+            title={
+              sinSincronizar
+                ? `${sinSincronizar} grabación(es) más quedan fuera por no estar sincronizadas`
+                : undefined
+            }
+            className="px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium flex items-center gap-2"
+          >
+            <i className="fa-solid fa-table-cells-large" aria-hidden="true" />
+            Ver {paraMosaico.length} a la vez
+          </button>
+        )}
 
         {puedeSubir && !subiendo && (
           <>
@@ -367,6 +423,10 @@ const WarVods: React.FC<Props> = ({
         />
       )}
 
+      {mosaico && (
+        <Multistream vods={paraMosaico} marcas={marcas} onClose={() => setMosaico(false)} />
+      )}
+
       {viendo && (
         <Sheet
           title={nombres[viendo.playerId] ?? viendo.playerId}
@@ -390,6 +450,9 @@ const WarVods: React.FC<Props> = ({
             // servidor lo vuelve a comprobar: esto sólo decide si se ve el
             // botón.
             puedeBorrar={(m) => m.autorId === miUserId || puedeEditar}
+            onSincronizar={
+              puedeEditar ? (ms) => void sincronizar(viendo.id, ms) : undefined
+            }
           />
         </Sheet>
       )}

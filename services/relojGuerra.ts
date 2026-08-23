@@ -313,3 +313,30 @@ export const enPalabras = (ms: number) =>
   ms < 0
     ? `empieza ${comoReloj(-ms)} antes de la preparación`
     : `empieza en el minuto ${comoReloj(ms)} de la guerra`;
+
+// --- Mantener varios vídeos cuadrados ---------------------------------------
+
+/** Más allá de esto la deriva se ve, y se corrige de golpe. */
+export const SALTO_MS = 250;
+/** Por debajo de esto no vale la pena tocar nada. */
+export const QUIETO_MS = 40;
+
+/**
+ * Qué hacer con la deriva de un vídeo esclavo respecto al reloj maestro del
+ * mosaico. Ver docs/VODS.md §5.
+ *
+ * Vive aquí y no en el componente porque es aritmética, no interfaz, y porque
+ * un signo cambiado separaría los vídeos en vez de juntarlos -- despacio, y por
+ * eso costaría verlo mirando. Aquí se puede probar.
+ *
+ * `derivaMs` positiva = ese vídeo va ADELANTADO respecto a donde debería.
+ */
+export function correccion(derivaMs: number): { saltar: boolean; velocidad: number } {
+  if (Math.abs(derivaMs) > SALTO_MS) return { saltar: true, velocidad: 1 };
+  if (Math.abs(derivaMs) > QUIETO_MS) {
+    // Adelantado, frenar; atrasado, correr. Un 3 % no se oye ni se ve, y evita
+    // el tirón, que es lo que hace que un mosaico bien cuadrado parezca roto.
+    return { saltar: false, velocidad: derivaMs > 0 ? 0.97 : 1.03 };
+  }
+  return { saltar: false, velocidad: 1 };
+}

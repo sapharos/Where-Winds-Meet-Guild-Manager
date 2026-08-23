@@ -1,13 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import Sheet from './Sheet';
-import {
-  Fase,
-  PARTIDA_S,
-  PREPARACION_S,
-  enPalabras,
-  offsetDesde,
-  sondearReloj,
-} from '../services/relojGuerra';
+import { enPalabras, sondearReloj } from '../services/relojGuerra';
+import MarcaDeReloj from './MarcaDeReloj';
 
 /**
  * Lo que pasa entre elegir el fichero y subirlo. Ver docs/VODS.md §4.
@@ -55,10 +49,6 @@ const PreparaVod: React.FC<Props> = ({ fichero, onCancelar, onListo }) => {
   const [leyendo, setLeyendo] = useState(true);
   const [progreso, setProgreso] = useState('Preparando…');
   const [problema, setProblema] = useState<string | null>(null);
-
-  // A mano: la fase y lo que marca el reloj en el fotograma que se esté viendo.
-  const [fase, setFase] = useState<Fase>('partida');
-  const [marca, setMarca] = useState('');
 
   /**
    * La URL del fichero local se crea DENTRO del efecto y se guarda en estado.
@@ -115,19 +105,6 @@ const PreparaVod: React.FC<Props> = ({ fichero, onCancelar, onListo }) => {
     void sondear();
   };
 
-  /** El reloj que se teclea vale para el fotograma que se está viendo. */
-  const aplicarMarca = () => {
-    const m = marca.match(/^(\d{1,2})\s*:\s*(\d{1,2})$/);
-    if (!m) return;
-    const restante = Number(m[1]) * 60 + Number(m[2]);
-    const tope = fase === 'preparacion' ? PREPARACION_S : PARTIDA_S;
-    if (restante > tope) return;
-    setOffsetMs(offsetDesde({ restante, fase, posicionS: posicion }));
-    setConfianza('manual');
-    setProblema(null);
-  };
-
-  const marcaValida = /^(\d{1,2})\s*:\s*(\d{2})$/.test(marca);
   const recorteMs = (s: number | null) => (s === null ? null : Math.round(s * 1000));
 
   /**
@@ -231,49 +208,14 @@ const PreparaVod: React.FC<Props> = ({ fichero, onCancelar, onListo }) => {
             subir algo que ya se sabe mal.
           */}
           <div className="mt-3 pt-3 border-t border-slate-800">
-            <p className="text-[11px] text-slate-500 mb-2">
-              Pausa donde se lea bien el cronómetro del juego y escribe lo que marca.
-            </p>
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="flex rounded-lg overflow-hidden border border-slate-700">
-                {(['preparacion', 'partida'] as Fase[]).map((f) => (
-                  <button
-                    key={f}
-                    type="button"
-                    onClick={() => setFase(f)}
-                    className={`px-3 text-xs ${
-                      fase === f ? 'bg-slate-700 text-slate-100' : 'bg-slate-900 text-slate-400'
-                    }`}
-                  >
-                    {f === 'preparacion' ? 'Preparación' : 'Partida'}
-                  </button>
-                ))}
-              </div>
-              <input
-                value={marca}
-                onChange={(e) => setMarca(e.target.value)}
-                placeholder="4:21"
-                inputMode="numeric"
-                aria-label="Lo que marca el cronómetro"
-                className="w-24 px-3 rounded-lg bg-slate-900 border border-slate-700 text-slate-100 text-sm text-center"
-              />
-              <button
-                type="button"
-                disabled={!marcaValida}
-                onClick={aplicarMarca}
-                className="px-3 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 text-xs"
-              >
-                Aplicar en {reloj(posicion)}
-              </button>
-            </div>
-            {/*
-              La misma cifra aparece dos veces en una guerra: la preparación
-              cuenta 5:00→0:00 y la partida 30:00→0:00. Elegir mal el
-              interruptor desplaza el vídeo media hora, así que se dice.
-            */}
-            <p className="mt-2 text-[11px] text-slate-500">
-              Por encima de 5:00 es siempre partida. Por debajo, mira el rótulo bajo el reloj.
-            </p>
+            <MarcaDeReloj
+              posicionS={posicion}
+              onAplicar={(ms) => {
+                setOffsetMs(ms);
+                setConfianza('manual');
+                setProblema(null);
+              }}
+            />
           </div>
         </section>
         )}

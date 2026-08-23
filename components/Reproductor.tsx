@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import MarcaDeReloj from './MarcaDeReloj';
+import { enPalabras } from '../services/relojGuerra';
 
 /**
  * El reproductor de las grabaciones de guerra. Ver docs/VODS.md.
@@ -33,6 +35,13 @@ interface Props {
   onMarcar?: (tMs: number, texto: string, hito: boolean) => void;
   onBorrarMarca?: (id: string) => void;
   puedeBorrar?: (m: Marca) => boolean;
+  /**
+   * Corregir la sincronía de una grabación YA SUBIDA. Null si esta persona no
+   * puede. Existe porque sin esto una grabación que subió antes de que hubiera
+   * OCR --o a la que el OCR le falló-- se quedaba sin arreglo posible y fuera
+   * del multistream para siempre.
+   */
+  onSincronizar?: (offsetMs: number) => void;
 }
 
 const HLSJS = 'https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js';
@@ -43,7 +52,7 @@ const mmss = (s: number) => {
 };
 
 const Reproductor: React.FC<Props> = ({
-  src, offsetMs, marcas, onMarcar, onBorrarMarca, puedeBorrar,
+  src, offsetMs, marcas, onMarcar, onBorrarMarca, puedeBorrar, onSincronizar,
 }) => {
   const video = useRef<HTMLVideoElement>(null);
   const caja = useRef<HTMLDivElement>(null);
@@ -55,6 +64,7 @@ const Reproductor: React.FC<Props> = ({
   const [texto, setTexto] = useState('');
   const [hito, setHito] = useState(false);
   const [escribiendo, setEscribiendo] = useState(false);
+  const [ajustando, setAjustando] = useState(false);
 
   // --- HLS ------------------------------------------------------------------
   useEffect(() => {
@@ -351,11 +361,51 @@ const Reproductor: React.FC<Props> = ({
         )
       )}
 
-      {onMarcar && offsetMs === null && (
-        <p className="text-[11px] text-amber-400">
-          Esta grabación no está sincronizada, así que no se puede saber a qué momento de la
-          guerra corresponde lo que se marque.
-        </p>
+      {/*
+        La sincronía, y cómo arreglarla. No es un detalle escondido: sin ella no
+        hay marcas ni multistream, así que cuando falta se dice y se ofrece el
+        arreglo en el sitio, en vez de dejar a la grabación inservible.
+      */}
+      {offsetMs === null ? (
+        <div className="rounded-lg border border-amber-900/60 bg-amber-950/20 p-3">
+          <p className="text-[11px] text-amber-400 mb-2">
+            Sin sincronizar: no se sabe a qué momento de la guerra corresponde, así que no
+            puede llevar marcas ni entrar en un mosaico.
+          </p>
+          {onSincronizar ? (
+            <MarcaDeReloj posicionS={posicion} onAplicar={onSincronizar} />
+          ) : (
+            <p className="text-[11px] text-slate-500">
+              Alguien que pueda editar la guerra tiene que sincronizarla.
+            </p>
+          )}
+        </div>
+      ) : (
+        onSincronizar && (
+          <p className="text-[11px] text-slate-500">
+            {enPalabras(offsetMs)}
+            {' · '}
+            <button
+              type="button"
+              onClick={() => setAjustando((v) => !v)}
+              className="tap-suelto underline hover:text-slate-300"
+            >
+              {ajustando ? 'dejarlo' : 'corregir'}
+            </button>
+          </p>
+        )
+      )}
+
+      {ajustando && onSincronizar && offsetMs !== null && (
+        <div className="rounded-lg border border-slate-800 p-3">
+          <MarcaDeReloj
+            posicionS={posicion}
+            onAplicar={(ms) => {
+              onSincronizar(ms);
+              setAjustando(false);
+            }}
+          />
+        </div>
       )}
 
       {/* --- Lo marcado --- */}

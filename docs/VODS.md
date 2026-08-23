@@ -171,6 +171,21 @@ final:
 - **El mosaico enfocado a calidad alta, el resto a 360p.** Con 900 Mbps
   simétricos hay margen, pero cuatro mosaicos a 1080p son ~30 Mbps por espectador
   y no hace falta.
+- **El reloj manda, no el vídeo.** La hora de la guerra la lleva el mosaico
+  enfocado, pero **sólo mientras está reproduciendo**. Leerla siempre parecía lo
+  natural y es un error: si el maestro no puede moverse --cargando, red
+  atascada, o fuera de su tramo-- su posición se queda quieta y publicarla en
+  cada fotograma deshace el salto que acaba de pedir quien mira. Se pulsa la
+  línea de tiempo y no pasa nada, sin ninguna pista de por qué.
+- **Y si el enfocado no cubre el instante, manda otro.** A un vídeo que no llega
+  a ese momento no se le puede preguntar la hora. Pasa en cuanto alguien se
+  mueve fuera del tramo del que está oyendo, que con cobertura desigual es a
+  cada rato.
+- **Lo que decide va en una referencia, no en el estado de React.** El estado
+  sólo se refresca al repintar, así que dos pulsaciones seguidas de «marca
+  siguiente» leerían el mismo instante y saltarían las dos al mismo sitio. Vale
+  para el mosaico y para el reproductor de una sola: los dos se cobraron el
+  mismo fallo.
 - **Cobertura desigual.** No todos los VODs cubren el mismo tramo. La línea de
   tiempo dibuja **la cobertura de cada uno como una barra**, y al saltar a un
   instante que un VOD no grabó, su mosaico dice **«aún no grababa»** en vez de
@@ -216,9 +231,9 @@ Sólo reproduce un miembro con sesión y `war.view`.
 |---|---|---|
 | **1** | Infraestructura: NAS montado y visible desde el LXC 180 | **hecha 2026-08-23** |
 | **2** | Subida + aprobación + reproductor simple | **hecha 2026-08-23** |
-| **3** | Recorte, OCR del cronómetro, sincronía | ← siguiente |
-| **4** | Multistream sincronizado | |
-| **5** | QuickSync, correlación de audio, respaldo a B2 | opcional |
+| **3** | Recorte, OCR del cronómetro, sincronía | **hecha 2026-08-23** |
+| **4** | Multistream sincronizado | **hecha 2026-08-23** |
+| **5** | QuickSync, correlación de audio, respaldo a B2 | ← opcional, lo que queda |
 
 ---
 
