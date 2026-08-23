@@ -6,6 +6,7 @@ import { authService, api, ApiError, Session } from './services/authService';
 import { DEFAULT_GROUPS } from './constants';
 import MemberManager from './components/MemberManager';
 import Agenda from './components/Agenda';
+import Guerras from './components/Guerras';
 import WarBoard from './components/WarBoard';
 import LoginScreen from './components/LoginScreen';
 import DiscordClaim from './components/DiscordClaim';
@@ -20,7 +21,7 @@ import { Bloque, Tarjetas } from './components/Esqueleto';
 const App: React.FC = () => {
   const [session, setSession] = useState<Session | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
-  const [activeTab, setActiveTab] = useState<'me' | 'roster' | 'agenda' | 'war-room' | 'admin'>(
+  const [activeTab, setActiveTab] = useState<'me' | 'roster' | 'agenda' | 'war-room' | 'guerras' | 'admin'>(
     'roster',
   );
   const [haciaAtras, setHaciaAtras] = useState(false);
@@ -296,6 +297,10 @@ const App: React.FC = () => {
     { id: 'me' as const, label: 'Mi perfil', corto: 'Perfil', icon: 'fa-user', show: Boolean(myPlayer) },
     { id: 'agenda' as const, label: 'Agenda', corto: 'Agenda', icon: 'fa-calendar-day', show: true },
     { id: 'war-room' as const, label: 'Sala de Guerra', corto: 'Guerra', icon: 'fa-chess-knight', show: true },
+    // Detrás de la Sala y no delante: primero se organiza la que viene, luego
+    // se repasa la que pasó. Y aquí es donde se suben las grabaciones, que
+    // antes estaban a tres pulsaciones dentro de una herramienta de organizar.
+    { id: 'guerras' as const, label: 'Guerras', corto: 'Guerras', icon: 'fa-clock-rotate-left', show: can('war.view') },
     { id: 'admin' as const, label: 'Administración', corto: 'Admin', icon: 'fa-user-shield', show: canSeeAdmin },
   ].filter((t) => t.show);
 
@@ -556,6 +561,18 @@ const App: React.FC = () => {
             myPlayerId={session.user.playerId}
             canManage={can('events.manage')}
             canReset={can('events.reset')}
+          />
+        ) : activeTab === 'guerras' ? (
+          <Guerras
+            canEdit={can('war.edit')}
+            weaponSets={weaponSets}
+            players={players}
+            canUploadVod={can('war.vod.upload')}
+            canApproveVod={can('war.vod.approve')}
+            canPinVod={can('war.vod.pin')}
+            miPlayerId={session.user.playerId ?? null}
+            miUserId={session.user.id}
+            onChanged={() => {}}
           />
         ) : activeTab === 'roster' ? (
           <MemberManager

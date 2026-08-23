@@ -121,6 +121,13 @@ interface Props {
   miPlayerId: string | null;
   /** Su cuenta, que es lo que firma las marcas de los vídeos. */
   miUserId: string | null;
+  /**
+   * Como página de la aplicación en vez de como hoja encima de la Sala de
+   * Guerra. Es el mismo contenido y a propósito: repasar una guerra y repartir
+   * la formación de la siguiente son tareas distintas, pero el historial que se
+   * mira es el mismo, y tener dos copias sería garantizar que se separan.
+   */
+  comoPagina?: boolean;
   onClose: () => void;
   /**
    * Something changed here that the board behind is also showing. Deleting the
@@ -144,6 +151,7 @@ const WarHistory: React.FC<Props> = ({
   canPinVod,
   miPlayerId,
   miUserId,
+  comoPagina,
   onClose,
   onChanged,
 }) => {
@@ -385,17 +393,8 @@ const WarHistory: React.FC<Props> = ({
     );
   };
 
-  return (
-    <Sheet
-      title="Historial de guerras"
-      subtitle={
-        canEdit
-          ? 'Sube las capturas de resultados —o pégalas con Ctrl+V desde un ordenador— y anota lo que aportó cada uno.'
-          : 'Las guerras que se han librado y quién estuvo en ellas.'
-      }
-      size="xl"
-      onClose={onClose}
-    >
+  const cuerpo = (
+    <>
       <div ref={drop} className="space-y-4">
           {message && (
             <div
@@ -964,6 +963,24 @@ const WarHistory: React.FC<Props> = ({
           </span>
         </div>
       )}
+    </>
+  );
+
+  // De página no lleva hoja ni botón de cerrar: ya está dentro de la aplicación.
+  return comoPagina ? (
+    cuerpo
+  ) : (
+    <Sheet
+      title="Historial de guerras"
+      subtitle={
+        canEdit
+          ? 'Sube las capturas de resultados —o pégalas con Ctrl+V desde un ordenador— y anota lo que aportó cada uno.'
+          : 'Las guerras que se han librado y quién estuvo en ellas.'
+      }
+      size="xl"
+      onClose={onClose}
+    >
+      {cuerpo}
     </Sheet>
   );
 };
