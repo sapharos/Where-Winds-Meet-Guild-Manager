@@ -338,7 +338,7 @@ const Multistream: React.FC<Props> = ({ vods, marcas, onClose }) => {
                   muted={v.id !== foco}
                   className={`w-full aspect-video ${dentro ? '' : 'opacity-20'}`}
                 />
-                <span className="absolute top-1 left-1 px-1.5 rounded bg-black/70 text-[10px] text-slate-200">
+                <span className="absolute top-1 left-1 px-1.5 rounded bg-slate-950/85 text-[10px] text-slate-200">
                   {at + 1} · {v.nombre}
                   {v.id === foco && <span className="text-amber-400"> · sonando</span>}
                 </span>
@@ -391,7 +391,7 @@ const Multistream: React.FC<Props> = ({ vods, marcas, onClose }) => {
             }}
             className="tap-suelto relative h-4 flex items-center cursor-pointer"
           >
-            <div className="h-1.5 w-full rounded-full bg-white/15 overflow-hidden">
+            <div className="h-1.5 w-full rounded-full bg-slate-900 overflow-hidden">
               <div className="h-full bg-amber-500" style={{ width: `${pct(tGuerra)}%` }} />
             </div>
             {ordenadas.map((m) => (
@@ -406,7 +406,7 @@ const Multistream: React.FC<Props> = ({ vods, marcas, onClose }) => {
                 aria-label={`Ir a ${mmss(m.tMs - desde)}: ${m.texto}`}
                 style={{ left: `${pct(m.tMs)}%` }}
                 className={`tap-suelto absolute top-0 h-4 w-1 -translate-x-1/2 rounded-full ${
-                  m.hito ? 'bg-sky-300' : 'bg-white/80'
+                  m.hito ? 'bg-sky-600' : 'bg-slate-100'
                 }`}
               />
             ))}

@@ -309,6 +309,10 @@ const Reproductor: React.FC<Props> = ({
         ref={caja}
         onMouseMove={despertar}
         onTouchStart={despertar}
+        // `bg-black` aquí SÍ es correcto en los dos temas: es el marco del
+        // vídeo, no cromo de la aplicación. Un 16:9 dentro de un contenedor de
+        // otra proporción se enmarca en negro en cualquier reproductor, y en
+        // tema claro un marco blanco compite con la imagen.
         className={`relative bg-black rounded-lg overflow-hidden group ${
           mandosVisibles ? '' : 'cursor-none'
         }`}
@@ -715,17 +719,35 @@ const Barra: React.FC<{
         // se falla, y aquí se busca un instante concreto.
         className="tap-suelto group/pista relative h-5 flex items-center cursor-pointer"
       >
-        <div className="h-1.5 w-full rounded-full bg-white/20 overflow-hidden">
+        {/*
+          Todo esto sale de las RAMPAS, nunca de `white` o `black` a pelo.
+
+          El tema invierte el neutro (tailwind.config.js): `slate-950` es casi
+          negro en oscuro y casi blanco en claro, y por eso el panel de mandos
+          funciona en los dos. Un `bg-white` no invierte, así que en tema claro
+          los puntos eran blancos sobre un panel blanco -- invisibles, y sólo se
+          veía en claro. Pasó el 2026-08-23.
+
+          Los tonos concretos están MEDIDOS en los dos temas, no elegidos a
+          ojo. Relleno `amber-500` sobre pista `slate-900` da 5,91 en oscuro y
+          5,58 en claro; el `amber-600` que probé primero se hundía a 1,66 en
+          oscuro, invisible sobre su propia pista.
+
+          El punto no depende de lo que tenga detrás: su anillo es del color
+          del panel, así que nunca toca el relleno. Contra ese anillo mide
+          15,8 y 13,1.
+        */}
+        <div className="h-1.5 w-full rounded-full bg-slate-900 overflow-hidden">
           {/* Lo descargado, por detrás: sin esto, una pausa para cargar parece
               que el reproductor se colgó. */}
-          <div className="absolute h-1.5 rounded-full bg-white/25" style={{ width: `${pct(cargado)}%` }} />
+          <div className="absolute h-1.5 rounded-full bg-slate-700" style={{ width: `${pct(cargado)}%` }} />
           <div className="relative h-full rounded-full bg-amber-500" style={{ width: `${pct(posicion)}%` }} />
         </div>
 
         {/* El tirador. Aparece al acercarse: en reposo la barra se lee mejor
             limpia, y al ir a arrastrar es cuando hace falta saber dónde agarrar. */}
         <div
-          className="absolute h-3 w-3 -translate-x-1/2 rounded-full bg-amber-400 opacity-0 group-hover/pista:opacity-100 transition-opacity duration-micro"
+          className="absolute h-3 w-3 -translate-x-1/2 rounded-full bg-amber-500 opacity-0 group-hover/pista:opacity-100 transition-opacity duration-micro"
           style={{ left: `${pct(posicion)}%` }}
         />
 
@@ -787,8 +809,8 @@ const Barra: React.FC<{
             >
               <span
                 className={`flex items-center justify-center rounded-full border-2 border-slate-950 text-[8px] font-bold leading-none transition-transform duration-micro group-hover/marca:scale-150 ${
-                  miembros.length > 1 ? 'h-3.5 w-3.5 text-slate-950' : 'h-3 w-3'
-                } ${hayHito ? 'bg-sky-300' : 'bg-white'}`}
+                  miembros.length > 1 ? 'h-3.5 w-3.5' : 'h-3 w-3'
+                } ${hayHito ? 'bg-sky-600 text-slate-50' : 'bg-slate-100 text-slate-900'}`}
               >
                 {/* El número dice que hay más de una. Sin él, un racimo de
                     cinco se lee como una sola marca. */}
