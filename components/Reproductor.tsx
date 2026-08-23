@@ -66,6 +66,9 @@ const Reproductor: React.FC<Props> = ({
   const [escribiendo, setEscribiendo] = useState(false);
   const [ajustando, setAjustando] = useState(false);
   const [cargado, setCargado] = useState(0);
+  const [pantallaCompleta, setPantallaCompleta] = useState(false);
+  const [mandosVisibles, setMandosVisibles] = useState(true);
+  const ocultar = useRef<number | null>(null);
 
   // --- HLS ------------------------------------------------------------------
   useEffect(() => {
@@ -103,6 +106,17 @@ const Reproductor: React.FC<Props> = ({
     };
   }, [src]);
 
+  useEffect(() => {
+    const mirar = () => setPantallaCompleta(document.fullscreenElement === caja.current);
+    document.addEventListener('fullscreenchange', mirar);
+    return () => document.removeEventListener('fullscreenchange', mirar);
+  }, []);
+
+  const alternarPantalla = useCallback(() => {
+    if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
+    else void caja.current?.requestFullscreen?.().catch(() => {});
+  }, []);
+
   // --- Movimiento -----------------------------------------------------------
 
   /** Todo lo que mueve el vídeo pasa por aquí. La fase 4 engancha justo aquí. */
@@ -118,6 +132,41 @@ const Reproductor: React.FC<Props> = ({
     if (el.paused) void el.play();
     else el.pause();
   }, []);
+
+  // --- Los mandos se esconden solos ----------------------------------------
+
+  /** Un comentario se escribe pausado, así que la tecla vale reproduciendo o no. */
+  const puedeMarcar = Boolean(onMarcar) && offsetMs !== null;
+
+  /**
+   * Tres segundos sin mover el ratón y los controles se van.
+   *
+   * Nunca mientras esté PAUSADO ni mientras se esté ESCRIBIENDO una marca: en
+   * los dos casos quien mira está haciendo algo con ellos, y esconderlos sería
+   * quitarle la herramienta de las manos. Tampoco con el ratón encima.
+   */
+  const despertar = useCallback(() => {
+    setMandosVisibles(true);
+    if (ocultar.current) window.clearTimeout(ocultar.current);
+    ocultar.current = window.setTimeout(() => {
+      const el = video.current;
+      if (!el || el.paused) return;
+      setMandosVisibles(false);
+    }, 3000);
+  }, []);
+
+  useEffect(() => {
+    // Pausar o ponerse a escribir los trae de vuelta y los deja quietos.
+    if (!sonando || escribiendo) {
+      if (ocultar.current) window.clearTimeout(ocultar.current);
+      setMandosVisibles(true);
+      return;
+    }
+    despertar();
+    return () => {
+      if (ocultar.current) window.clearTimeout(ocultar.current);
+    };
+  }, [sonando, escribiendo, despertar]);
 
   // --- Marcas ---------------------------------------------------------------
 
@@ -189,7 +238,14 @@ const Reproductor: React.FC<Props> = ({
         },
         n: () => saltarMarca(1),
         p: () => saltarMarca(-1),
-        f: () => void caja.current?.requestFullscreen?.().catch(() => {}),
+        // Comentar. Es lo que hace posible marcar sin salir de pantalla
+        // completa: C, escribir, Enter.
+        c: () => {
+          if (!puedeMarcar) return;
+          el.pause();
+          setEscribiendo(true);
+        },
+        f: alternarPantalla,
       };
       const hacer = atajos[e.key] ?? atajos[e.key.toLowerCase()];
       if (hacer) {
@@ -199,7 +255,7 @@ const Reproductor: React.FC<Props> = ({
     };
     window.addEventListener('keydown', alPulsar);
     return () => window.removeEventListener('keydown', alPulsar);
-  }, [alternar, saltarA, saltarMarca]);
+  }, [alternar, saltarA, saltarMarca, alternarPantalla, puedeMarcar]);
 
   /**
    * La marca por la que se está pasando, para asomarla sobre el vídeo.
@@ -236,11 +292,28 @@ const Reproductor: React.FC<Props> = ({
 
   return (
     <div className="space-y-3">
-      <div ref={caja} className="relative bg-black rounded-lg overflow-hidden group">
+      <div
+        ref={caja}
+        onMouseMove={despertar}
+        onTouchStart={despertar}
+        className={`relative bg-black rounded-lg overflow-hidden group ${
+          mandosVisibles ? '' : 'cursor-none'
+        }`}
+      >
         <video
           ref={video}
           playsInline
-          onClick={alternar}
+          onClick={() => {
+            // Con los mandos escondidos, el primer toque sólo los trae de
+            // vuelta. En un teléfono no hay ratón que mover, así que sin esto
+            // el gesto de «quiero ver los controles» pausaría el vídeo -- y
+            // quien mira acaba dando dos toques a ciegas cada vez.
+            if (!mandosVisibles) {
+              despertar();
+              return;
+            }
+            alternar();
+          }}
           onPlay={() => setSonando(true)}
           onPause={() => setSonando(false)}
           onLoadedMetadata={(e) => setDuracion(e.currentTarget.duration)}
@@ -265,7 +338,69 @@ const Reproductor: React.FC<Props> = ({
           opaca (docs/DIRECCION_VISUAL.md §2). Aquí es lo mismo con vídeo
           detrás en vez de color de usuario.
         */}
-        <div className="absolute inset-x-2 bottom-2 rounded-md border border-slate-700 bg-slate-950/95 shadow-1 px-3 pt-2 pb-1.5">
+        <div
+          // Al pasar el ratón por encima no se van: se está yendo a pulsarlos.
+          onMouseEnter={() => setMandosVisibles(true)}
+          className={`absolute inset-x-2 bottom-2 rounded-md border border-slate-700 bg-slate-950/95 shadow-1 px-3 pt-2 pb-1.5 transition-opacity duration-tap ${
+            mandosVisibles ? 'opacity-100' : 'opacity-0 pointer-events-none'
+          }`}
+        >
+          {/*
+            Marcar, dentro del mismo panel que los mandos.
+
+            Dentro y no flotando por encima, por dos razones. Una: el panel es
+            lo que entra en pantalla completa, y antes el formulario vivía fuera
+            del contenedor, así que a pantalla completa había que salir, marcar
+            y volver a entrar -- o sea, no se marcaba. Y dos: flotándolo a una
+            altura fija se solapaba con los mandos en un teléfono, donde el
+            vídeo mide 192 px y el panel 86. Aquí no hay número que calcular.
+          */}
+          {puedeMarcar && escribiendo && (
+            <div className="flex flex-wrap items-center gap-2 mb-2 pb-2 border-b border-slate-800">
+              <span className="text-xs text-amber-400 tabular-nums">{mmss(posicion)}</span>
+              <input
+                autoFocus
+                value={texto}
+                onChange={(e) => setTexto(e.target.value)}
+                onKeyDown={(e) => {
+                  // Se paran aquí: si subieran, la barra espaciadora de una
+                  // frase pausaría el vídeo y la J escribiría un salto.
+                  e.stopPropagation();
+                  if (e.key === 'Enter') enviarMarca();
+                  if (e.key === 'Escape') setEscribiendo(false);
+                }}
+                maxLength={280}
+                placeholder="Qué pasó aquí"
+                className="flex-1 min-w-32 px-3 rounded bg-slate-900 border border-slate-700 text-slate-100 text-sm"
+              />
+              <label className="flex items-center gap-1.5 text-[11px] text-slate-400">
+                <input
+                  type="checkbox"
+                  checked={hito}
+                  onChange={(e) => setHito(e.target.checked)}
+                  className="tap-suelto"
+                />
+                Hito
+              </label>
+              <button
+                type="button"
+                onClick={enviarMarca}
+                disabled={!texto.trim()}
+                className="px-3 rounded bg-amber-600 hover:bg-amber-500 disabled:opacity-40 text-white text-xs"
+              >
+                Marcar
+              </button>
+              <button
+                type="button"
+                onClick={() => setEscribiendo(false)}
+                aria-label="Dejarlo"
+                className="tap-suelto text-slate-500 hover:text-slate-300 text-xs px-1"
+              >
+                <i className="fa-solid fa-xmark" aria-hidden="true" />
+              </button>
+            </div>
+          )}
+
           <Barra
             posicion={posicion}
             duracion={duracion}
@@ -311,6 +446,21 @@ const Reproductor: React.FC<Props> = ({
               <span className="text-slate-600"> / {mmss(duracion)}</span>
             </span>
 
+            {puedeMarcar && !escribiendo && (
+              <button
+                type="button"
+                onClick={() => {
+                  video.current?.pause();
+                  setEscribiendo(true);
+                }}
+                aria-label="Marcar este momento"
+                title="Marcar este momento (C)"
+                className="min-w-tap rounded text-slate-300 hover:bg-slate-800 hover:text-white"
+              >
+                <i className="fa-solid fa-flag" aria-hidden="true" />
+              </button>
+            )}
+
             <div className="flex-1" />
 
             {visibles.length > 0 && (
@@ -337,12 +487,15 @@ const Reproductor: React.FC<Props> = ({
             </button>
             <button
               type="button"
-              onClick={() => void caja.current?.requestFullscreen?.().catch(() => {})}
-              aria-label="Pantalla completa"
+              onClick={alternarPantalla}
+              aria-label={pantallaCompleta ? 'Salir de pantalla completa' : 'Pantalla completa'}
               title="Pantalla completa (F)"
               className="min-w-tap rounded text-slate-300 hover:bg-slate-800 hover:text-white"
             >
-              <i className="fa-solid fa-expand" aria-hidden="true" />
+              <i
+                className={`fa-solid ${pantallaCompleta ? 'fa-compress' : 'fa-expand'}`}
+                aria-hidden="true"
+              />
             </button>
           </div>
         </div>
@@ -369,58 +522,8 @@ const Reproductor: React.FC<Props> = ({
       {error && <p className="text-xs text-red-400">{error}</p>}
 
       <p className="text-[11px] text-slate-600">
-        Espacio reproduce · ← → 5 s · J L 10 s · N P entre marcas · M silencio · F pantalla completa
+        Espacio reproduce · ← → 5 s · J L 10 s · N P entre marcas · C comentar · M silencio · F pantalla completa
       </p>
-
-      {/* --- Marcar este momento --- */}
-      {onMarcar && offsetMs !== null && (
-        escribiendo ? (
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs text-slate-400 tabular-nums">{mmss(posicion)}</span>
-            <input
-              autoFocus
-              value={texto}
-              onChange={(e) => setTexto(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') enviarMarca();
-                if (e.key === 'Escape') setEscribiendo(false);
-              }}
-              maxLength={280}
-              placeholder="Qué pasó aquí"
-              className="flex-1 min-w-40 px-3 rounded-lg bg-slate-900 border border-slate-700 text-slate-100 text-sm"
-            />
-            <label className="flex items-center gap-1.5 text-[11px] text-slate-400">
-              <input
-                type="checkbox"
-                checked={hito}
-                onChange={(e) => setHito(e.target.checked)}
-                className="tap-suelto"
-              />
-              Hito
-            </label>
-            <button
-              type="button"
-              onClick={enviarMarca}
-              disabled={!texto.trim()}
-              className="px-3 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-40 text-white text-xs"
-            >
-              Marcar
-            </button>
-          </div>
-        ) : (
-          <button
-            type="button"
-            onClick={() => {
-              video.current?.pause();
-              setEscribiendo(true);
-            }}
-            className="px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs flex items-center gap-2"
-          >
-            <i className="fa-solid fa-flag" aria-hidden="true" />
-            Marcar este momento ({mmss(posicion)})
-          </button>
-        )
-      )}
 
       {/*
         La sincronía, y cómo arreglarla. No es un detalle escondido: sin ella no
