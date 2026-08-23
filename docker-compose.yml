@@ -82,6 +82,10 @@ services:
     user: "0:0"
     command:
       - -upload-dir=/vods/entrada
+      # Explícito aunque sea el valor por defecto: nginx tiene que apuntar aquí
+      # y un puerto implícito es un puerto que cambia de versión sin avisar --
+      # la v1 escuchaba en 1080.
+      - -port=8080
       - -behind-proxy
       - -base-path=/vods-upload/
       - -max-size=${VODS_MAX_BYTES:-6442450944}

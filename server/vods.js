@@ -279,12 +279,31 @@ async function sondear(fichero) {
   };
 }
 
-/** Los cortes de `-ss`/`-to` van ANTES de `-i` para que ffmpeg salte en vez de leerlo todo. */
+/**
+ * El recorte, en dos mitades porque van a distinto lado de `-i`.
+ *
+ * `-ss` ANTES de la entrada: así ffmpeg salta hasta ahí en vez de leerse el
+ * fichero entero, que con 2 GB es la diferencia entre segundos y minutos.
+ *
+ * Y el final se expresa como DURACIÓN (`-t`) y no como instante (`-to`). Con
+ * `-ss` de entrada, ffmpeg pone a cero el reloj de la salida, así que un `-to`
+ * no significa «hasta el segundo N del original» sino «N segundos de salida»:
+ * pedir `-ss 5 -to 20` da veinte segundos, no quince. Se comprobó, y no se ve
+ * hasta que alguien sube un vídeo de verdad.
+ *
+ * CAVEAT para la fase 3: copiando sin recodificar, `-ss` cae en el fotograma
+ * clave más cercano, así que el corte real puede irse un par de segundos de lo
+ * pedido. Da igual para ver el vídeo y NO da igual para `offset_ms`: cuando se
+ * implemente la sincronía hay que medir el desplazamiento realmente aplicado
+ * sobre la salida en vez de fiarse de `recorte_ini_ms`.
+ */
 const recorteArgs = (vod) => {
-  const args = [];
-  if (vod.recorte_ini_ms > 0) args.push('-ss', (vod.recorte_ini_ms / 1000).toFixed(3));
-  if (vod.recorte_fin_ms > 0) args.push('-to', (vod.recorte_fin_ms / 1000).toFixed(3));
-  return args;
+  const ini = vod.recorte_ini_ms > 0 ? vod.recorte_ini_ms : 0;
+  const fin = vod.recorte_fin_ms > 0 ? vod.recorte_fin_ms : null;
+  return {
+    antes: ini ? ['-ss', (ini / 1000).toFixed(3)] : [],
+    despues: fin && fin > ini ? ['-t', ((fin - ini) / 1000).toFixed(3)] : [],
+  };
 };
 
 const hlsArgs = (destino, calidad) => [
@@ -312,14 +331,12 @@ async function procesar(id) {
   // minutos -- pero eso sólo le pasa a quien graba en HEVC.
   await correr('ffmpeg', [
     '-hide_banner', '-loglevel', 'error', '-y',
-    ...corte, '-i', origen,
+    ...corte.antes, '-i', origen, ...corte.despues,
     ...(copiable ? ['-c', 'copy'] : ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-c:a', 'aac']),
     ...hlsArgs(destino, 'origen'),
   ]);
 
-  const util = corte.length
-    ? (vod.recorte_fin_ms || duracionMs) - (vod.recorte_ini_ms || 0)
-    : duracionMs;
+  const util = (vod.recorte_fin_ms || duracionMs) - (vod.recorte_ini_ms || 0);
 
   // Reproducible ya, con una calidad. La de 360p llega después y no es motivo
   // para hacer esperar a nadie.
@@ -338,7 +355,7 @@ async function procesar(id) {
   // sobreviviría si algún día se recorta la retención.
   await correr('ffmpeg', [
     '-hide_banner', '-loglevel', 'error', '-y',
-    ...corte, '-i', origen,
+    ...corte.antes, '-i', origen, ...corte.despues,
     '-vf', 'scale=-2:360', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '28',
     '-c:a', 'aac', '-b:a', '64k',
     ...hlsArgs(destino, '360p'),
