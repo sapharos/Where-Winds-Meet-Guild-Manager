@@ -237,6 +237,8 @@ const WarVods: React.FC<Props> = ({
     (v) => v.estado === 'aprobado' && v.offsetMs === null && v.calidades.length,
   ).length;
 
+  const aprobadas = (vods ?? []).filter((v) => v.estado === 'aprobado' && v.calidades.length).length;
+
   const pendientes = vods?.filter((v) => v.estado === 'listo').length ?? 0;
 
   return (
@@ -320,6 +322,28 @@ const WarVods: React.FC<Props> = ({
 
       {aviso && (
         <p className={`mb-3 text-xs ${aviso.ok ? 'text-emerald-400' : 'text-red-400'}`}>{aviso.texto}</p>
+      )}
+
+      {/*
+        Por qué no hay mosaico, cuando no lo hay.
+        
+        Antes el botón simplemente no aparecía y nada lo explicaba: con dos
+        grabaciones publicadas pero una sin sincronizar, la funcionalidad
+        estaba ahí y era invisible, sin manera de averiguar qué faltaba. Un
+        renglón cuesta nada y convierte un callejón sin salida en una tarea.
+      */}
+      {vods !== null && paraMosaico.length < 2 && aprobadas >= 1 && (
+        <p className="mb-3 text-[11px] text-slate-500">
+          {sinSincronizar > 0 ? (
+            <>
+              Para verlas a la vez hacen falta dos grabaciones sincronizadas y hay{' '}
+              {sinSincronizar} sin sincronizar. Ábrela con «Ver» y dile en qué momento de la
+              guerra empieza.
+            </>
+          ) : (
+            <>Con una segunda grabación publicada de esta guerra podréis verlas a la vez, cuadradas.</>
+          )}
+        </p>
       )}
 
       {vods === null ? (
