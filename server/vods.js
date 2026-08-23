@@ -460,6 +460,48 @@ export async function vodsDeLaGuerra(warId, user, permisos = []) {
   return rows;
 }
 
+/**
+ * Los ficheros que un reproductor puede pedir de un VOD: la playlist de una
+ * calidad y sus segmentos, y nada más.
+ *
+ * El nombre se valida con una lista blanca y no quitando `..`: el fichero llega
+ * en la URL y termina en una ruta del sistema, así que aquí un descuido se lee
+ * como «devuélveme /etc/passwd». Todo lo que genera la cola encaja en este
+ * patrón, y lo que no encaje no existe.
+ */
+const FICHERO_HLS = /^(origen|360p)(-\d{5})?\.(m3u8|ts)$/;
+
+export function tipoDeFichero(nombre) {
+  if (!FICHERO_HLS.test(nombre)) return null;
+  return nombre.endsWith('.m3u8') ? 'application/vnd.apple.mpegurl' : 'video/mp2t';
+}
+
+/**
+ * ¿Puede esta persona ver este VOD? Mismas reglas que el listado: lo aprobado
+ * lo ve el gremio, lo suyo lo ve su dueño, y todo lo ve quien aprueba.
+ *
+ * Se comprueba en cada segmento y no sólo al abrir el reproductor. Suena
+ * excesivo hasta que se piensa en el caso que importa: a quien se va del gremio
+ * a mitad de la tarde se le corta la reproducción, en vez de seguir sirviéndole
+ * la guerra entera porque ya tenía la playlist.
+ */
+export async function vodAccesible(id, user, permisos = []) {
+  const { rows } = await pool.query(
+    `SELECT v.id, v.ruta, v.estado, v.player_id AS "playerId"
+       FROM war_vods v
+       JOIN wars w ON w.id = v.war_id
+      WHERE v.id = $1 AND w.guild_id = $2`,
+    [id, GUILD_ID],
+  );
+  const vod = rows[0];
+  // `ruta` nula es un VOD caducado: la fila sigue para contarlo, los bytes no.
+  if (!vod || !vod.ruta) return null;
+  if (vod.estado === 'aprobado') return vod;
+  if (permisos.includes('war.vod.approve')) return vod;
+  if (user?.playerId && vod.playerId === user.playerId) return vod;
+  return null;
+}
+
 /** Aprobar o rechazar. Rechazar borra los bytes en el acto: ocupan y no valen. */
 export async function resolverVod(id, aprobado, userId) {
   const estado = aprobado ? 'aprobado' : 'rechazado';

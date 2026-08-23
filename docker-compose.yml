@@ -6,6 +6,11 @@ services:
     container_name: wwm-guild-manager-web
     ports:
       - "${WEB_PORT:-8085}:80"
+    volumes:
+      # Sólo para servir los segmentos de las grabaciones, y sólo de lectura:
+      # nginx mueve los bytes pero no escribe nada ahí. La ruta interna que los
+      # expone no se alcanza sin un X-Accel-Redirect de la API.
+      - ${VODS_HOST_DIR:-/mnt/vods}:/vods:ro
     depends_on:
       - api
     restart: unless-stopped

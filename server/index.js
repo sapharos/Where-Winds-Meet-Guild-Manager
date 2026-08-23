@@ -97,6 +97,8 @@ import {
   secretoValido,
   manejarGancho,
   vodsDeLaGuerra,
+  vodAccesible,
+  tipoDeFichero,
   resolverVod,
   fijarVod,
   ajustarSincronia,
@@ -1266,6 +1268,29 @@ app.post('/api/vods/hook/:secreto', (req, res, next) => {
   next();
 }, requireAuth, asHandler(async (req, res) => {
   res.json(await manejarGancho(req.body ?? {}, req.user, req.permissions));
+}));
+
+/**
+ * La reproducción. La API no mueve un byte de vídeo: comprueba quién pregunta y
+ * le pasa a nginx la ruta interna con `X-Accel-Redirect`.
+ *
+ * Se comprueba en cada segmento, no sólo al abrir. Es una consulta corta y es
+ * lo que hace que a quien se va del gremio a media tarde se le corte el vídeo,
+ * en vez de seguir sirviéndole la guerra entera porque ya tenía la playlist.
+ */
+app.get('/api/vods/:id/hls/:fichero', requireAuth, requirePermission('war.view'), asHandler(async (req, res) => {
+  const tipo = tipoDeFichero(req.params.fichero);
+  if (!tipo) return res.status(404).end();
+
+  const vod = await vodAccesible(req.params.id, req.user, req.permissions);
+  if (!vod) return res.status(404).end();
+
+  res.setHeader('Content-Type', tipo);
+  // Los segmentos no cambian nunca; la playlist de un VOD terminado, tampoco.
+  // `private` porque esto no es de cualquiera aunque sea inmutable.
+  res.setHeader('Cache-Control', 'private, max-age=86400');
+  res.setHeader('X-Accel-Redirect', `/vods-privado/${vod.ruta}/${req.params.fichero}`);
+  res.end();
 }));
 
 app.get('/api/war/wars/:id/vods', requireAuth, requirePermission('war.view'), asHandler(async (req, res) => {
