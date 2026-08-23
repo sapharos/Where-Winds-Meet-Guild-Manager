@@ -214,8 +214,8 @@ Sólo reproduce un miembro con sesión y `war.view`.
 
 | | Qué | Estado |
 |---|---|---|
-| **1** | Infraestructura: NAS montado y visible desde el LXC 180 | ← empezar aquí |
-| **2** | Subida + aprobación + reproductor simple | |
+| **1** | Infraestructura: NAS montado y visible desde el LXC 180 | **hecha 2026-08-23** |
+| **2** | Subida + aprobación + reproductor simple | ← siguiente |
 | **3** | Recorte, OCR del cronómetro, retención automática | |
 | **4** | Multistream sincronizado | |
 | **5** | QuickSync, correlación de audio, respaldo a B2 | opcional |
@@ -426,6 +426,34 @@ docker run --rm -v /mnt/vods:/datos alpine sh -c 'touch /datos/prueba-docker && 
 ```
 
 Si eso escribe y borra sin quejarse, **la fase 1 está terminada**.
+
+---
+
+## Estado y referencia
+
+Montado y verificado el **2026-08-23**. Escritura secuencial medida desde el LXC
+180: **116 MB/s**, o sea saturando el gigabit (~125 MB/s teóricos). Sirve de
+referencia: el día que esto vaya lento, la mitad del diagnóstico es saber cómo
+iba cuando iba bien.
+
+En números útiles: un VOD de 2 GB se escribe en ~18 s, y el enlace da para ~100
+espectadores simultáneos a 8 Mbps antes de saturarse — muy por encima de lo que
+un gremio de cien personas hará nunca a la vez.
+
+## Aviso para la fase 2: los contenedores tienen que ir como root
+
+El montaje es `0770` y pertenece a `root` dentro del 180. **Un contenedor que
+corra como usuario no privilegiado no podrá escribir**, y la imagen oficial de
+tusd hace justo eso (corre como el usuario `tusd`, UID 1000).
+
+La solución es `user: "0:0"` en el compose de los servicios que tocan
+`/mnt/vods`, no aflojar los permisos del montaje. Y no es la concesión que
+parece: el 180 es un LXC **no privilegiado**, así que su root ya es un usuario
+sin privilegios en el host (UID 100000). No hay escalada que ganar ahí.
+
+Síntoma si se olvida: `permission denied` al escribir, con el montaje
+funcionando perfectamente desde la consola del contenedor — que es justo la
+combinación que más despista.
 
 ---
 
