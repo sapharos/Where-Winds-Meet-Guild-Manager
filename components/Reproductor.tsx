@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import MarcaDeReloj from './MarcaDeReloj';
 import { enPalabras } from '../services/relojGuerra';
+import { agrupar } from '../services/marcas';
 
 /**
  * El reproductor de las grabaciones de guerra. Ver docs/VODS.md.
@@ -291,7 +292,19 @@ const Reproductor: React.FC<Props> = ({
   if (!src) return <p className="text-sm text-slate-400">Esta grabación ya no tiene vídeo.</p>;
 
   return (
-    <div className="space-y-3">
+    /*
+      En pantalla ancha, el vídeo a la izquierda y lo escrito a la derecha.
+      
+      Apilado, un 16:9 dejaba media pantalla vacía a los lados y la lista de
+      marcas empujaba el vídeo hacia arriba; aquí lo que se viene a mirar es la
+      imagen. La altura se topa en 70vh para que no haya que desplazarse para
+      ver los controles, y el vídeo se ajusta dentro sin recortarse.
+    */
+    // La columna lateral sólo a partir de `xl`. En `lg` le quitaba 320 px al
+    // vídeo y salía más pequeño que antes, que es lo contrario de lo que se
+    // pedía: por debajo de eso, la anchura entera es para la imagen.
+    <div className="xl:flex xl:items-start xl:gap-4">
+      <div className="space-y-3 xl:flex-1 xl:min-w-0">
       <div
         ref={caja}
         onMouseMove={despertar}
@@ -520,7 +533,10 @@ const Reproductor: React.FC<Props> = ({
       </div>
 
       {error && <p className="text-xs text-red-400">{error}</p>}
+      </div>
 
+      {/* La columna de al lado. En móvil vuelve a caer debajo, sin más. */}
+      <aside className="space-y-3 mt-3 xl:mt-0 xl:w-72 xl:shrink-0">
       <p className="text-[11px] text-slate-600">
         Espacio reproduce · ← → 5 s · J L 10 s · N P entre marcas · C comentar · M silencio · F pantalla completa
       </p>
@@ -605,13 +621,13 @@ const Reproductor: React.FC<Props> = ({
           ))}
         </ul>
       )}
+      </aside>
     </div>
   );
 };
 
 /**
- * La barra, con las marcas encima.
- *
+ * La barra, con las marcas encima. *
  * Es la razón de tener reproductor propio: los controles nativos no admiten
  * marcas, y pintar dónde están los momentos que alguien señaló convierte media
  * hora de arrastrar a ciegas en una lectura de un vistazo.
@@ -632,7 +648,26 @@ const Barra: React.FC<{
   const [encima, setEncima] = useState<number | null>(null);
   // El globo lleva SU posición además del texto: sin ella se pintaba encima de
   // la cabeza lectora y señalaba a un punto de la barra que no era el suyo.
-  const [globo, setGlobo] = useState<{ texto: string; segundo: number } | null>(null);
+  const [globo, setGlobo] = useState<{ texto: React.ReactNode; segundo: number } | null>(null);
+  const [ancho, setAncho] = useState(0);
+
+  // El ancho de la pista, para agrupar por solape real y no por una distancia
+  // en segundos elegida a ojo. Se vigila porque cambia al girar el teléfono,
+  // al entrar en pantalla completa y al arrastrar la ventana.
+  useEffect(() => {
+    const el = pista.current;
+    if (!el) return;
+    const medir = () => setAncho(el.getBoundingClientRect().width);
+    medir();
+    const ro = new ResizeObserver(medir);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const grupos = useMemo(
+    () => agrupar(marcas, duracion, ancho),
+    [marcas, duracion, ancho],
+  );
 
   const pct = (s: number) => (duracion ? Math.min(100, (s / duracion) * 100) : 0);
 
@@ -648,7 +683,10 @@ const Barra: React.FC<{
           está mirando. Arriba y no abajo, que abajo está la barra de controles. */}
       {(globo || encima !== null) && (
         <div
-          className="absolute -top-9 z-10 -translate-x-1/2 max-w-64 truncate rounded border border-slate-700 bg-slate-950 px-2 py-1 text-[11px] text-slate-200 shadow-1 pointer-events-none"
+          // `bottom-full` y no `-top-9`: un racimo de cinco marcas es una
+          // burbuja de cinco renglones, y con la altura fija los de arriba se
+          // salían por encima de la barra.
+          className="absolute bottom-full mb-2 z-10 -translate-x-1/2 w-max max-w-72 rounded border border-slate-700 bg-slate-950 px-2 py-1 text-[11px] text-slate-200 shadow-1 pointer-events-none"
           style={{ left: `${pct(globo ? globo.segundo : (encima ?? posicion))}%` }}
         >
           {globo ? globo.texto : mmss(encima ?? 0)}
@@ -691,42 +729,74 @@ const Barra: React.FC<{
           style={{ left: `${pct(posicion)}%` }}
         />
 
-        {marcas.map(({ marca, segundo }) => (
-          <button
-            key={marca.id}
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onSaltar(segundo);
-            }}
-            onMouseEnter={() => setGlobo({ texto: `${mmss(segundo)} · ${marca.texto}`, segundo })}
-            onMouseLeave={() => setGlobo(null)}
-            onFocus={() => setGlobo({ texto: `${mmss(segundo)} · ${marca.texto}`, segundo })}
-            onBlur={() => setGlobo(null)}
-            aria-label={`Ir a ${mmss(segundo)}: ${marca.texto}`}
-            style={{ left: `${pct(segundo)}%` }}
-            /*
-              El botón mide 20 px y el punto 10: el área de acierto es el doble
-              de lo que se ve, que con el dedo es la diferencia entre dar y no
-              dar.
-              
-              No llega a los 44 px de la casa, y es una excepción con motivo:
-              en 375 px de ancho, cuatro marcas de 44 px se solapan y tapan la
-              barra entera. Por eso lleva `tap-suelto` --la excepción declarada,
-              no supuesta (docs/DIRECCION_VISUAL.md)-- y por eso hay dos
-              caminos táctiles que sí miden: los botones de marca anterior y
-              siguiente, y la lista de abajo. Fallar el punto tampoco es grave:
-              la pista de debajo también salta, y deja cerca.
-            */
-            className="tap-suelto absolute h-5 w-5 -translate-x-1/2 flex items-center justify-center group/marca"
-          >
-            <span
-              className={`h-2.5 w-2.5 rounded-full border border-slate-950 transition-transform duration-micro group-hover/marca:scale-150 ${
-                marca.hito ? 'bg-sky-300' : 'bg-white'
-              }`}
-            />
-          </button>
-        ))}
+        {grupos.map(({ centro, miembros }) => {
+          const solo = miembros.length === 1 ? miembros[0].marca : null;
+          const hayHito = miembros.some((m) => m.marca.hito);
+          return (
+            <button
+              key={miembros[0].marca.id}
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onSaltar(centro);
+              }}
+              onMouseEnter={() =>
+                setGlobo({
+                  segundo: centro,
+                  texto: solo ? (
+                    `${mmss(centro)} · ${solo.texto}`
+                  ) : (
+                    // Apiladas y todas legibles. Antes, dos marcas juntas se
+                    // pintaban una encima de otra y sólo se veía la última: las
+                    // demás desaparecían sin decir que estaban.
+                    <span className="block">
+                      {miembros.map(({ marca, segundo }) => (
+                        <span key={marca.id} className="block truncate">
+                          <span className="text-amber-400 tabular-nums">{mmss(segundo)}</span>{' '}
+                          {marca.texto}
+                        </span>
+                      ))}
+                    </span>
+                  ),
+                })
+              }
+              onMouseLeave={() => setGlobo(null)}
+              onFocus={() => setGlobo({ segundo: centro, texto: `${mmss(centro)} · ${miembros.length} marcas` })}
+              onBlur={() => setGlobo(null)}
+              aria-label={
+                solo
+                  ? `Ir a ${mmss(centro)}: ${solo.texto}`
+                  : `Ir a ${mmss(centro)}: ${miembros.length} marcas juntas`
+              }
+              style={{ left: `${pct(centro)}%` }}
+              /*
+                El botón mide 20 px y el punto 10: el área de acierto es el
+                doble de lo que se ve, que con el dedo es la diferencia entre
+                dar y no dar.
+
+                No llega a los 44 px de la casa, y es una excepción con motivo:
+                en 375 px de ancho, cuatro marcas de 44 px se solapan y tapan la
+                barra entera. Por eso lleva `tap-suelto` --la excepción
+                declarada, no supuesta (docs/DIRECCION_VISUAL.md)-- y por eso
+                hay dos caminos táctiles que sí miden: los botones de marca
+                anterior y siguiente, y la lista de al lado. Fallar el punto
+                tampoco es grave: la pista de debajo también salta, y deja
+                cerca.
+              */
+              className="tap-suelto absolute h-5 w-5 -translate-x-1/2 flex items-center justify-center group/marca"
+            >
+              <span
+                className={`flex items-center justify-center rounded-full border-2 border-slate-950 text-[8px] font-bold leading-none transition-transform duration-micro group-hover/marca:scale-150 ${
+                  miembros.length > 1 ? 'h-3.5 w-3.5 text-slate-950' : 'h-3 w-3'
+                } ${hayHito ? 'bg-sky-300' : 'bg-white'}`}
+              >
+                {/* El número dice que hay más de una. Sin él, un racimo de
+                    cinco se lee como una sola marca. */}
+                {miembros.length > 1 ? miembros.length : ''}
+              </span>
+            </button>
+          );
+        })}
       </div>
     </div>
   );

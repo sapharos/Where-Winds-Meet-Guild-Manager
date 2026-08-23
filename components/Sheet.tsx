@@ -21,7 +21,7 @@ interface Props {
   title: string;
   subtitle?: React.ReactNode;
   /** Ancho máximo en escritorio. En móvil siempre ocupa todo. */
-  size?: 'sm' | 'md' | 'lg' | 'xl';
+  size?: 'sm' | 'md' | 'lg' | 'xl' | 'video';
   /** Va pegado al pie, fuera del área que hace scroll. */
   footer?: React.ReactNode;
   onClose: () => void;
@@ -33,6 +33,10 @@ const ANCHOS: Record<NonNullable<Props['size']>, string> = {
   md: 'sm:max-w-lg',
   lg: 'sm:max-w-3xl',
   xl: 'sm:max-w-5xl',
+  // Para el vídeo. Un 16:9 dentro de 5xl deja media pantalla vacía en un
+  // monitor ancho, y aquí lo que se mira es la imagen: cuanto más grande,
+  // mejor se ve quién estaba dónde.
+  video: 'sm:max-w-[min(96rem,95vw)]',
 };
 
 /** Lo que puede recibir el foco dentro de la hoja. */

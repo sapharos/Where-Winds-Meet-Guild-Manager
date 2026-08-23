@@ -32,6 +32,8 @@ interface WarRow {
   imported: boolean;
   participants: number;
   images: number;
+  /** Grabaciones publicadas y todavía con vídeo. Ver docs/VODS.md. */
+  vods: number;
 }
 
 interface Participant {
@@ -471,6 +473,22 @@ const WarHistory: React.FC<Props> = ({
                       {when(w.startedAt)} · {minutes(w.startedAt, w.endedAt)} · {w.participants} en campo
                       {w.images > 0 && ` · ${w.images} capturas`}
                     </p>
+                    {/*
+                      Que se pueda ver desde el listado cuáles tienen
+                      grabación: es la razón por la que alguien abre un acta
+                      vieja, y sin la pista hay que entrar en cada una a
+                      probar suerte. En ámbar y no en gris para que destaque
+                      entre los datos de siempre.
+                    */}
+                    {w.vods > 0 && (
+                      <p className="text-[11px] text-amber-400 mt-0.5 flex items-center gap-1.5">
+                        <i className="fa-solid fa-video text-[10px]" aria-hidden="true" />
+                        {w.vods === 1 ? '1 grabación' : `${w.vods} grabaciones`}
+                        {w.vods > 1 && (
+                          <span className="text-slate-500">· se pueden ver a la vez</span>
+                        )}
+                      </p>
+                    )}
                   </div>
                   <i className="fa-solid fa-chevron-right text-slate-600 text-xs shrink-0"></i>
                 </button>

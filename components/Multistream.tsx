@@ -310,7 +310,7 @@ const Multistream: React.FC<Props> = ({ vods, marcas, onClose }) => {
     <Sheet
       title="Mosaico"
       subtitle={`${vods.length} grabaciones de la misma guerra, cuadradas`}
-      size="xl"
+      size="video"
       onClose={onClose}
     >
       <div className="space-y-3">

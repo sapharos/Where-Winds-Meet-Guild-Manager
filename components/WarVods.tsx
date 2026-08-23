@@ -455,7 +455,7 @@ const WarVods: React.FC<Props> = ({
         <Sheet
           title={nombres[viendo.playerId] ?? viendo.playerId}
           subtitle="Grabación de esta guerra"
-          size="xl"
+          size="video"
           onClose={() => setViendo(null)}
         >
           <Reproductor

@@ -343,7 +343,13 @@ export async function listWars() {
     `SELECT w.id, w.name, w.started_at AS "startedAt", w.ended_at AS "endedAt",
             w.outcome, w.notes, w.match_type AS "matchType", w.imported,
             (SELECT count(*)::int FROM war_participants p WHERE p.war_id = w.id) AS "participants",
-            (SELECT count(*)::int FROM war_images i WHERE i.war_id = w.id) AS "images"
+            (SELECT count(*)::int FROM war_images i WHERE i.war_id = w.id) AS "images",
+            -- Cuántas grabaciones se pueden ver de esta guerra. Sólo las
+            -- publicadas y con vídeo todavía: una rechazada o caducada tiene
+            -- fila pero no hay nada que mirar, y anunciarla sería mandar a
+            -- alguien a un acta vacía.
+            (SELECT count(*)::int FROM war_vods v
+              WHERE v.war_id = w.id AND v.estado = 'aprobado' AND v.ruta IS NOT NULL) AS "vods"
        FROM wars w WHERE w.guild_id = $1 ORDER BY w.started_at DESC LIMIT 100`,
     [GUILD_ID],
   );

@@ -609,7 +609,12 @@ const GET: [RegExp, Ruta][] = [
     /^\/war\/usual-lanes$/,
     () => store.deployments.map((d) => ({ playerId: d.playerId, side: d.side, lane: d.lane, games: 3 })),
   ],
-  [/^\/war\/wars$/, () => fake.warRows],
+  // Con el recuento de grabaciones, igual que el servidor de verdad.
+  [/^\/war\/wars$/, () =>
+    fake.warRows.map((w) => ({
+      ...w,
+      vods: store.vods.filter((v) => v.warId === w.id && v.estado === 'aprobado' && v.calidades.length).length,
+    }))],
   [/^\/war\/wars\/([^/]+)$/, (m) => detalleConAnexos(m[1])],
   [/^\/war\/wars\/([^/]+)\/vods$/, (m) => store.vods.filter((v) => v.warId === m[1])],
   [/^\/war\/wars\/([^/]+)\/marcas$/, (m) =>
