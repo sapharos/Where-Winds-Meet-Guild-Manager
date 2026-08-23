@@ -337,14 +337,29 @@ arranque si el NAS está apagado.
 **Comprobación:**
 
 ```bash
-umount /mnt/vods && mount -a && mount | grep vods
+umount /mnt/vods && mount -a && ls -n /mnt/vods
 ```
 
-Tiene que volver a aparecer montado.
+Tiene que volver a salir el fichero de prueba con `100000 100000`. `mount -a`
+avisa de que systemd sigue con la versión vieja de `fstab`; el montaje ya
+funciona, pero conviene ponerlo al día:
+
+```bash
+systemctl daemon-reload
+```
 
 ## 1.5 — Entregarlo al LXC 180
 
-Todavía en el **host**:
+Todavía en el **host**. Primero, comprobar que `mp0` está libre — asignarlo
+encima de un punto de montaje existente machacaría la configuración de algo que
+ya funciona:
+
+```bash
+pct config 180 | grep -E '^mp[0-9]'
+```
+
+Si no devuelve nada, adelante. **Esto reinicia el contenedor 180**, y ahí dentro
+está la web, la API y el bot de Discord: hazlo cuando no haya guerra en marcha.
 
 ```bash
 pct set 180 -mp0 /mnt/vods,mp=/mnt/vods
@@ -392,8 +407,11 @@ llenar el bootdisk.
 Prueba de velocidad real, escribiendo 1 GB:
 
 ```bash
-dd if=/dev/zero of=/mnt/vods/tmp/prueba.bin bs=1M count=1024 oflag=direct && rm /mnt/vods/tmp/prueba.bin
+dd if=/dev/zero of=/mnt/vods/tmp/prueba.bin bs=1M count=1024 conv=fsync && rm /mnt/vods/tmp/prueba.bin
 ```
+
+(`conv=fsync` y no `oflag=direct`: CIFS rechaza O_DIRECT salvo que se monte con
+`cache=none`, y aquí no interesa.)
 
 Anota la cifra. Por debajo de ~40 MB/s conviene revisar antes de seguir; el DS713+
 debería acercarse a saturar su gigabit en escritura secuencial.
