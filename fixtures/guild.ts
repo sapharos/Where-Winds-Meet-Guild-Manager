@@ -248,6 +248,7 @@ export const warRows = wars.map((w) => ({
   outcome: w.outcome,
   imported: 'imported' in w && w.imported === true,
   participants: w.count,
+  // Una sola fuente para el recuento: el detalle la lee de aquí.
   images: w.id === 'w-1' ? 3 : 0,
 }));
 
@@ -258,7 +259,29 @@ export const warDetail = (id: string) => {
   return {
     ...w,
     imported: cargada,
-    images: [],
+    /*
+      Las mismas que anuncia el listado, no una lista vacía.
+
+      El listado decía «3 capturas» y el acta abría diciendo «sin capturas»: el
+      banco se contradecía consigo mismo, y un banco que miente sobre un estado
+      es peor que no tenerlo -- se toman decisiones de interfaz mirando algo que
+      no pasa en la aplicación de verdad.
+
+      Un SVG diminuto y no un JPEG de pega: lo que hay que poder mirar es la
+      rejilla, el botón de borrar y el paso a tarjetas en móvil, no la foto.
+    */
+    images: Array.from({ length: warRows.find((r) => r.id === w.id)?.images ?? 0 }, (_, at) => ({
+      id: `img-${w.id}-${at + 1}`,
+      image:
+        'data:image/svg+xml;utf8,' +
+        encodeURIComponent(
+          `<svg xmlns="http://www.w3.org/2000/svg" width="480" height="270">` +
+            `<rect width="480" height="270" fill="#1c2b27"/>` +
+            `<text x="240" y="145" fill="#8aa89d" font-family="sans-serif" font-size="22" text-anchor="middle">Resultados ${at + 1}</text>` +
+          `</svg>`,
+        ),
+      caption: null,
+    })),
     participants: participantsFor(w.count, w.seed, cargada),
   };
 };

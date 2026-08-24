@@ -584,11 +584,53 @@ const WarHistory: React.FC<Props> = ({
                 </div>
               )}
 
-              <section>
+
+              {/*
+                Las grabaciones van LAS PRIMERAS.
+
+                Antes abrían las capturas de resultados y no es lo que se viene
+                a ver: una captura es el material de trabajo de quien apunta las
+                cifras --se mira una vez, se transcribe y no se vuelve-- y una
+                grabación es lo que alguien abre el acta para mirar. Quien
+                anota sigue teniendo las suyas a una pulsación, plegadas justo
+                debajo.
+              */}
+              <WarVods
+                warId={detail.id}
+                nombres={Object.fromEntries(players.map((p) => [p.id, p.name]))}
+                miPlayerId={miPlayerId}
+                miUserId={miUserId}
+                puedeEditar={canEdit}
+                puedeSubir={canUploadVod}
+                puedeAprobar={canApproveVod}
+                puedeFijar={canPinVod}
+              />
+
+              {/*
+                Plegada, y con `<details>` en vez de estado propio por lo mismo
+                que Seccion.tsx: el navegador ya sabe hacerlo con el teclado, lo
+                anuncia un lector de pantalla y el buscador del navegador
+                encuentra texto dentro aunque esté cerrada.
+
+                Los botones van DENTRO y no en el tirador: pulsar cualquier cosa
+                de un `<summary>` abre y cierra la sección, así que «Subir
+                imagen» la habría cerrado en la cara de quien iba a usarla.
+              */}
+              <details className="group/cap">
+                <summary className="list-none cursor-pointer min-h-tap flex items-center gap-2 text-sm font-bold text-slate-300">
+                  <i className="fa-solid fa-chevron-right text-[10px] text-slate-600 transition-transform duration-micro group-open/cap:rotate-90" aria-hidden="true" />
+                  Resultados
+                  <span className="font-normal text-slate-500">
+                    {detail.images.length === 0
+                      ? 'sin capturas'
+                      : detail.images.length === 1
+                        ? '1 captura'
+                        : `${detail.images.length} capturas`}
+                  </span>
+                </summary>
+
+                <div className="mt-2">
                 <div className="flex items-center justify-between gap-3 flex-wrap mb-2">
-                  <h3 className="text-sm font-bold text-slate-300">
-                    Resultados ({detail.images.length})
-                  </h3>
                   {canEdit && (
                     <div className="flex items-center gap-4">
                       {detail.images.length > 0 && (
@@ -655,24 +697,8 @@ const WarHistory: React.FC<Props> = ({
                     ))}
                   </div>
                 )}
-              </section>
-
-              {/*
-                Las grabaciones van entre las capturas y los participantes, y no
-                al final: son la otra cosa que el acta *muestra* de la guerra, y
-                quien abre un acta a mirar cómo fue las quiere junto a los
-                pantallazos, no después de una tabla de treinta filas.
-              */}
-              <WarVods
-                warId={detail.id}
-                nombres={Object.fromEntries(players.map((p) => [p.id, p.name]))}
-                miPlayerId={miPlayerId}
-                miUserId={miUserId}
-                puedeEditar={canEdit}
-                puedeSubir={canUploadVod}
-                puedeAprobar={canApproveVod}
-                puedeFijar={canPinVod}
-              />
+                </div>
+              </details>
 
               <section>
                 <h3 className="text-sm font-bold text-slate-300 mb-2">
