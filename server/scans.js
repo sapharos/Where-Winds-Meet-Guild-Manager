@@ -61,6 +61,36 @@ function similarity(a, b) {
 const SUGGEST_FLOOR = 0.6;
 
 /**
+ * Enseñarle que un nombre leído es una persona concreta.
+ *
+ * Existe suelto --y no sólo dentro de `commitScan`-- porque el momento en que
+ * alguien descubre que el lector no reconoce a un compañero es importando una
+ * guerra, no barriendo escaneos. Aprenderlo ahí arregla el problema **para
+ * siempre**: la próxima captura con ese mismo nombre se empareja sola, y de
+ * paso también en los escaneos, que usan la misma tabla.
+ *
+ * Se guarda tal cual lo leyó el lector, sin normalizar, porque la búsqueda ya
+ * pasa por `fold()` en las dos puntas.
+ */
+export async function aprenderAlias(alias, playerId) {
+  const limpio = String(alias ?? '').trim();
+  if (!limpio || !playerId) return null;
+
+  const { rows } = await pool.query(
+    `SELECT id, name FROM players WHERE guild_id = $1 AND id = $2`,
+    [GUILD_ID, playerId],
+  );
+  if (!rows.length) return null;
+
+  await pool.query(
+    `INSERT INTO player_aliases (guild_id, alias, player_id) VALUES ($1, $2, $3)
+       ON CONFLICT (guild_id, alias) DO UPDATE SET player_id = EXCLUDED.player_id`,
+    [GUILD_ID, limpio, playerId],
+  );
+  return { alias: limpio, playerId, playerName: rows[0].name };
+}
+
+/**
  * Work out who each scanned name belongs to. An alias settles it outright;
  * otherwise the roster is ranked by similarity and left for a person to
  * confirm, which is the only step that ever needs one.

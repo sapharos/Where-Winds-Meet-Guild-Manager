@@ -85,6 +85,16 @@ const ImportWar: React.FC<Props> = ({ players, onClose, onImported }) => {
   const [name, setName] = useState('');
   const [when, setWhen] = useState(() => localInput(new Date()));
   const [matchType, setMatchType] = useState<WarMatchType>('league');
+  /**
+   * Lo que el lector leyó pero no supo a quién atribuir.
+   *
+   * Antes se tiraban: un `.filter((r) => r.playerId)` y con la fila se iban
+   * también sus cifras, sin decir nada. Quien importaba veía veintiocho
+   * personas de treinta y no tenía forma de saber que faltaban dos, ni menos
+   * de recuperarlas -- el «añadir a mano» que ya existía las mete con las
+   * cifras en blanco, que es justo lo que no sirve.
+   */
+  const [pendientes, setPendientes] = useState<{ read: string; figures: Record<string, number> }[]>([]);
   const [outcome, setOutcome] = useState<WarOutcome | null>(null);
 
   // Las capturas, sin más: no se les pregunta de qué bando son porque la
@@ -181,8 +191,50 @@ const ImportWar: React.FC<Props> = ({ players, onClose, onImported }) => {
           return { playerId, side, why, lane: usual.get(playerId)?.lane ?? null, stats: r.figures };
         }),
     );
+    // Lo que no se pudo emparejar se aparta, no se tira: las cifras están
+    // leídas y son buenas, lo único que falta es de quién son.
+    setPendientes(
+      found
+        .filter((r) => !r.playerId && r.read.trim())
+        .map((r) => ({ read: r.read.trim(), figures: r.figures })),
+    );
     setReading(false);
     setStep('filas');
+  };
+
+  /**
+   * «Esta fila es esta persona.» Con sus cifras, que es el punto.
+   *
+   * Y si se pide, se le enseña al lector: se guarda el nombre leído como alias
+   * del miembro, así que la próxima captura con ese mismo nombre --y los
+   * escaneos, que comparten la tabla-- lo emparejan solos. Arreglarlo una vez
+   * en vez de cada semana.
+   */
+  const identificar = async (read: string, figures: Record<string, number>, playerId: string, recordar: boolean) => {
+    if (!playerId) return;
+    setPendientes((prev) => prev.filter((p) => p.read !== read));
+
+    setRows((prev) => {
+      // Si ya estaba en la lista --añadido a mano antes, con las cifras en
+      // blanco-- se le rellenan en vez de duplicar la fila.
+      const ya = prev.find((r) => r.playerId === playerId);
+      if (ya) {
+        return prev.map((r) =>
+          r.playerId === playerId ? { ...r, stats: { ...r.stats, ...figures }, ...sideOf(playerId, figures) } : r,
+        );
+      }
+      const { side, why } = sideOf(playerId, figures);
+      return [...prev, { playerId, side, why, lane: usual.get(playerId)?.lane ?? null, stats: figures }];
+    });
+
+    if (recordar) {
+      // Que falle enseñar el alias no puede costar la fila, que es lo que de
+      // verdad se venía a recuperar.
+      await api(`/players/${playerId}/alias`, {
+        method: 'POST',
+        body: JSON.stringify({ alias: read }),
+      }).catch(() => {});
+    }
   };
 
   const setLane = (playerId: string, lane: WarLane | null) =>
@@ -450,6 +502,14 @@ const ImportWar: React.FC<Props> = ({ players, onClose, onImported }) => {
           <span className="text-[11px] text-slate-500">
             {rows.length} en campo
             {missing > 0 && ` · ${missing} sin línea`}
+            {/*
+              Y aquí también, no sólo arriba: se guarda desde el pie, y guardar
+              con filas sin identificar pierde sus cifras para siempre. Que se
+              vea justo al lado del botón que las pierde.
+            */}
+            {pendientes.length > 0 && (
+              <span className="text-amber-400"> · {pendientes.length} sin identificar</span>
+            )}
           </span>
           <div className="flex-1" />
           <button
@@ -622,6 +682,41 @@ const ImportWar: React.FC<Props> = ({ players, onClose, onImported }) => {
           ))}
         </div>
 
+        {/*
+          Lo que se leyó pero no se supo de quién era.
+
+          Va ARRIBA de todo y en ámbar porque es lo único de esta pantalla que
+          se pierde si nadie lo mira: sus cifras están leídas y son buenas, y en
+          cuanto se guarde la guerra sin ellas ya no hay forma de recuperarlas
+          salvo volver a empezar con las mismas capturas.
+        */}
+        {pendientes.length > 0 && (
+          <section className="rounded-lg border border-amber-900/60 bg-amber-950/20 p-3 space-y-2">
+            <h4 className="text-xs font-semibold text-amber-400">
+              {pendientes.length === 1
+                ? 'Una fila leída sin identificar'
+                : `${pendientes.length} filas leídas sin identificar`}
+              <span className="block font-normal text-[11px] text-slate-400 mt-0.5">
+                El lector sacó sus cifras pero no reconoció el nombre. Di de quién es y se
+                añaden con todo lo leído; si marcas «recordar», la próxima captura lo
+                emparejará sola.
+              </span>
+            </h4>
+
+            {pendientes.map((p) => (
+              <FilaSinIdentificar
+                key={p.read}
+                pendiente={p}
+                libres={free}
+                onIdentificar={(playerId, recordar) =>
+                  void identificar(p.read, p.figures, playerId, recordar)
+                }
+                onDescartar={() => setPendientes((prev) => prev.filter((x) => x.read !== p.read))}
+              />
+            ))}
+          </section>
+        )}
+
         {/* A quien la lectura no vio -- tapado por un icono, o de una página
             que ya nadie tiene -- se le añade a mano, sin cifras. Estuvo. */}
         <label className="block pt-2 border-t border-slate-800">
@@ -644,6 +739,77 @@ const ImportWar: React.FC<Props> = ({ players, onClose, onImported }) => {
         </label>
       </div>
     </Sheet>
+  );
+};
+
+/**
+ * Una fila leída de la que no se sabe quién es.
+ *
+ * Enseña lo que se leyó --el nombre tal cual salió, y dos cifras para poder
+ * reconocerla-- y pide a quién asignarla. Las cifras importan: con treinta
+ * filas, «Subaru» y «Subâru» sólo se distinguen por lo que hicieron.
+ */
+const FilaSinIdentificar: React.FC<{
+  pendiente: { read: string; figures: Record<string, number> };
+  libres: Player[];
+  onIdentificar: (playerId: string, recordar: boolean) => void;
+  onDescartar: () => void;
+}> = ({ pendiente, libres, onIdentificar, onDescartar }) => {
+  // Marcado de entrada: casi siempre es un nombre que el lector va a volver a
+  // leer igual la semana que viene, así que lo normal es querer recordarlo.
+  const [recordar, setRecordar] = useState(true);
+
+  const pistas = FIGURES.filter((f) => (pendiente.figures[f.key] ?? 0) > 0)
+    .slice(0, 3)
+    .map((f) => `${f.label} ${pendiente.figures[f.key].toLocaleString('es')}`)
+    .join(' · ');
+
+  return (
+    <div className="rounded border border-slate-800 bg-slate-900/60 p-2 space-y-2">
+      <div className="min-w-0">
+        <p className="text-sm text-slate-200 truncate">
+          «{pendiente.read}»
+        </p>
+        <p className="text-[11px] text-slate-500 truncate">{pistas || 'sin cifras legibles'}</p>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <select
+          defaultValue=""
+          onChange={(e) => e.target.value && onIdentificar(e.target.value, recordar)}
+          aria-label={`Quién es «${pendiente.read}»`}
+          className="flex-1 min-w-40 min-h-tap bg-slate-950 border border-slate-800 rounded px-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
+        >
+          <option value="">— ¿quién es? —</option>
+          {libres.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+              {p.isActive === false ? ' (ya no está)' : ''}
+            </option>
+          ))}
+        </select>
+
+        <label className="flex items-center gap-1.5 text-[11px] text-slate-400">
+          <input
+            type="checkbox"
+            checked={recordar}
+            onChange={(e) => setRecordar(e.target.checked)}
+            className="tap-suelto"
+          />
+          Recordar este nombre
+        </label>
+
+        {/* Descartar existe porque no todo lo que sale en la captura es del
+            gremio: la tabla lista a los treinta del rival también. */}
+        <button
+          type="button"
+          onClick={onDescartar}
+          className="tap-suelto text-[11px] text-slate-500 hover:text-slate-300 underline"
+        >
+          No es del gremio
+        </button>
+      </div>
+    </div>
   );
 };
 

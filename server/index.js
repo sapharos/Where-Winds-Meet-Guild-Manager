@@ -3,7 +3,7 @@ import cookieParser from 'cookie-parser';
 import express from 'express';
 import { pool, migrate, replaceAll, replacePlayers, GUILD_ID } from './db.js';
 import { ROLES, PERMISSIONS } from './permissions.js';
-import { matchEntries, commitScan, historyFor, scanSummary } from './scans.js';
+import { matchEntries, commitScan, historyFor, scanSummary, aprenderAlias } from './scans.js';
 import { listBuilds, saveBuilds, mayEditBuilds } from './builds.js';
 import {
   listGear,
@@ -1104,6 +1104,20 @@ app.post('/api/scans/commit', requireAuth, requirePermission('roster.edit'), asH
     return res.status(400).json({ error: 'no entry names a player to store against' });
   }
   res.json(await commitScan({ scannedAt: req.body?.scannedAt, entries }));
+}));
+
+/**
+ * «Este nombre leído es esta persona.»
+ *
+ * Pide `war.edit` y no `roster.edit` porque el sitio donde hace falta es el
+ * importador de guerras: quien reconstruye una guerra desde su captura ya está
+ * autorizado a atribuirle cifras a un miembro, y esto es la misma decisión
+ * escrita para que no haya que repetirla en cada importación.
+ */
+app.post('/api/players/:id/alias', requireAuth, requirePermission('war.edit'), asHandler(async (req, res) => {
+  const hecho = await aprenderAlias(req.body?.alias, req.params.id);
+  if (!hecho) return res.status(400).json({ error: 'alias y jugador válidos son obligatorios' });
+  res.json(hecho);
 }));
 
 app.get('/api/scans', requireAuth, asHandler(async (_req, res) => {
