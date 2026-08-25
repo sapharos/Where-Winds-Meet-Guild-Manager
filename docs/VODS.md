@@ -146,6 +146,29 @@ coinciden, se marca como confianza alta y no se pregunta nada.
 
 **4. Arrastrar para alinear** — último recurso, contra otro VOD ya alineado.
 
+#### Corregirla después: «Aplicar» ES guardar
+
+El mismo formulario (`MarcaDeReloj`) sale en dos sitios: al subir y, después, en
+el reproductor bajo «corregir». **No hay botón de guardar aparte, y no debe
+haberlo**: en el reproductor, «Aplicar» manda el `PUT /api/vods/:id/sync` en el
+acto. Un segundo paso para confirmar lo que ya se ve escrito arriba sólo añadiría
+otra forma de irse sin haberlo hecho.
+
+Lo que sí faltaba era la respuesta, y era la pregunta que se hacía todo el mundo:
+aplicar cerraba el panel y ya. Si el valor nuevo se parecía al viejo no cambiaba
+nada en pantalla, y **un rechazo del servidor se veía exactamente igual que un
+acierto** — se llamaba y se olvidaba, así que un 403 dejaba a quien lo había
+corregido convencido de haberlo arreglado. Ahora el reproductor espera la
+respuesta: el panel sólo se cierra si de verdad se guardó, y en cualquier caso se
+dice qué pasó.
+
+El formulario además **enseña el resultado antes de pulsar**: «Con el vídeo en
+0:00, esta grabación empieza en el minuto 4:13 de la guerra». Es lo único que lo
+hace comprobable, porque el número que se guarda no es ninguna de las dos cifras
+que se escriben sino la resta de ambas — y porque es donde se ve, sin haber
+guardado nada todavía, el error de media hora del interruptor de fase: `0:47` da
+4:13 en preparación y **34:13** en partida.
+
 Un VOD sin confirmar se marca **«sincronía sin verificar»** para que el
 multistream avise en vez de mentir.
 

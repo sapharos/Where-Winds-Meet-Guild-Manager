@@ -41,8 +41,13 @@ interface Props {
    * puede. Existe porque sin esto una grabación que subió antes de que hubiera
    * OCR --o a la que el OCR le falló-- se quedaba sin arreglo posible y fuera
    * del multistream para siempre.
+   *
+   * Devuelve una promesa para poder decir si SE GUARDÓ. Antes se llamaba y se
+   * olvidaba: el panel se cerraba en el acto, así que un fallo del servidor
+   * --sin permiso, sin red-- se veía exactamente igual que un acierto, y quien
+   * lo había corregido se iba convencido de haberlo arreglado.
    */
-  onSincronizar?: (offsetMs: number) => void;
+  onSincronizar?: (offsetMs: number) => void | Promise<void>;
 }
 
 const HLSJS = 'https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js';
@@ -66,6 +71,8 @@ const Reproductor: React.FC<Props> = ({
   const [hito, setHito] = useState(false);
   const [escribiendo, setEscribiendo] = useState(false);
   const [ajustando, setAjustando] = useState(false);
+  /** Qué pasó con lo último que se mandó guardar. Ver `guardarSincronia`. */
+  const [sincronia, setSincronia] = useState<{ ok: boolean; texto: string } | null>(null);
   const [cargado, setCargado] = useState(0);
   const [pantallaCompleta, setPantallaCompleta] = useState(false);
   const [mandosVisibles, setMandosVisibles] = useState(true);
@@ -117,6 +124,43 @@ const Reproductor: React.FC<Props> = ({
     if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
     else void caja.current?.requestFullscreen?.().catch(() => {});
   }, []);
+
+  /**
+   * Guardar la sincronía y contar qué pasó.
+   *
+   * No hay botón de guardar aparte a propósito -- aplicar ES guardar, y meter
+   * un segundo paso para confirmar lo que ya se ve escrito arriba sólo añade
+   * una forma más de irse sin haberlo hecho. Lo que faltaba no era el paso,
+   * era la respuesta.
+   *
+   * El panel se cierra sólo si de verdad se guardó. Cerrarlo antes de saberlo
+   * --que es lo que hacía-- convertía un 403 en un éxito aparente.
+   */
+  const guardarSincronia = useCallback(
+    async (ms: number) => {
+      if (!onSincronizar) return;
+      setSincronia(null);
+      try {
+        await onSincronizar(ms);
+        setAjustando(false);
+        setSincronia({ ok: true, texto: `Guardado: ${enPalabras(ms)}.` });
+      } catch (err) {
+        setSincronia({
+          ok: false,
+          texto: `No se pudo guardar: ${err instanceof Error ? err.message : 'lo rechazó el servidor'}. Vuelve a intentarlo.`,
+        });
+      }
+    },
+    [onSincronizar],
+  );
+
+  // El acuse se borra solo. Un «Guardado» que se queda para siempre deja de
+  // leerse como «acaba de pasar» y pasa a leerse como una etiqueta más.
+  useEffect(() => {
+    if (!sincronia?.ok) return;
+    const t = setTimeout(() => setSincronia(null), 6000);
+    return () => clearTimeout(t);
+  }, [sincronia]);
 
   // --- Movimiento -----------------------------------------------------------
 
@@ -557,7 +601,7 @@ const Reproductor: React.FC<Props> = ({
             puede llevar marcas ni entrar en un mosaico.
           </p>
           {onSincronizar ? (
-            <MarcaDeReloj posicionS={posicion} onAplicar={onSincronizar} />
+            <MarcaDeReloj posicionS={posicion} onAplicar={guardarSincronia} />
           ) : (
             <p className="text-[11px] text-slate-500">
               Alguien que pueda editar la guerra tiene que sincronizarla.
@@ -582,14 +626,30 @@ const Reproductor: React.FC<Props> = ({
 
       {ajustando && onSincronizar && offsetMs !== null && (
         <div className="rounded-lg border border-slate-800 p-3">
-          <MarcaDeReloj
-            posicionS={posicion}
-            onAplicar={(ms) => {
-              onSincronizar(ms);
-              setAjustando(false);
-            }}
-          />
+          <MarcaDeReloj posicionS={posicion} onAplicar={guardarSincronia} />
         </div>
+      )}
+
+      {/*
+        Que se ha guardado, dicho. No había ninguna señal: aplicar cerraba el
+        panel y ya, y si el valor nuevo se parecía al viejo no cambiaba nada en
+        pantalla. La pregunta que se hacía todo el mundo -- «¿dónde guardo
+        esto?» -- no era sobre un botón que faltara, sino sobre una confirmación
+        que faltaba.
+      */}
+      {sincronia && (
+        <p
+          role="status"
+          className={`text-[11px] flex items-start gap-1.5 ${
+            sincronia.ok ? 'text-emerald-400' : 'text-red-400'
+          }`}
+        >
+          <i
+            className={`fa-solid ${sincronia.ok ? 'fa-check' : 'fa-triangle-exclamation'} mt-0.5 shrink-0`}
+            aria-hidden="true"
+          />
+          <span>{sincronia.texto}</span>
+        </p>
       )}
 
       {/* --- Lo marcado --- */}

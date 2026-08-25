@@ -629,9 +629,10 @@ const WarVods: React.FC<Props> = ({
             // servidor lo vuelve a comprobar: esto sólo decide si se ve el
             // botón.
             puedeBorrar={(m) => m.autorId === miUserId || puedeEditar}
-            onSincronizar={
-              puedeEditar ? (ms) => void sincronizar(viendo.id, ms) : undefined
-            }
+            // Sin `void`: el reproductor necesita esperar la respuesta para
+            // poder decir si se guardó, y un fallo tiene que llegarle en vez de
+            // morir en un rechazo sin dueño.
+            onSincronizar={puedeEditar ? (ms) => sincronizar(viendo.id, ms) : undefined}
           />
         </Sheet>
       )}
