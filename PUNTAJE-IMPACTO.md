@@ -95,6 +95,19 @@ El total más alto en defensa esa noche fue de **Ryu影**, que pasa a valer 100.
 
 Ninguna casilla pregunta si Subâru "debía" curar. Cada una mide lo que hizo, contra lo mejor que se hizo esa noche en esa misma cosa.
 
+## Qué enseñan las barras del desglose
+
+En *Mi perfil → Mis guerras*, al abrir una guerra, cada eje sale con dos cifras. Las dos se pueden comprobar a mano contra la tabla de participantes que está justo debajo:
+
+- **% del mejor** — tu cifra dividida entre la del primero de esa columna. Es la que gobierna el largo de la barra, porque llega a 100 y por tanto se ve.
+- **% del grupo** — tu cifra dividida entre la suma de toda la guerra. Es la que contesta *cuánto de la noche pasó por mí*, y en una guerra de treinta se mueve entre el 2 y el 8 %, que como barra no se distinguiría de cero. Por eso va en cifra y no en barra.
+
+**Ninguna de las dos es la columna "Curvado" del ejemplo de arriba**, y es a propósito. Ese valor es un intermedio del cálculo: está elevado a 0,7 y medido contra la holgura del conjunto de armas, así que sale bastante por encima de la división cruda — el 49 % de daño de Subâru se lee 61 % una vez curvado. Enseñarlo como porcentaje era el error que tenía la pantalla: el número no cuadraba con la tabla de abajo ni con ninguna otra cosa que se pudiera señalar. El resultado de esa cuenta ya está arriba, y es el puntaje.
+
+La única fila donde el reparto no sale de sumar la columna entera es **Daño de asedio**, por lo dicho más arriba: la defensa se pone en cero, así que tanto el mejor como el total se calculan sólo entre quien atacó. Si alguien en defensa tiene una cifra anotada ahí, se ve en la tabla pero no cuenta.
+
+El bot de Discord enseña lo mismo en `/impacto`, bajo *Dónde pesas*, promediado sobre todas tus guerras.
+
 ## Por qué no lee el rol asignado
 
 Nada en el cálculo consulta el rol del roster. Es deliberado: un rol es una etiqueta que alguien escribió antes de la guerra, y la guerra la juega la build que de verdad se llevó puesta.

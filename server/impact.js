@@ -45,8 +45,15 @@
  * @property {string} name
  * @property {number} score Nought to a hundred, where a hundred is the best of
  *   that war.
- * @property {Record<string, number>} parts Each axis as a share of the best in
- *   that war, for showing the working.
+ * @property {Record<string, number>} parts Each axis bent by CURVE and measured
+ *   against whatever the weapons carried were asked for. This is what the score
+ *   is built from -- an internal, not a figure to put on screen: it is neither
+ *   reproducible from the results table nor a percentage of anything a reader
+ *   can point at.
+ * @property {Record<string, number>} share Each axis as a plain share of the
+ *   best in that war, 0 to 1. Divide your row by the top row and you get this.
+ * @property {Record<string, number>} pool Each axis as a share of everything
+ *   the war produced on it, 0 to 1. These add up to 1 across the whole war.
  */
 
 /**
@@ -217,24 +224,48 @@ export function impactOf(rows) {
 
   /** @type {Record<string, number>} */
   const best = {};
+  /**
+   * Everything the war produced on each axis.
+   *
+   * Only ever shown, never scored: a share of the guild's total falls as the
+   * guild grows, so scoring on it would mean a full raid punishing everyone in
+   * it. What it answers is the other question -- not «how close was I to the
+   * best» but «how much of the night went through me» -- and the two together
+   * are what make a bar mean something.
+   */
+  /** @type {Record<string, number>} */
+  const pooled = {};
   for (const { key } of WEIGHTS) {
     best[key] = Math.max(...measured.map(({ axis }) => axis[key]), 0);
+    pooled[key] = measured.reduce((n, { axis }) => n + axis[key], 0);
   }
 
   const raw = measured.map(({ row, axis }) => {
     /** @type {Record<string, number>} */
     const parts = {};
+    /** @type {Record<string, number>} */
+    const share = {};
+    /** @type {Record<string, number>} */
+    const pool = {};
     for (const { key, weight } of WEIGHTS) {
+      // The two figures a reader can check, kept deliberately clear of the
+      // scoring maths below. Neither is bent and neither knows about the
+      // weapon allowance, which is what makes them reproducible: divide your
+      // row by the top row and you get `share`; divide it by the column and
+      // you get `pool`.
+      share[key] = best[key] > 0 ? axis[key] / best[key] : 0;
+      pool[key] = pooled[key] > 0 ? axis[key] / pooled[key] : 0;
+
       // What the weapons carried are asked for, which is the whole of the
       // war's best unless the guild has said otherwise. Capped, because
       // beating your own allowance cannot be worth more than being the best
       // in the war outright.
       const target = best[key] * (weight > 0 ? (row.expects?.[key] ?? 1) : 1);
       // Nobody reached it, so nobody is measured against it.
-      const share = target > 0 ? Math.min(1, axis[key] / target) : 0;
+      const reached = target > 0 ? Math.min(1, axis[key] / target) : 0;
       // Only what you earn is bent. A penalty that got easier the larger it
       // grew would be no penalty at all.
-      parts[key] = weight > 0 ? Math.pow(share, CURVE) : share;
+      parts[key] = weight > 0 ? Math.pow(reached, CURVE) : reached;
     }
 
     // Shares are all settled before anything is added up, because the death
@@ -247,7 +278,7 @@ export function impactOf(rows) {
           ? weight * parts.deaths * (1 - DEATH_RELIEF * parts.taken)
           : weight * parts[key];
     }
-    return { row, parts, total };
+    return { row, parts, share, pool, total };
   });
 
   /** @type {Record<WarSide, number>} */
@@ -257,13 +288,15 @@ export function impactOf(rows) {
   };
 
   return raw
-    .map(({ row, parts, total }) => {
+    .map(({ row, parts, share, pool, total }) => {
       const top = topOf[row.side];
       return {
         playerId: row.playerId,
         name: row.name,
         score: top > 0 ? Math.round((total / top) * 100) : 0,
         parts,
+        share,
+        pool,
       };
     })
     .sort((a, b) => b.score - a.score);
@@ -392,7 +425,12 @@ export const MINIMO_PARA_RANKING = 3;
  * @property {number} mejor La mejor noche.
  * @property {number} victorias
  * @property {number} derrotas
- * @property {Record<string, number>} partes Media por eje, de 0 a 1.
+ * @property {Record<string, number>} partes Media por eje del valor curvado con
+ *   el que se puntúa, de 0 a 1. Interno: no se enseña.
+ * @property {Record<string, number>} partesMejor Media por eje de la cuota
+ *   cruda contra el mejor de cada guerra, de 0 a 1.
+ * @property {Record<string, number>} partesGrupo Media por eje de la cuota
+ *   sobre el total que produjo cada guerra, de 0 a 1.
  * @property {number | null} puesto Puesto en el gremio; null si no llega al mínimo.
  */
 
@@ -414,7 +452,7 @@ export const MINIMO_PARA_RANKING = 3;
  * @returns {{ tabla: Trayectoria[], guerras: number, minimo: number }}
  */
 export function trayectorias(puntuadas) {
-  /** @type {Map<string, Trayectoria & { suma: number, sumaPartes: Record<string, number> }>} */
+  /** @type {Map<string, Trayectoria & { suma: number, sumaPartes: Record<string, number>, sumaMejor: Record<string, number>, sumaGrupo: Record<string, number> }>} */
   const gente = new Map();
 
   for (const { war, ranked } of puntuadas) {
@@ -439,9 +477,13 @@ export function trayectorias(puntuadas) {
           victorias: 0,
           derrotas: 0,
           partes: {},
+          partesMejor: {},
+          partesGrupo: {},
           puesto: null,
           suma: 0,
           sumaPartes: {},
+          sumaMejor: {},
+          sumaGrupo: {},
         };
         gente.set(entrada.playerId, quien);
       }
@@ -453,6 +495,8 @@ export function trayectorias(puntuadas) {
       if (war.outcome === 'loss') quien.derrotas += 1;
       for (const { key } of WEIGHTS) {
         quien.sumaPartes[key] = (quien.sumaPartes[key] ?? 0) + (entrada.parts[key] ?? 0);
+        quien.sumaMejor[key] = (quien.sumaMejor[key] ?? 0) + (entrada.share?.[key] ?? 0);
+        quien.sumaGrupo[key] = (quien.sumaGrupo[key] ?? 0) + (entrada.pool?.[key] ?? 0);
       }
     }
   }
@@ -460,14 +504,31 @@ export function trayectorias(puntuadas) {
   const minimo = Math.min(MINIMO_PARA_RANKING, puntuadas.length || 1);
 
   const tabla = [...gente.values()]
-    .map(({ suma, sumaPartes, ...quien }) => {
+    .map(({ suma, sumaPartes, sumaMejor, sumaGrupo, ...quien }) => {
       /** @type {Record<string, number>} */
       const partes = {};
-      for (const { key } of WEIGHTS) partes[key] = (sumaPartes[key] ?? 0) / quien.guerras;
+      /** @type {Record<string, number>} */
+      const partesMejor = {};
+      /** @type {Record<string, number>} */
+      const partesGrupo = {};
+      for (const { key } of WEIGHTS) {
+        partes[key] = (sumaPartes[key] ?? 0) / quien.guerras;
+        partesMejor[key] = (sumaMejor[key] ?? 0) / quien.guerras;
+        // La media de las cuotas y no la cuota de las sumas, a propósito: quien
+        // fue a diez guerras no debe salir con diez veces la cuota de quien fue
+        // a una. Lo que se promedia es «cuánto de aquella noche fui yo».
+        partesGrupo[key] = (sumaGrupo[key] ?? 0) / quien.guerras;
+      }
       // Redondeada a un decimal y no a un entero: con treinta personas y una
       // escala de cien, los empates a entero son constantes y un empate en una
       // tabla ordenada se lee como un error de cálculo.
-      return { ...quien, partes, media: Math.round((suma / quien.guerras) * 10) / 10 };
+      return {
+        ...quien,
+        partes,
+        partesMejor,
+        partesGrupo,
+        media: Math.round((suma / quien.guerras) * 10) / 10,
+      };
     })
     .sort((a, b) => b.media - a.media || b.guerras - a.guerras || a.name.localeCompare(b.name, 'es'));
 

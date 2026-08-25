@@ -70,7 +70,8 @@ const MyWars: React.FC<Props> = ({ playerId, weaponSets }) => {
     // repetido salían dos "Mis guerras" seguidos.
     <section>
       <p className="text-[11px] text-slate-500 mb-4">
-        El impacto compara cada aporte con el mejor de esa misma guerra
+        El impacto compara cada aporte con el mejor de esa misma guerra. Cada eje se enseña de las
+        dos maneras: qué fracción del mejor alcanzaste y qué parte del total del gremio saliste tú.
       </p>
 
       {failed && (
@@ -160,23 +161,13 @@ const MyWars: React.FC<Props> = ({ playerId, weaponSets }) => {
                   {mine && (
                     <div className="flex gap-3 flex-wrap">
                       {WEIGHTS.filter((axis) => axis.weight > 0).map((axis) => (
-                        <div key={axis.key} className="flex-1 min-w-[110px]">
-                          <div className="flex justify-between text-[10px] text-slate-500 mb-1">
-                            <span>{axis.label}</span>
-                            <span className="tabular-nums">
-                              {Math.round((mine.parts[axis.key] ?? 0) * 100)}%
-                            </span>
-                          </div>
-                          <div className="h-1.5 rounded bg-slate-800 overflow-hidden">
-                            <div
-                              className="h-full rounded"
-                              style={{
-                                width: `${Math.min(100, (mine.parts[axis.key] ?? 0) * 100)}%`,
-                                backgroundColor: impactShade(mine.score),
-                              }}
-                            />
-                          </div>
-                        </div>
+                        <Eje
+                          key={axis.key}
+                          label={axis.label}
+                          mejor={mine.share?.[axis.key] ?? 0}
+                          grupo={mine.pool?.[axis.key] ?? 0}
+                          shade={impactShade(mine.score)}
+                        />
                       ))}
                     </div>
                   )}
@@ -191,6 +182,47 @@ const MyWars: React.FC<Props> = ({ playerId, weaponSets }) => {
     </section>
   );
 };
+
+const pct = (fraccion: number) => Math.round(Math.min(1, Math.max(0, fraccion)) * 100);
+
+/**
+ * Un eje del desglose, con las dos cifras que se pueden comprobar.
+ *
+ * Antes enseñaba `parts`, que es el valor con el que se puntúa: curvado a 0,7 y
+ * medido contra la holgura del conjunto de armas. Salía muy por encima de la
+ * división que cualquiera puede hacer a mano -- 49 % del mejor daño se leía
+ * 61 % -- y no cuadraba ni con la tabla de abajo ni con nada. Ese número no es
+ * un porcentaje de nada que se pueda señalar, así que no se enseña.
+ *
+ * Las dos que sí: la fracción del mejor de la noche, que es la que gobierna la
+ * barra porque llega a 100 y por tanto se ve, y la parte del total del gremio,
+ * que es la pregunta de verdad -- cuánto de la guerra pasó por ti -- pero que
+ * con treinta personas se mueve entre el 2 y el 8 % y como barra no se
+ * distinguiría de cero. Va debajo, en cifra.
+ */
+const Eje: React.FC<{ label: string; mejor: number; grupo: number; shade: string }> = ({
+  label,
+  mejor,
+  grupo,
+  shade,
+}) => (
+  <div className="flex-1 min-w-[130px]">
+    <div className="flex justify-between items-baseline gap-2 text-[10px] text-slate-500 mb-1">
+      <span className="leading-tight">{label}</span>
+      <span className="tabular-nums shrink-0">{pct(mejor)}%</span>
+    </div>
+    <div className="h-1.5 rounded bg-slate-800 overflow-hidden">
+      <div
+        className="h-full rounded"
+        style={{ width: `${pct(mejor)}%`, backgroundColor: shade }}
+      />
+    </div>
+    <div className="flex justify-between gap-2 text-[9px] text-slate-600 mt-0.5">
+      <span>del mejor</span>
+      <span className="tabular-nums shrink-0">{pct(grupo)}% del grupo</span>
+    </div>
+  </div>
+);
 
 const Table: React.FC<{ war: War; ranked: Impact[]; playerId: string }> = ({
   war,

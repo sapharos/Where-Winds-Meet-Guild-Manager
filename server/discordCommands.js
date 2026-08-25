@@ -1876,15 +1876,33 @@ export function impactoEmbed({
   // Dónde pesa. Es la respuesta a «mi contribución promedio» con el detalle que
   // una sola cifra no puede dar: dos personas con la misma media pueden estar
   // haciendo trabajos distintos, y eso es lo que se ve aquí.
+  //
+  // Dos columnas y no una. Aquí se enseñaba `partes`, que es el valor con el que
+  // se puntúa -- curvado a 0,7 y medido contra la holgura de las armas --, así
+  // que salía muy por encima de la división que cualquiera puede hacer a mano y
+  // no cuadraba con ninguna tabla. «Mejor» es la media de la fracción del mejor
+  // de cada guerra, que sí se puede comprobar; «gremio» es la media de la parte
+  // del total de esa noche, que es lo que contesta cuánto de la guerra pasó por
+  // ti. Ninguna de las dos es el número con el que se puntúa, y ninguna de las
+  // dos tiene por qué serlo: el puntaje ya está arriba.
   const ejes = WEIGHTS.filter((axis) => axis.weight > 0)
     .map((axis) => {
-      const parte = trayectoria.partes[axis.key] ?? 0;
-      return `${axis.label.padEnd(15)}${barra(parte)} ${String(Math.round(parte * 100)).padStart(3)} %`;
+      const mejor = trayectoria.partesMejor?.[axis.key] ?? 0;
+      const grupo = trayectoria.partesGrupo?.[axis.key] ?? 0;
+      return [
+        axis.label.padEnd(15),
+        barra(mejor),
+        `${String(Math.round(mejor * 100)).padStart(4)} %`,
+        `${String(Math.round(grupo * 100)).padStart(4)} %`,
+      ].join(' ');
     })
     .join('\n');
+  // La cabecera se alinea a mano contra los mismos anchos de la fila: quince
+  // del nombre del eje, diez de la barra, y seis por columna de cifra.
+  const cabecera = `${' '.repeat(26)}mejor gremio`;
   embed.fields.push({
     name: ajeno ? 'Dónde pesa' : 'Dónde pesas',
-    value: `\`\`\`\n${ejes}\n\`\`\``,
+    value: `\`\`\`\n${cabecera}\n${ejes}\n\`\`\``,
     inline: false,
   });
 

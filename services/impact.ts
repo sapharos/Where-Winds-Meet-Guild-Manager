@@ -39,8 +39,17 @@ export interface Impact {
   name: string;
   /** Nought to a hundred, where a hundred is the best of that war. */
   score: number;
-  /** Each axis as a share of the best in that war, for showing the working. */
+  /**
+   * Each axis bent by the curve and measured against what the weapons carried
+   * were asked for -- the internal the score is built from, not a figure to
+   * show. It reads well above the plain ratio (a 49 % share comes out 61 %),
+   * so on screen it matched nothing anyone could divide out of the table.
+   */
   parts: Record<string, number>;
+  /** Each axis as a plain share of the best in that war, 0 to 1. */
+  share: Record<string, number>;
+  /** Each axis as a share of everything the war produced on it, 0 to 1. */
+  pool: Record<string, number>;
 }
 
 /** Lo que vale cada eje una vez normalizado. Ver `server/impact.js`. */
