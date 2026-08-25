@@ -244,7 +244,7 @@ const store: Store = {
   vods: [
     {
       id: 'vod-1', warId: fake.warRows[0].id, playerId: 'p-3',
-      estado: 'aprobado', duracionMs: 2_116_000, offsetMs: -281_000,
+      estado: 'aprobado', duracionMs: 2_116_000, offsetMs: -581_000,
       offsetConfianza: 'ocr', fijado: false, expiraEn: vencimiento(62),
       subidoEn: vencimiento(-28),
       calidades: [
@@ -255,7 +255,7 @@ const store: Store = {
     {
       // Fijada: la que alguien decidió que no se pierda.
       id: 'vod-2', warId: fake.warRows[0].id, playerId: 'p-1',
-      estado: 'aprobado', duracionMs: 1_980_000, offsetMs: 1_201_000,
+      estado: 'aprobado', duracionMs: 1_980_000, offsetMs: 901_000,
       offsetConfianza: 'manual', fijado: true, expiraEn: null,
       subidoEn: vencimiento(-28),
       calidades: [{ calidad: 'origen', playlist: 'vod-2/origen.m3u8' }],
@@ -305,22 +305,24 @@ const store: Store = {
     {
       // Caducada: la fila sigue, los bytes no. Sin botón de ver.
       id: 'vod-5', warId: fake.warRows[1]?.id ?? fake.warRows[0].id, playerId: 'p-2',
-      estado: 'caducado', duracionMs: 2_040_000, offsetMs: -120_000,
+      estado: 'caducado', duracionMs: 2_040_000, offsetMs: -420_000,
       offsetConfianza: 'nombre', fijado: false, expiraEn: vencimiento(-4),
       subidoEn: vencimiento(-94), calidades: [],
     },
   ],
-  // En tiempo de guerra. vod-1 arranca en -281000, asi que estas caen entre
-  // sus segundos 281+ y se pintan sobre su barra.
+  // En tiempo de guerra, con el cero en el ARRANQUE DE LA PARTIDA: negativo es
+  // preparacion. vod-1 arranca en -581000 -- 4:41 antes de que empiece la
+  // preparacion -- asi que estas caen a partir de su segundo 581 y se pintan
+  // sobre su barra.
   marcas: [
     { id: 'mrc-1', warId: fake.warRows[0].id, vodId: 'vod-1', autorId: 'u-1',
-      autor: 'jinwei', tMs: 300_000, texto: 'Arranca la partida',
+      autor: 'jinwei', tMs: 0, texto: 'Arranca la partida',
       hito: true, creadaEn: vencimiento(-27) },
     { id: 'mrc-2', warId: fake.warRows[0].id, vodId: 'vod-1', autorId: 'u-2',
-      autor: 'mei', tMs: 742_000, texto: 'Nos rompen la puerta del medio, nadie cubria',
+      autor: 'mei', tMs: 442_000, texto: 'Nos rompen la puerta del medio, nadie cubria',
       hito: true, creadaEn: vencimiento(-27) },
     { id: 'mrc-3', warId: fake.warRows[0].id, vodId: 'vod-2', autorId: 'u-1',
-      autor: 'jinwei', tMs: 1_105_000, texto: 'Aqui el 3v1 que no habia que pelear',
+      autor: 'jinwei', tMs: 805_000, texto: 'Aqui el 3v1 que no habia que pelear',
       hito: false, creadaEn: vencimiento(-26) },
   ],
   usuarios: [

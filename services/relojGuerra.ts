@@ -9,17 +9,28 @@
  *
  * ## El contrato
  *
- * `offsetMs` son los milisegundos entre **el comienzo de la preparación** y el
- * primer fotograma del vídeo. Negativo si empezó a grabar antes de que la
- * guerra arrancara --lo normal-- y positivo si le dio a grabar a mitad.
+ * `offsetMs` son los milisegundos entre **el arranque de la partida** y el
+ * primer fotograma del vídeo. Negativo si empezó a grabar antes --lo normal,
+ * porque casi todo el mundo graba desde la preparación-- y positivo si le dio a
+ * grabar a mitad.
  *
  * La preparación cuenta 5:00 → 0:00 y la partida 30:00 → 0:00, así que el
  * tiempo de guerra de un fotograma es:
  *
- *     preparación:  300 - restante
- *     partida:      300 + (1800 - restante)
+ *     preparación:  -restante
+ *     partida:      1800 - restante
  *
  * y de ahí `offset = tiempoDeGuerra - posiciónEnElVídeo`.
+ *
+ * El cero estaba antes en el comienzo de la PREPARACIÓN, y se movió aquí porque
+ * la cuenta que salía no se parecía a nada de lo que se ve en pantalla. Un
+ * fotograma con el reloj en «0:47 · Fase de preparación» se anunciaba como «el
+ * minuto 4:13 de la guerra»: cierto bajo aquel cero, y contrario a como lo lee
+ * cualquiera, porque un reloj que va hacia atrás no invita a pensar en lo
+ * transcurrido. Y dentro de la partida era peor -- el minuto 10 salía como
+ * 15:00, con la preparación sumada, una cifra que no coincide con ningún reloj
+ * del juego. Ahora la preparación es tiempo negativo, que es como la cuenta el
+ * juego y como la cuenta la gente.
  */
 
 const TESSERACT = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
@@ -38,11 +49,16 @@ export interface LecturaReloj {
   posicionS: number;
 }
 
-/** Segundos de guerra desde que empezó la preparación. */
+/**
+ * Segundos de guerra, contando desde que arranca la partida.
+ *
+ * La preparación sale negativa, y eso es lo que se quiere: su reloj cuenta
+ * hacia atrás hasta el arranque, así que «0:47 de preparación» son literalmente
+ * cuarenta y siete segundos antes de empezar. La cifra que se guarda dice
+ * entonces lo mismo que el reloj de la pantalla, en vez de su complemento.
+ */
 export const tiempoDeGuerra = (l: { restante: number; fase: Fase }) =>
-  l.fase === 'preparacion'
-    ? PREPARACION_S - l.restante
-    : PREPARACION_S + (PARTIDA_S - l.restante);
+  l.fase === 'preparacion' ? -l.restante : PARTIDA_S - l.restante;
 
 /** El número que se guarda: dónde cae el primer fotograma del vídeo. */
 export const offsetDesde = (l: LecturaReloj) =>
@@ -308,11 +324,29 @@ export const comoReloj = (ms: number) => {
   return `${signo}${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
 };
 
-/** Lo que dirá la ficha del VOD: «empieza 4:41 antes de la guerra». */
-export const enPalabras = (ms: number) =>
-  ms < 0
-    ? `empieza ${comoReloj(-ms)} antes de la preparación`
-    : `empieza en el minuto ${comoReloj(ms)} de la guerra`;
+/**
+ * Lo que dirá la ficha del VOD.
+ *
+ * Se habla en fases y no en un tiempo corrido, porque en fases es como se ve la
+ * guerra desde dentro: hay una cuenta atrás de preparación y luego una partida,
+ * y ningún reloj de la pantalla enseña nunca los dos sumados. Decir «el minuto
+ * 15:00» de algo que en el juego marca 10 obliga a hacer una resta mental que
+ * nadie debería tener que hacer.
+ *
+ * El caso raro va aparte: quien empezó a grabar antes incluso de la
+ * preparación. Se dice así en vez de darle un número, porque «5:40 antes de la
+ * partida» no le dice a nadie que eso cae fuera de la guerra entera.
+ */
+export const enPalabras = (ms: number) => {
+  if (ms === 0) return 'empieza justo al arrancar la partida';
+  if (ms > 0) return `empieza en el minuto ${comoReloj(ms)} de la partida`;
+
+  const antes = -ms;
+  if (antes > PREPARACION_S * 1000) {
+    return `empieza ${comoReloj(antes - PREPARACION_S * 1000)} antes de la preparación`;
+  }
+  return `empieza en la preparación, ${comoReloj(antes)} antes de la partida`;
+};
 
 // --- Mantener varios vídeos cuadrados ---------------------------------------
 

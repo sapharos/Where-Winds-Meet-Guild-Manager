@@ -750,11 +750,13 @@ ALTER TABLE event_series ADD COLUMN IF NOT EXISTS reminder_time TEXT;
 -- esto se llene de grabaciones que no son de la guerra. Validado en el servidor
 -- y no con una restricción aquí, igual que side, lane y match_type.
 --
--- `offset_ms`: milisegundos desde el inicio de la guerra hasta el primer
--- fotograma. NEGATIVO si empezó a grabar antes de que empezara -- lo normal,
--- porque casi todos graban desde la preparación -- y positivo si se acordó de
--- darle a grabar a mitad. Es el número del que depende el multistream: sin él
--- cuatro vídeos del mismo momento no se pueden poner uno al lado del otro.
+-- `offset_ms`: milisegundos desde EL ARRANQUE DE LA PARTIDA hasta el primer
+-- fotograma. NEGATIVO si empezó a grabar antes -- lo normal, porque casi todos
+-- graban desde la preparación, que en esta escala es tiempo negativo -- y
+-- positivo si se acordó de darle a grabar a mitad. Es el número del que depende
+-- el multistream: sin él cuatro vídeos del mismo momento no se pueden poner uno
+-- al lado del otro. El cero estuvo en el comienzo de la preparación hasta que
+-- se movió aquí; el porqué está al pie de este bloque, con la migración.
 --
 -- `offset_confianza` -- de dónde salió ese número: 'ocr' (leído del cronómetro
 -- del juego, el método bueno), 'nombre' (de la marca de hora del fichero),
@@ -858,9 +860,11 @@ CREATE TABLE IF NOT EXISTS war_vod_renditions (
 -- multistream a la vez y saltar entre ellas mueve todos los mosaicos.
 --
 -- `t_ms` usa la misma referencia que `war_vods.offset_ms`: milisegundos desde
--- que empezó la preparación. Situar una marca en una grabación concreta es
--- entonces `t_ms - offset_ms`, y por eso una grabación sin sincronizar no puede
--- enseñarlas: no se sabe dónde caen.
+-- que arranca la partida, negativos durante la preparación. Situar una marca en
+-- una grabación concreta es entonces `t_ms - offset_ms`, y por eso una
+-- grabación sin sincronizar no puede enseñarlas: no se sabe dónde caen. Que la
+-- resta sea lo único que importa es también lo que permitió mover el cero sin
+-- mover nada de lo ya anotado.
 --
 -- `vod_id` es de dónde salió, no dónde vive. Sirve para saber por los ojos de
 -- quién se vio aquello, y se pone a null si esa grabación caduca -- la marca
@@ -881,3 +885,36 @@ CREATE TABLE IF NOT EXISTS war_marcas (
 );
 
 CREATE INDEX IF NOT EXISTS war_marcas_guerra_idx ON war_marcas (war_id, t_ms);
+
+-- El cero del tiempo de guerra pasa de la preparación a la partida.
+--
+-- Era el comienzo de la PREPARACIÓN, y con eso un fotograma en el que el reloj
+-- del juego marcaba «0:47 · Fase de preparación» se anunciaba como «el minuto
+-- 4:13 de la guerra» -- 5:00 menos 0:47. Coherente consigo mismo y contrario a
+-- lo que ve quien mira: nadie lee un reloj que va hacia atrás y piensa en lo
+-- que lleva transcurrido. Peor todavía dentro de la partida, donde el minuto 10
+-- se anunciaba como el 15:00 por llevar la preparación sumada, que es una cifra
+-- que no coincide con ningún reloj de la pantalla.
+--
+-- Ahora el cero es el arranque de la PARTIDA y la preparación es tiempo
+-- negativo, que es como lo cuenta el juego y como lo cuenta la gente.
+--
+-- Se restan 5:00 a las dos columnas QUE SE MIDEN DESDE ESE CERO, y a las dos a
+-- la vez: la posición de una marca dentro de un vídeo es `t_ms - offset_ms`, así
+-- que desplazando ambas por igual no se mueve nada de lo ya anotado. El
+-- multistream tampoco se entera: alinea por la diferencia entre offsets, y una
+-- resta común no cambia ninguna diferencia. Cambia lo que se dice, no dónde
+-- está nada.
+--
+-- La guarda es obligatoria y no cosmética: este fichero se ejecuta ENTERO en
+-- cada arranque, así que un UPDATE aritmético sin marca restaría otros cinco
+-- minutos en cada despliegue hasta desalinearlo todo. Va en `app_settings`, que
+-- ya existe para cosas que sólo se hacen una vez.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM app_settings WHERE key = 'vods_cero_en_partida') THEN
+    UPDATE war_vods SET offset_ms = offset_ms - 300000 WHERE offset_ms IS NOT NULL;
+    UPDATE war_marcas SET t_ms = t_ms - 300000;
+    INSERT INTO app_settings (key, value) VALUES ('vods_cero_en_partida', '1');
+  END IF;
+END $$;

@@ -115,9 +115,45 @@ recorte, la gente sube grabaciones con el antes y el después y se va al doble.
 
 ### Sincronía
 
-Cada VOD guarda `offset_ms`: milisegundos desde el inicio de la guerra hasta su
-primer fotograma. **Negativo** si empezó a grabar antes, **positivo** si empezó
-tarde (hay quien se acuerda de grabar en el minuto 20).
+Cada VOD guarda `offset_ms`: milisegundos desde **el arranque de la partida**
+hasta su primer fotograma. **Negativo** si empezó a grabar antes —lo normal,
+porque casi todo el mundo graba desde la preparación, que en esta escala es
+tiempo negativo— y **positivo** si empezó tarde (hay quien se acuerda de grabar
+en el minuto 20). `war_marcas.t_ms` usa exactamente la misma referencia.
+
+#### Por qué el cero está ahí y no al empezar la preparación
+
+Estuvo al comienzo de la preparación, y la cuenta que salía no se parecía a nada
+de lo que se ve en pantalla. Un fotograma con el reloj del juego en
+`0:47 · Fase de preparación` se anunciaba como **«el minuto 4:13 de la guerra»**
+—5:00 menos 0:47—: cierto bajo aquel cero, y contrario a como lo lee cualquiera,
+porque un reloj que va hacia atrás no invita a pensar en lo transcurrido. Dentro
+de la partida era peor: el minuto 10 salía como **15:00**, con la preparación
+sumada, una cifra que no coincide con ningún reloj del juego.
+
+La migración vive al pie del bloque de VODs en `schema.sql`: resta 5:00 a
+`war_vods.offset_ms` y a `war_marcas.t_ms`, **a las dos a la vez**. La posición
+de una marca dentro de un vídeo es `t_ms - offset_ms`, así que desplazando ambas
+por igual no se movió nada de lo ya anotado, y el multistream —que alinea por la
+diferencia entre offsets— tampoco se enteró. Cambió lo que se dice, no dónde está
+nada.
+
+Lleva guarda en `app_settings` y **no es opcional**: este fichero se ejecuta
+entero en cada arranque, así que un `UPDATE` aritmético sin marca restaría otros
+cinco minutos en cada despliegue hasta desalinearlo todo.
+
+Cómo se dice ahora, según dónde caiga el primer fotograma:
+
+| `offset_ms` | Se lee |
+|---|---|
+| antes de la preparación | «empieza 4:41 antes de la preparación» |
+| dentro de la preparación | «empieza en la preparación, 0:47 antes de la partida» |
+| exactamente 0 | «empieza justo al arrancar la partida» |
+| dentro de la partida | «empieza en el minuto 10:00 de la partida» |
+
+Se habla en fases y no en un tiempo corrido porque en fases es como se ve la
+guerra desde dentro: hay una cuenta atrás y luego una partida, y ningún reloj de
+la pantalla enseña nunca los dos sumados.
 
 Cuatro vías, de menos a más esfuerzo:
 
