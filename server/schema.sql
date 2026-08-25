@@ -793,6 +793,34 @@ CREATE INDEX IF NOT EXISTS war_vods_war_idx ON war_vods (war_id, subido_en);
 CREATE INDEX IF NOT EXISTS war_vods_caducados_idx
   ON war_vods (expira_en) WHERE NOT fijado;
 
+-- Cómo va la preparación, para poder contestar «¿por qué lleva media hora en
+-- Preparando?» sin entrar por SSH a mirar el log del contenedor.
+--
+-- Hacía falta porque `estado` es un estado plano: dice *que* está preparando y
+-- nada más. Un remux con `-c copy` tarda segundos y un recodificado de HEVC
+-- tarda una hora, y las dos cosas se veían exactamente igual desde la interfaz
+-- -- igual que se veía un trabajo que ya no existía porque la API se reinició
+-- con la cola en memoria.
+--
+-- `proceso_fase`: 'cola' (los bytes están, espera turno), 'origen' (el remux o
+-- el recodificado que hace falta para poder ver el vídeo) o '360p' (la copia
+-- de los mosaicos, que va DESPUÉS de que el estado pase a 'listo' y por eso
+-- necesita nombre propio: sin él, «reproducible» y «terminado» se confunden).
+-- Null cuando no hay nada en marcha.
+--
+-- `proceso_latido` es lo que distingue lento de muerto, que era justo lo que no
+-- se podía distinguir. ffmpeg informa de su avance cada segundo; si el latido
+-- se quedó atrás, no es que vaya despacio, es que ya no hay nadie trabajando.
+--
+-- `proceso_error` guarda el motivo. Antes sólo iba a `console.error`, así que
+-- «Falló al preparar» era todo lo que llegaba a la persona que había esperado
+-- veinte minutos a que subieran sus 2 GB.
+ALTER TABLE war_vods ADD COLUMN IF NOT EXISTS proceso_fase   TEXT;
+ALTER TABLE war_vods ADD COLUMN IF NOT EXISTS proceso_pct    SMALLINT;
+ALTER TABLE war_vods ADD COLUMN IF NOT EXISTS proceso_desde  TIMESTAMPTZ;
+ALTER TABLE war_vods ADD COLUMN IF NOT EXISTS proceso_latido TIMESTAMPTZ;
+ALTER TABLE war_vods ADD COLUMN IF NOT EXISTS proceso_error  TEXT;
+
 -- Las calidades de un mismo VOD, cada una con su playlist de HLS.
 --
 -- Tabla aparte y no columnas porque no llegan a la vez: el original se

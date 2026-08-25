@@ -86,6 +86,14 @@ interface VodFalso {
   expiraEn: string | null;
   subidoEn: string;
   calidades: { calidad: string; playlist: string }[];
+  // Como va la preparacion. El servidor de verdad resuelve `procesoParado` y
+  // `procesoSegundos` en SQL, contra su propio reloj; aqui llegan puestos a
+  // mano porque lo que hay que poder mirar es como se pinta cada caso.
+  procesoFase?: 'cola' | 'origen' | '360p' | null;
+  procesoPct?: number | null;
+  procesoError?: string | null;
+  procesoSegundos?: number | null;
+  procesoParado?: boolean;
 }
 
 /**
@@ -259,6 +267,10 @@ const store: Store = {
       offsetConfianza: null, fijado: false, expiraEn: vencimiento(89),
       subidoEn: vencimiento(-1),
       calidades: [{ calidad: 'origen', playlist: 'vod-3/origen.m3u8' }],
+      // Ya se ve, pero la copia de los mosaicos sigue en marcha. Es el caso que
+      // el estado solo no sabia contar: «Esperando revision» mientras la
+      // maquina lleva media hora ocupada.
+      procesoFase: '360p', procesoPct: 34, procesoSegundos: 1_680, procesoParado: false,
     },
     {
       // A medio preparar: la lista se refresca sola mientras esto exista.
@@ -266,6 +278,29 @@ const store: Store = {
       estado: 'procesando', duracionMs: null, offsetMs: null,
       offsetConfianza: null, fijado: false, expiraEn: vencimiento(90),
       subidoEn: new Date().toISOString(), calidades: [],
+      // Esta avanza sola en cada sondeo, para poder ver moverse la barra.
+      procesoFase: 'origen', procesoPct: 8, procesoSegundos: 45, procesoParado: false,
+    },
+    {
+      // La que se quedo sin nadie detras: un redespliegue se llevo la cola por
+      // delante y la fila se quedo en «Preparando» para siempre. Es tuya, asi
+      // que sale el boton de reintentar.
+      id: 'vod-6', warId: fake.warRows[0].id, playerId: fake.session.user.playerId,
+      estado: 'procesando', duracionMs: null, offsetMs: null,
+      offsetConfianza: null, fijado: false, expiraEn: vencimiento(90),
+      subidoEn: vencimiento(-2), calidades: [],
+      procesoFase: 'origen', procesoPct: 17, procesoSegundos: 9_240, procesoParado: true,
+    },
+    {
+      // La que fallo de verdad, con el motivo que antes solo veia `docker logs`.
+      id: 'vod-7', warId: fake.warRows[0].id, playerId: fake.session.user.playerId,
+      estado: 'error', duracionMs: null, offsetMs: null,
+      offsetConfianza: null, fijado: false, expiraEn: vencimiento(90),
+      subidoEn: vencimiento(-3), calidades: [],
+      procesoFase: null, procesoPct: null, procesoParado: false, procesoSegundos: 12,
+      procesoError:
+        'ffmpeg salió 1: [matroska,webm @ 0x7f2a] Read error at pos. 1610612736 (0x60000000) · ' +
+        'origen: Invalid data found when processing input',
     },
     {
       // Caducada: la fila sigue, los bytes no. Sin botón de ver.
@@ -616,7 +651,17 @@ const GET: [RegExp, Ruta][] = [
       vods: store.vods.filter((v) => v.warId === w.id && v.estado === 'aprobado' && v.calidades.length).length,
     }))],
   [/^\/war\/wars\/([^/]+)$/, (m) => detalleConAnexos(m[1])],
-  [/^\/war\/wars\/([^/]+)\/vods$/, (m) => store.vods.filter((v) => v.warId === m[1])],
+  // Cada sondeo avanza lo que este preparandose, que es la unica forma de ver
+  // moverse la barra sin un ffmpeg detras. Lo que esta parado no avanza: de eso
+  // va precisamente ese caso.
+  [/^\/war\/wars\/([^/]+)\/vods$/, (m) => {
+    for (const v of store.vods) {
+      if (v.procesoParado || v.procesoFase !== 'origen' && v.procesoFase !== '360p') continue;
+      v.procesoPct = Math.min(99, (v.procesoPct ?? 0) + 7);
+      v.procesoSegundos = (v.procesoSegundos ?? 0) + 5;
+    }
+    return store.vods.filter((v) => v.warId === m[1]);
+  }],
   [/^\/war\/wars\/([^/]+)\/marcas$/, (m) =>
     store.marcas.filter((x) => x.warId === m[1]).sort((a, b) => a.tMs - b.tMs)],
   [/^\/players\/([^/]+)\/scans$/, (m) => fake.scansOf(m[1])],
@@ -1150,6 +1195,18 @@ const ESCRITURAS: [string, RegExp, Ruta][] = [
     // botón de ver, estaría enseñando algo que en el servidor ya no existe.
     if (!body.aprobado) vod.calidades = [];
     return { id: vod.id, estado: vod.estado };
+  }],
+  ['POST', /^\/vods\/([^/]+)\/retry$/, (m) => {
+    const vod = store.vods.find((v) => v.id === m[1]);
+    if (!vod) return { error: 'no such vod' };
+    // Vuelve a la cola, sin porcentaje todavia: esperar turno no es avanzar.
+    vod.estado = 'subiendo';
+    vod.procesoFase = 'cola';
+    vod.procesoPct = null;
+    vod.procesoError = null;
+    vod.procesoParado = false;
+    vod.procesoSegundos = null;
+    return { ok: true };
   }],
   ['POST', /^\/vods\/([^/]+)\/pin$/, (m, _req, body) => {
     const vod = store.vods.find((v) => v.id === m[1]);

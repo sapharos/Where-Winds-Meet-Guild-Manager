@@ -32,6 +32,22 @@ export interface Vod {
   expiraEn: string | null;
   subidoEn: string;
   calidades: VodCalidad[];
+  /**
+   * Cómo va la preparación. Ver docs/VODS.md §8.
+   *
+   * `estado` dice *que* está preparando y nada más, y eso no bastaba: un remux
+   * con `-c copy` tarda segundos y un recodificado de HEVC tarda una hora, y en
+   * pantalla se veían igual -- igual que se veía un trabajo que ya no existía
+   * porque la API se había reiniciado con la cola en memoria.
+   */
+  procesoFase: 'cola' | 'origen' | '360p' | null;
+  /** De 0 a 100. Null si ffprobe no supo decir la duración. */
+  procesoPct: number | null;
+  procesoError: string | null;
+  /** Segundos desde que empezó a prepararse. Lo cuenta el servidor. */
+  procesoSegundos: number | null;
+  /** Hay algo en marcha y hace rato que no da señales. Lo decide el servidor. */
+  procesoParado: boolean;
 }
 
 interface Props {
@@ -62,6 +78,46 @@ const caducidad = (iso: string | null, fijado: boolean) => {
   const dias = Math.ceil((new Date(iso).getTime() - Date.now()) / 86400000);
   if (dias <= 0) return 'caduca hoy';
   return dias === 1 ? 'caduca mañana' : `caduca en ${dias} días`;
+};
+
+/** Cuánto lleva, redondeado a lo que de verdad se mira. */
+const desdeHace = (segundos: number) => {
+  if (segundos < 60) return `${segundos} s`;
+  const min = Math.round(segundos / 60);
+  if (min < 60) return `${min} min`;
+  return `${Math.floor(min / 60)} h ${min % 60} min`;
+};
+
+/**
+ * Lo que se dice del avance, en una línea.
+ *
+ * Se prefiere la fase al estado porque el estado miente por omisión en los dos
+ * extremos: «Subiendo» cuando los bytes están enteros y sólo falta el turno, y
+ * «Esperando revisión» cuando el vídeo ya se ve pero la máquina sigue media
+ * hora haciendo la copia de los mosaicos.
+ */
+const avanceDe = (vod: Vod): { texto: string | null; clase: string; barra: boolean } | null => {
+  // Cifra de verdad o nada: un campo que no viniera se colaba en la resta y
+  // salía «lleva NaN h NaN min» en pantalla.
+  const pct = typeof vod.procesoPct === 'number' ? vod.procesoPct : null;
+
+  if (vod.procesoFase === 'cola') {
+    return { texto: 'En cola', clase: 'text-slate-400', barra: false };
+  }
+  // La etiqueta del estado ya dice «Preparando»; aquí sólo se le pone cifra.
+  if (vod.estado === 'procesando') {
+    return { texto: pct === null ? null : `${pct}%`, clase: 'text-amber-400', barra: pct !== null };
+  }
+  // La de 360p va después de que el vídeo ya se pueda ver, así que es una nota
+  // al margen y no el titular: quien mira ya puede darle al play.
+  if (vod.procesoFase === '360p') {
+    return {
+      texto: pct === null ? 'generando 360p' : `generando 360p ${pct}%`,
+      clase: 'text-slate-500',
+      barra: false,
+    };
+  }
+  return null;
 };
 
 const ETIQUETA: Record<Vod['estado'], { texto: string; clase: string }> = {
@@ -110,7 +166,13 @@ const WarVods: React.FC<Props> = ({
    * queda en «Preparando» hasta que alguien recarga y parece que se colgó.
    */
   useEffect(() => {
-    if (!vods?.some((v) => v.estado === 'procesando' || v.estado === 'subiendo')) return;
+    // También mientras hay una fase en marcha: la copia de 360p corre cuando el
+    // estado ya es «listo», así que mirando sólo el estado la barra de esa fase
+    // se quedaría congelada en el número con el que se cargó la página.
+    const enMarcha = vods?.some(
+      (v) => v.estado === 'procesando' || v.estado === 'subiendo' || v.procesoFase !== null,
+    );
+    if (!enMarcha) return;
     const t = setInterval(() => void cargar(), 5000);
     return () => clearInterval(t);
   }, [vods, cargar]);
@@ -178,6 +240,24 @@ const WarVods: React.FC<Props> = ({
 
   const resolver = async (vod: Vod, aprobado: boolean) => {
     await api(`/vods/${vod.id}/resolve`, { method: 'POST', body: JSON.stringify({ aprobado }) });
+    await cargar();
+  };
+
+  /**
+   * Volver a ponerla en la cola.
+   *
+   * El fichero de origen no se borra hasta que la preparación termina del todo,
+   * así que reintentar no le cuesta a nadie volver a subir 2 GB: casi siempre
+   * lo único que hacía falta era que alguien volviera a arrancar el trabajo.
+   */
+  const reintentar = async (vod: Vod) => {
+    setAviso(null);
+    try {
+      await api(`/vods/${vod.id}/retry`, { method: 'POST' });
+      setAviso({ texto: 'De vuelta a la cola. Se prepara en cuanto le toque el turno.', ok: true });
+    } catch (err) {
+      setAviso({ texto: err instanceof Error ? err.message : 'No se pudo reintentar', ok: false });
+    }
     await cargar();
   };
 
@@ -359,6 +439,12 @@ const WarVods: React.FC<Props> = ({
             const etiqueta = ETIQUETA[vod.estado];
             const mia = vod.playerId === miPlayerId;
             const reproducible = vod.calidades.length > 0 && vod.estado !== 'caducado';
+            const avance = avanceDe(vod);
+            // Reintentar la suya, quien la subió; la de otro, quien aprueba --
+            // el servidor manda igual, esto sólo evita enseñar un botón que va
+            // a contestar 403.
+            const puedeReintentar =
+              (mia || puedeAprobar) && (vod.estado === 'error' || vod.procesoParado);
             return (
               <li
                 key={vod.id}
@@ -370,7 +456,26 @@ const WarVods: React.FC<Props> = ({
                     {mia && <span className="text-slate-500 text-xs"> · la tuya</span>}
                   </p>
                   <p className="text-[11px] text-slate-500 flex flex-wrap items-center gap-x-2">
-                    <span className={etiqueta.clase}>{etiqueta.texto}</span>
+                    {/* El titular sigue siendo el estado; el avance va al lado,
+                        porque «Preparando» sin más era justo lo que no decía
+                        nada.
+
+                        Salvo en la cola, donde el estado es lo que estorba: la
+                        fila sólo existe a partir del gancho `post-finish`, así
+                        que «Subiendo» ahí significa que los bytes están enteros
+                        y falta el turno. Dicho junto a «En cola» eran dos
+                        etiquetas contradictorias sobre lo mismo. */}
+                    {vod.procesoFase !== 'cola' && (
+                      <span className={etiqueta.clase}>{etiqueta.texto}</span>
+                    )}
+                    {avance?.texto && (
+                      <span className={`${avance.clase} tabular-nums`}>{avance.texto}</span>
+                    )}
+                    {/* Sólo mientras hay algo en marcha: «lleva 40 min» sobre una
+                        grabación terminada hace un mes no dice nada. */}
+                    {avance && typeof vod.procesoSegundos === 'number' && (
+                      <span className="tabular-nums">lleva {desdeHace(vod.procesoSegundos)}</span>
+                    )}
                     {duracion(vod.duracionMs) && <span>{duracion(vod.duracionMs)}</span>}
                     {vod.fijado && (
                       <span className="text-sky-400">
@@ -381,6 +486,45 @@ const WarVods: React.FC<Props> = ({
                       <span>{caducidad(vod.expiraEn, vod.fijado)}</span>
                     )}
                   </p>
+
+                  {avance?.barra && vod.procesoPct !== null && (
+                    <div
+                      className="mt-1.5 h-1 rounded bg-slate-800 overflow-hidden"
+                      role="progressbar"
+                      aria-valuenow={vod.procesoPct}
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-label="Preparación de la grabación"
+                    >
+                      <div
+                        className="h-full rounded bg-amber-500 transition-all duration-slow"
+                        style={{ width: `${vod.procesoPct}%` }}
+                      />
+                    </div>
+                  )}
+
+                  {/*
+                    Que no dé señales no es lo mismo que haber fallado, y por eso
+                    se dice de otra manera. ffmpeg informa de su avance cada
+                    segundo; si lleva dos minutos callado es que ya no hay nadie
+                    trabajando -- casi siempre, un redespliegue que se llevó la
+                    cola por delante. Se puede arreglar desde aquí.
+                  */}
+                  {vod.procesoParado && vod.estado !== 'error' && (
+                    <p className="mt-1 text-[11px] text-amber-400 flex items-start gap-1.5">
+                      <i className="fa-solid fa-triangle-exclamation mt-0.5 shrink-0" aria-hidden="true" />
+                      <span>
+                        Sin señal desde hace rato. Lo más probable es que la preparación se
+                        interrumpiera{mia || puedeAprobar ? '; puedes reintentarla' : ''}.
+                      </span>
+                    </p>
+                  )}
+
+                  {/* El motivo, entero. Es lo único que convierte «falló» en algo
+                      que alguien pueda hacer. */}
+                  {vod.estado === 'error' && vod.procesoError && (
+                    <p className="mt-1 text-[11px] text-red-300 break-words">{vod.procesoError}</p>
+                  )}
                 </div>
 
                 <div className="flex items-center gap-2 shrink-0">
@@ -392,6 +536,17 @@ const WarVods: React.FC<Props> = ({
                     >
                       <i className="fa-solid fa-play" aria-hidden="true" />
                       Ver
+                    </button>
+                  )}
+
+                  {puedeReintentar && (
+                    <button
+                      type="button"
+                      onClick={() => void reintentar(vod)}
+                      className="px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium flex items-center gap-2"
+                    >
+                      <i className="fa-solid fa-arrow-rotate-left" aria-hidden="true" />
+                      Reintentar
                     </button>
                   )}
 

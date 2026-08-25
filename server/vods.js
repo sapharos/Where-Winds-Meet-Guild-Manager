@@ -225,11 +225,25 @@ export async function registrarSubida({
  */
 const cola = [];
 let trabajando = false;
+/**
+ * Lo que se está preparando ahora mismo.
+ *
+ * Existe para que «reintentar» no pueda encolar por segunda vez algo que sigue
+ * vivo: quien mira la pantalla no puede distinguir un recodificado lento de un
+ * trabajo muerto --de eso va todo este módulo-- así que va a darle al botón, y
+ * sin esto se recodificaría el mismo fichero dos veces seguidas.
+ */
+let enCurso = null;
 
 export function encolar(id) {
-  if (!cola.includes(id)) cola.push(id);
+  if (id === enCurso || cola.includes(id)) return false;
+  cola.push(id);
   arrancar();
+  return true;
 }
+
+/** Si está en la cola o debajo del cabezal. Lo consulta el reintento. */
+export const estaEnLaCola = (id) => id === enCurso || cola.includes(id);
 
 async function arrancar() {
   if (trabajando) return;
@@ -237,11 +251,25 @@ async function arrancar() {
   try {
     while (cola.length) {
       const id = cola.shift();
+      enCurso = id;
       try {
         await procesar(id);
       } catch (err) {
+        // El motivo va a la fila y no sólo al log. Antes vivía únicamente en
+        // `docker logs`, así que a quien había esperado veinte minutos a que
+        // subieran sus 2 GB le llegaba «Falló al preparar» y nada más.
         console.error(`[vods] ${id} falló:`, err.message);
-        await pool.query(`UPDATE war_vods SET estado = 'error' WHERE id = $1`, [id]);
+        await pool
+          .query(
+            `UPDATE war_vods
+                SET estado = 'error', proceso_fase = NULL, proceso_latido = now(),
+                    proceso_error = $2
+              WHERE id = $1`,
+            [id, String(err?.message ?? 'falló sin decir por qué').slice(0, ERROR_MAX)],
+          )
+          .catch((otro) => console.error(`[vods] ${id} ni se pudo anotar el fallo:`, otro.message));
+      } finally {
+        enCurso = null;
       }
     }
   } finally {
@@ -249,13 +277,85 @@ async function arrancar() {
   }
 }
 
-/** ffmpeg/ffprobe, siempre cediendo el turno. */
-const conNice = (programa, args) =>
+/** Lo que cabe de un mensaje de ffmpeg en la fila. Sobra: lo útil va al final. */
+const ERROR_MAX = 600;
+
+/**
+ * Cada cuánto se anota el avance.
+ *
+ * ffmpeg informa cada segundo y eso son miles de UPDATE por vídeo, que es mucho
+ * ruido para un número que se enseña con un sondeo de cinco segundos. Cada tres
+ * basta para que la barra se mueva y para que el latido sirva de señal de vida.
+ */
+const LATIDO_MS = 3000;
+
+/**
+ * El lector del `-progress` de ffmpeg.
+ *
+ * Se lee `out_time` y no `out_time_ms` a propósito: pese al nombre, `out_time_ms`
+ * viene en MICROsegundos en buena parte de las compilaciones -- un viejo desliz
+ * de ffmpeg que nadie corrige ya por no romper a quien lo compensa. `out_time`
+ * es `HH:MM:SS.ffffff` y no admite dos lecturas.
+ *
+ * El avance se mide sobre la SALIDA, que es lo que `out_time` cuenta: con `-ss`
+ * antes de `-i`, ffmpeg pone su reloj a cero, así que el total contra el que se
+ * divide es la duración recortada y no la del fichero entero.
+ *
+ * Los UPDATE van sueltos, sin esperarlos: si uno se pierde, lo único que pasa
+ * es que la barra se queda quieta tres segundos. Llevan `proceso_fase` en el
+ * WHERE para que un avance que llegue tarde no pise el 100 % de una fase que ya
+ * terminó.
+ */
+function seguidor(id, fase, totalMs) {
+  let ultimo = 0;
+  return (linea) => {
+    const m = /^out_time=(\d+):(\d\d):(\d\d(?:\.\d+)?)$/.exec(linea.trim());
+    if (!m) return;
+    const ahora = Date.now();
+    if (ahora - ultimo < LATIDO_MS) return;
+    ultimo = ahora;
+
+    const ms = ((Number(m[1]) * 60 + Number(m[2])) * 60 + Number(m[3])) * 1000;
+    // Tope en 99: el 100 lo pone quien termina, para que una barra llena
+    // signifique siempre «ya está» y no «ya casi».
+    const pct = totalMs > 0 ? Math.max(0, Math.min(99, Math.round((ms / totalMs) * 100))) : null;
+    void pool
+      .query(
+        `UPDATE war_vods SET proceso_pct = $3, proceso_latido = now()
+          WHERE id = $1 AND proceso_fase = $2`,
+        [id, fase, pct],
+      )
+      .catch(() => {});
+  };
+}
+
+/**
+ * ffmpeg/ffprobe, siempre cediendo el turno.
+ *
+ * Con `alLinea` la salida estándar se trocea en renglones y se tira según se
+ * lee, en vez de acumularse: `-progress` escupe unas cuantas líneas por segundo
+ * durante toda la codificación, y guardarlas sería juntar un megabyte de
+ * telemetría para quedarse con un número. Sin `alLinea` se comporta como antes,
+ * que es lo que necesita ffprobe para devolver su JSON de una pieza.
+ */
+const conNice = (programa, args, alLinea) =>
   new Promise((resolve, reject) => {
     const p = spawn('nice', ['-n', '15', programa, ...args], { stdio: ['ignore', 'pipe', 'pipe'] });
     let salida = '';
     let error = '';
-    p.stdout.on('data', (d) => (salida += d));
+    let resto = '';
+    p.stdout.on('data', (d) => {
+      if (!alLinea) {
+        salida += d;
+        return;
+      }
+      resto += d;
+      const lineas = resto.split('\n');
+      // El último trozo puede ser media línea: se guarda para el siguiente
+      // pedazo en vez de interpretarse a medias.
+      resto = lineas.pop() ?? '';
+      for (const linea of lineas) alLinea(linea);
+    });
     p.stderr.on('data', (d) => (error += d));
     p.on('error', reject);
     p.on('close', (codigo) =>
@@ -271,7 +371,10 @@ const conNice = (programa, args) =>
 let corredor = conNice;
 export const usarCorredor = (fn) => { corredor = fn || conNice; };
 
-const correr = (programa, args) => corredor(programa, args);
+const correr = (programa, args, alLinea) => corredor(programa, args, alLinea);
+
+/** Lo que se le pide a ffmpeg para que cuente por dónde va. */
+const PROGRESO = ['-progress', 'pipe:1', '-nostats'];
 
 async function sondear(fichero) {
   const json = await correr('ffprobe', [
@@ -334,21 +437,34 @@ async function procesar(id) {
   const origen = path.join(ENTRADA, id);
   const destino = path.join(HLS, id);
   await mkdir(destino, { recursive: true });
-  await pool.query(`UPDATE war_vods SET estado = 'procesando' WHERE id = $1`, [id]);
+  await pool.query(
+    `UPDATE war_vods
+        SET estado = 'procesando', proceso_fase = 'origen', proceso_pct = 0,
+            proceso_desde = now(), proceso_latido = now(), proceso_error = NULL
+      WHERE id = $1`,
+    [id],
+  );
 
   const { duracionMs, copiable } = await sondear(origen);
   const corte = recorteArgs(vod);
 
+  // Lo que va a durar la SALIDA, que es contra lo que se mide el avance. Se
+  // calcula antes de codificar y no después porque es el denominador del
+  // porcentaje: sin él la barra no puede existir, aunque el vídeo salga igual.
+  const util = (vod.recorte_fin_ms || duracionMs) - (vod.recorte_ini_ms || 0);
+
   // La calidad de origen. Copiando es cuestión de segundos; recodificando, de
   // minutos -- pero eso sólo le pasa a quien graba en HEVC.
-  await correr('ffmpeg', [
-    '-hide_banner', '-loglevel', 'error', '-y',
-    ...corte.antes, '-i', origen, ...corte.despues,
-    ...(copiable ? ['-c', 'copy'] : ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-c:a', 'aac']),
-    ...hlsArgs(destino, 'origen'),
-  ]);
-
-  const util = (vod.recorte_fin_ms || duracionMs) - (vod.recorte_ini_ms || 0);
+  await correr(
+    'ffmpeg',
+    [
+      '-hide_banner', '-loglevel', 'error', '-y', ...PROGRESO,
+      ...corte.antes, '-i', origen, ...corte.despues,
+      ...(copiable ? ['-c', 'copy'] : ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-c:a', 'aac']),
+      ...hlsArgs(destino, 'origen'),
+    ],
+    seguidor(id, 'origen', util),
+  );
 
   // Reproducible ya, con una calidad. La de 360p llega después y no es motivo
   // para hacer esperar a nadie.
@@ -358,20 +474,31 @@ async function procesar(id) {
      ON CONFLICT (vod_id, calidad) DO UPDATE SET ruta_playlist = EXCLUDED.ruta_playlist`,
     [id, path.join(id, 'origen.m3u8')],
   );
+  // Pasa a 'listo' y la fase pasa a '360p' en el mismo movimiento: el vídeo ya
+  // se puede ver, pero el trabajo no ha terminado, y eran las dos cosas que se
+  // confundían. Sin la fase, quien miraba veía «Esperando revisión» mientras la
+  // máquina seguía media hora ocupada con los mosaicos.
   await pool.query(
-    `UPDATE war_vods SET estado = 'listo', duracion_ms = $2, ruta = $3 WHERE id = $1`,
+    `UPDATE war_vods
+        SET estado = 'listo', duracion_ms = $2, ruta = $3,
+            proceso_fase = '360p', proceso_pct = 0, proceso_latido = now()
+      WHERE id = $1`,
     [id, util, id],
   );
 
   // La de 360p: la que usan los mosaicos del multistream, y la única que
   // sobreviviría si algún día se recorta la retención.
-  await correr('ffmpeg', [
-    '-hide_banner', '-loglevel', 'error', '-y',
-    ...corte.antes, '-i', origen, ...corte.despues,
-    '-vf', 'scale=-2:360', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '28',
-    '-c:a', 'aac', '-b:a', '64k',
-    ...hlsArgs(destino, '360p'),
-  ]);
+  await correr(
+    'ffmpeg',
+    [
+      '-hide_banner', '-loglevel', 'error', '-y', ...PROGRESO,
+      ...corte.antes, '-i', origen, ...corte.despues,
+      '-vf', 'scale=-2:360', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '28',
+      '-c:a', 'aac', '-b:a', '64k',
+      ...hlsArgs(destino, '360p'),
+    ],
+    seguidor(id, '360p', util),
+  );
   await pool.query(
     `INSERT INTO war_vod_renditions (vod_id, calidad, ruta_playlist)
      VALUES ($1, '360p', $2)
@@ -379,9 +506,124 @@ async function procesar(id) {
     [id, path.join(id, '360p.m3u8')],
   );
 
+  // Nada en marcha: la fase vuelve a vacío y el 100 es de verdad. A partir de
+  // aquí ya no hay a qué volver -- el original se borra abajo -- así que esto
+  // es también lo que le dice al reintento que aquí no queda trabajo.
+  await pool.query(
+    `UPDATE war_vods SET proceso_fase = NULL, proceso_pct = 100, proceso_latido = now()
+      WHERE id = $1`,
+    [id],
+  );
+
   // El original ya no hace falta: lo que se sirve son los segmentos, y son 2 GB.
   await rm(origen, { force: true });
   await rm(`${origen}.info`, { force: true });
+}
+
+// --- Lo que dejó a medias un reinicio ---------------------------------------
+
+/**
+ * Devuelve a la cola lo que se quedó a mitad, y se llama al arrancar.
+ *
+ * La cola vive en la memoria de este proceso, que es lo correcto para lo que
+ * hace --de uno en uno, con `nice`, sin una tabla de trabajos ni un Redis para
+ * cuatro vídeos a la semana-- y tiene un precio que hasta ahora no se pagaba:
+ * al reiniciar la API, lo que estuviera preparándose desaparecía de la cola sin
+ * desaparecer de la tabla. La fila se quedaba en `procesando` PARA SIEMPRE. La
+ * barrida de abandonados no la tocaba --sólo mira `subiendo`-- y nadie la volvía
+ * a encolar, así que en pantalla se leía «Preparando» hasta el fin de los
+ * tiempos. Con los redespliegues que lleva esto, no era un caso raro.
+ *
+ * Se recogen también las que están en `subiendo`: la fila sólo nace en el
+ * gancho `post-finish`, o sea que si existe, los bytes están enteros y lo único
+ * que falta es el turno.
+ *
+ * Lo que ya no tiene fichero de origen no se puede rehacer, y decirlo es mejor
+ * que dejarlo girando: pasa a `error` con el motivo escrito, que es accionable
+ * -- «vuelve a subirla» -- mientras que «Preparando» no lo era.
+ */
+export async function recuperarPendientes() {
+  if (!vodsHabilitados()) return { recuperados: 0, perdidos: 0 };
+  const { rows } = await pool.query(
+    `SELECT id FROM war_vods WHERE estado IN ('subiendo', 'procesando') ORDER BY subido_en`,
+  );
+
+  let recuperados = 0;
+  let perdidos = 0;
+  for (const { id } of rows) {
+    if (await stat(path.join(ENTRADA, id)).catch(() => null)) {
+      await pool.query(
+        `UPDATE war_vods
+            SET proceso_fase = 'cola', proceso_pct = NULL, proceso_error = NULL,
+                proceso_latido = now()
+          WHERE id = $1`,
+        [id],
+      );
+      encolar(id);
+      recuperados++;
+    } else {
+      await pool.query(
+        `UPDATE war_vods
+            SET estado = 'error', proceso_fase = NULL, proceso_latido = now(), proceso_error = $2
+          WHERE id = $1`,
+        [id, 'La preparación se interrumpió y el fichero de origen ya no está en el almacén. Hay que subir la grabación otra vez.'],
+      );
+      perdidos++;
+    }
+  }
+
+  if (recuperados || perdidos) {
+    console.log(`[vods] al arrancar: ${recuperados} de vuelta a la cola, ${perdidos} sin origen`);
+  }
+  return { recuperados, perdidos };
+}
+
+/**
+ * Volver a intentarlo, a mano.
+ *
+ * La suya, quien la subió; la de otro, quien aprueba. Reintentar no publica
+ * nada ni escribe en el acta --deja el fichero exactamente donde estaba-- así
+ * que no hace falta un permiso propio para algo cuyo peor resultado es gastar
+ * un rato de CPU.
+ *
+ * Se niega si sigue en la cola: quien mira la pantalla no puede distinguir un
+ * recodificado lento de un trabajo muerto, así que va a darle al botón, y
+ * encolar dos veces el mismo fichero sólo lo recodificaría dos veces.
+ */
+export async function reintentarVod(id, user, permisos = []) {
+  if (!vodsHabilitados()) return { ok: false, codigo: 503, motivo: 'grabaciones desactivadas' };
+
+  const { rows } = await pool.query(
+    `SELECT v.player_id AS "playerId", v.estado
+       FROM war_vods v JOIN wars w ON w.id = v.war_id
+      WHERE v.id = $1 AND w.guild_id = $2`,
+    [id, GUILD_ID],
+  );
+  const vod = rows[0];
+  if (!vod) return { ok: false, codigo: 404, motivo: 'no such vod' };
+
+  if (vod.playerId !== user?.playerId && !permisos.includes('war.vod.approve')) {
+    return { ok: false, codigo: 403, motivo: 'sólo puedes reintentar tus propias grabaciones' };
+  }
+  if (!['error', 'procesando', 'subiendo'].includes(vod.estado)) {
+    return { ok: false, codigo: 409, motivo: 'esa grabación no está pendiente de preparar' };
+  }
+  if (estaEnLaCola(id)) {
+    return { ok: false, codigo: 409, motivo: 'ya está en la cola; sigue trabajando' };
+  }
+  if (!(await stat(path.join(ENTRADA, id)).catch(() => null))) {
+    return { ok: false, codigo: 409, motivo: 'el fichero de origen ya no está; hay que subirla otra vez' };
+  }
+
+  await pool.query(
+    `UPDATE war_vods
+        SET estado = 'subiendo', proceso_fase = 'cola', proceso_pct = NULL,
+            proceso_desde = NULL, proceso_latido = now(), proceso_error = NULL
+      WHERE id = $1`,
+    [id],
+  );
+  encolar(id);
+  return { ok: true };
 }
 
 // --- Retención --------------------------------------------------------------
@@ -536,6 +778,24 @@ export async function vodsDeLaGuerra(warId, user, permisos = []) {
             v.duracion_ms AS "duracionMs", v.offset_ms AS "offsetMs",
             v.offset_confianza AS "offsetConfianza", v.fijado,
             v.expira_en AS "expiraEn", v.subido_en AS "subidoEn",
+            v.proceso_fase AS "procesoFase", v.proceso_pct AS "procesoPct",
+            v.proceso_error AS "procesoError",
+            -- Cuánto lleva y si sigue vivo, resueltos aquí y no en el navegador
+            -- a propósito: el latido lo escribe el now() de Postgres, y restarlo
+            -- del reloj del que mira convertiría un ordenador con la hora mal
+            -- puesta en «todas tus grabaciones están colgadas». Las dos cuentas
+            -- se hacen contra el mismo reloj que las escribió.
+            CASE WHEN v.proceso_desde IS NOT NULL
+                 THEN GREATEST(0, EXTRACT(EPOCH FROM (now() - v.proceso_desde))::int)
+            END AS "procesoSegundos",
+            -- Estar en la cola no es estar parado: es esperar turno detrás de
+            -- otro, y ahí nadie late. Lo que sí es sospechoso es una fase en
+            -- marcha cuyo último latido se quedó atrás -- ffmpeg informa cada
+            -- segundo, así que si no informa es que ya no está.
+            (v.proceso_fase IS DISTINCT FROM 'cola'
+             AND (v.estado IN ('subiendo', 'procesando') OR v.proceso_fase IS NOT NULL)
+             AND COALESCE(v.proceso_latido, v.subido_en) < now() - interval '2 minutes'
+            ) AS "procesoParado",
             COALESCE(
               (SELECT json_agg(json_build_object('calidad', r.calidad, 'playlist', r.ruta_playlist))
                  FROM war_vod_renditions r WHERE r.vod_id = v.id), '[]'::json

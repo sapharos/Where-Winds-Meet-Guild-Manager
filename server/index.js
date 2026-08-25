@@ -106,6 +106,8 @@ import {
   crearMarca,
   borrarMarca,
   startVodSweeper,
+  recuperarPendientes,
+  reintentarVod,
 } from './vods.js';
 import {
   listEvents,
@@ -1352,6 +1354,14 @@ app.post('/api/vods/:id/resolve', requireAuth, requirePermission('war.vod.approv
   res.json(hecho);
 }));
 
+// Volver a preparar. Con `war.vod.upload` basta porque el portero de verdad
+// está dentro: la tuya siempre, la de otro sólo si además puedes aprobar.
+app.post('/api/vods/:id/retry', requireAuth, requirePermission('war.vod.upload'), asHandler(async (req, res) => {
+  const hecho = await reintentarVod(req.params.id, req.user, req.permissions);
+  if (!hecho.ok) return res.status(hecho.codigo).json({ error: hecho.motivo });
+  res.json({ ok: true });
+}));
+
 app.post('/api/vods/:id/pin', requireAuth, requirePermission('war.vod.pin'), asHandler(async (req, res) => {
   const hecho = await fijarVod(req.params.id, req.body?.fijado === true);
   if (!hecho) return res.status(404).json({ error: 'no such vod' });
@@ -1552,6 +1562,18 @@ migrate()
     // Las guerras de la semana se crean y se publican solas. Sin bot sigue
     // creándolas: la agenda de la web no depende de Discord.
     startAgendaScheduler();
+    // Lo que se quedó a medias en el reinicio anterior, de vuelta a la cola. La
+    // cola vive en memoria, así que sin esto un redespliegue a mitad de un
+    // recodificado dejaba la grabación en «Preparando» para siempre. No bloquea
+    // el arranque: preparar vídeos puede esperar a que la API atienda.
+    //
+    // Antes que la barrida, y en ese orden a propósito: la de abandonados borra
+    // subidas viejas que nadie terminó, y una que se pueda rehacer no es una
+    // que nadie terminó. Recuperar primero deja para la barrida sólo lo que de
+    // verdad está muerto.
+    void recuperarPendientes().catch((err) =>
+      console.error('[vods] no se pudo recuperar lo pendiente:', err.message),
+    );
     // La retención de las grabaciones. Cada seis horas y no cada noche a una
     // hora fija: el contenedor va en UTC y se reinicia cuando toca desplegar,
     // así que «a las 4:00» es una cita a la que se puede faltar. Lo que importa

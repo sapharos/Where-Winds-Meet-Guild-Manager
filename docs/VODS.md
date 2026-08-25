@@ -237,6 +237,42 @@ Sólo reproduce un miembro con sesión y `war.view`.
 
 ---
 
+## 8. Cómo va la preparación
+
+`estado` es un estado plano: dice *que* está preparando y nada más. Eso no bastaba. Un remux con `-c copy` tarda segundos y un recodificado de HEVC tarda una hora, y desde la interfaz se veían exactamente igual — igual que se veía un trabajo que ya no existía porque la API se había reiniciado con la cola en memoria. La única forma de averiguar cuál de las tres cosas estaba pasando era entrar por SSH y leer `docker logs`.
+
+Cinco columnas en `war_vods` lo cuentan, y las escribe la propia cola:
+
+| Columna | Qué dice |
+|---|---|
+| `proceso_fase` | `cola`, `origen`, `360p`, o vacío si no hay nada en marcha |
+| `proceso_pct` | 0–100 sobre la duración de salida. Vacío si `ffprobe` no supo la duración |
+| `proceso_desde` | cuándo empezó, para poder decir «lleva 40 min» |
+| `proceso_latido` | último signo de vida |
+| `proceso_error` | el motivo, cuando falla |
+
+**`proceso_latido` es lo que distingue lento de muerto**, que era justo lo que no se podía distinguir. ffmpeg informa de su avance cada segundo (`-progress pipe:1`); si el latido se quedó atrás, no es que vaya despacio, es que ya no hay nadie trabajando. La API lo resuelve en SQL y manda `procesoParado` ya decidido: restar el latido del reloj *del navegador* convertiría un ordenador con la hora mal puesta en «todas tus grabaciones están colgadas».
+
+Estar **en la cola no cuenta como parado**: es esperar turno detrás de otro, y ahí nadie late.
+
+Del `-progress` se lee `out_time` y no `out_time_ms`. Pese al nombre, `out_time_ms` viene en **microsegundos** en buena parte de las compilaciones de ffmpeg — un viejo desliz que ya no se corrige por no romper a quien lo compensa. `out_time` es `HH:MM:SS.ffffff` y no admite dos lecturas.
+
+### La fase `360p` existe porque el estado mentía por omisión
+
+La copia de los mosaicos corre **después** de que el estado pase a `listo`. Sin fase propia, quien miraba leía «Esperando revisión» mientras la máquina seguía media hora ocupada. Ahora el vídeo se puede ver y además se ve que el trabajo sigue.
+
+Lo mismo por el otro extremo: la fila sólo nace en el gancho `post-finish`, así que un `estado = 'subiendo'` significa que los bytes están enteros y sólo falta el turno. Con `proceso_fase = 'cola'`, la interfaz dice «En cola» y se calla el estado, que ahí sobra.
+
+### Recuperar lo que se llevó un reinicio
+
+La cola vive en la memoria del proceso, que es lo correcto para lo que hace — de uno en uno, con `nice`, sin una tabla de trabajos ni un Redis para cuatro vídeos a la semana — y tiene un precio que antes no se pagaba: al reiniciar la API, lo que estuviera preparándose desaparecía de la cola **sin desaparecer de la tabla**. La fila se quedaba en `procesando` para siempre; la barrida de abandonados no la tocaba (sólo mira `subiendo`) y nadie la volvía a encolar.
+
+`recuperarPendientes()` corre al arrancar, **antes que la barrida**, y devuelve a la cola todo lo que siga en `subiendo` o `procesando` y conserve su fichero en `entrada/`. El original no se borra hasta que la preparación termina del todo, así que casi siempre lo único que hacía falta era que alguien volviera a arrancar el trabajo. Lo que ya no tiene origen pasa a `error` con el motivo escrito, que al menos es accionable: vuelve a subirla.
+
+Y a mano: `POST /api/vods/:id/retry`. La tuya, quien la subió; la de otro, quien aprueba. Se niega si sigue viva en la cola, porque quien mira la pantalla no puede distinguir un recodificado lento de un trabajo muerto y va a darle al botón.
+
+---
+
 # Fase 2 — Puesta en marcha
 
 El código está desplegable, pero **la funcionalidad nace apagada**: sin
