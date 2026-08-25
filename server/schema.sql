@@ -821,6 +821,17 @@ ALTER TABLE war_vods ADD COLUMN IF NOT EXISTS proceso_desde  TIMESTAMPTZ;
 ALTER TABLE war_vods ADD COLUMN IF NOT EXISTS proceso_latido TIMESTAMPTZ;
 ALTER TABLE war_vods ADD COLUMN IF NOT EXISTS proceso_error  TEXT;
 
+-- Cuándo se avisó por privado, para no avisar dos veces. Ver docs/VODS.md §9.
+--
+-- Hace falta marca y no basta con mirar el estado porque las dos cosas que
+-- disparan un aviso se pueden repetir sin que haya nada nuevo que contar: una
+-- grabación vuelve a pasar por `listo` cada vez que se reprepara -- un
+-- reintento, o la recuperación al arrancar -- y «Publicar» se puede pulsar dos
+-- veces sobre algo ya publicado. Un privado repetido no es un fallo cosmético:
+-- es la clase de cosa por la que la gente silencia al bot.
+ALTER TABLE war_vods ADD COLUMN IF NOT EXISTS aviso_revision_en TIMESTAMPTZ;
+ALTER TABLE war_vods ADD COLUMN IF NOT EXISTS aviso_aprobada_en TIMESTAMPTZ;
+
 -- Las calidades de un mismo VOD, cada una con su playlist de HLS.
 --
 -- Tabla aparte y no columnas porque no llegan a la vez: el original se

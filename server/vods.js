@@ -23,6 +23,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { mkdir, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { pool, GUILD_ID } from './db.js';
+import { avisarAprobada, avisarRevision, sinRomperNada } from './vodAvisos.js';
 
 const DIR = process.env.VODS_DIR || '/vods';
 const ENTRADA = path.join(DIR, 'entrada');
@@ -486,6 +487,13 @@ async function procesar(id) {
     [id, util, id],
   );
 
+  // Aquí y no al terminar de subir: es AHORA cuando hay algo que mirar. Avisar
+  // en el gancho `post-finish` mandaría a un oficial a abrir un vídeo que
+  // todavía se está preparando, que es la forma más rápida de que deje de
+  // hacerle caso a estos avisos. Sin esperarlo, porque la copia de 360p que
+  // viene debajo no depende de que Discord conteste.
+  sinRomperNada(avisarRevision(id));
+
   // La de 360p: la que usan los mosaicos del multistream, y la única que
   // sobreviviría si algún día se recorta la retención.
   await correr(
@@ -866,6 +874,11 @@ export async function resolverVod(id, aprobado, userId) {
     await rm(path.join(HLS, id), { recursive: true, force: true });
     await pool.query(`DELETE FROM war_vod_renditions WHERE vod_id = $1`, [id]);
     await pool.query(`UPDATE war_vods SET ruta = NULL WHERE id = $1`, [id]);
+  } else {
+    // Las gracias, por privado. Sólo al publicar: un rechazo se explica en
+    // persona o no se explica, y un bot dando una mala noticia sin poder
+    // decir por qué es peor que el silencio.
+    sinRomperNada(avisarAprobada(id, userId));
   }
   return { id, estado };
 }

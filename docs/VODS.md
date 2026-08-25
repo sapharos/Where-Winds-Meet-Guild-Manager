@@ -296,6 +296,45 @@ Y a mano: `POST /api/vods/:id/retry`. La tuya, quien la subió; la de otro, quie
 
 ---
 
+## 9. Avisos por privado
+
+Dos, en direcciones contrarias, y los dos existen por lo mismo: entre subir y publicar hay una persona esperando a que otra entre a la web **sin motivo para entrar**. Nadie recarga un acta por si acaso, así que esa espera era de días.
+
+| Cuándo | A quién | Qué dice |
+|---|---|---|
+| Una grabación queda **lista** | A todo el que puede publicar | quién la subió, de qué guerra, tipo, fecha y duración |
+| Alguien la **publica** | A quien la subió | que ya se ve, quién la publicó, y gracias |
+
+Viven en `server/vodAvisos.js`, aparte de `vods.js` **por dónde pueden fallar**: Discord se cae, limita el ritmo y contesta 403 a quien tiene los privados cerrados. Nada de eso puede tumbar un remux ni impedir que se publique una grabación, así que se llaman sin esperarlos y ninguno lanza.
+
+### Al quedar lista, no al terminar de subir
+
+Es la única decisión de diseño que hay aquí. Avisar en el gancho `post-finish` mandaría a un oficial a abrir un vídeo que todavía se está preparando — segundos si es un remux, media hora si hay que recodificar HEVC. Un aviso que lleva a una pantalla donde no se puede hacer nada es la forma más rápida de que se deje de hacer caso a estos avisos. Se manda cuando **hay algo que mirar**.
+
+### A quién: por permiso, no por rango
+
+Se pregunta por `war.vod.approve` contra `role_permissions`, no por una lista de rangos escrita a mano. La matriz de permisos existe para moverse, y una lista fija se quedaría avisando según un reparto que ya no es el del gremio. Así se avisa exactamente a quien puede hacer algo con el aviso, hoy.
+
+Se consulta `role_permissions` en crudo, lo cual **sólo vale porque `war.vod.approve` no está en `LOCKED`** — los permisos que `permissionsFor` añade por su cuenta. No generaliza a `users.manage`.
+
+Quedan fuera tres, a propósito: las cuentas deshabilitadas, las que no tienen Discord vinculado (no hay a dónde escribir) y **quien acaba de subirla**, aunque sea oficial — ya sabe que la subió, y decírselo sólo lo convierte en ruido para el único que no lo necesita.
+
+### Una vez y no más
+
+`aviso_revision_en` y `aviso_aprobada_en` marcan que ya se avisó. Hace falta marca, y no basta con mirar el estado, porque las dos cosas que disparan un aviso se repiten sin que haya nada nuevo que contar: una grabación vuelve a pasar por `listo` cada vez que se reprepara — un reintento, o la recuperación al arrancar (§8) — y «Publicar» se puede pulsar dos veces sobre algo ya publicado. Un privado repetido no es un fallo cosmético: es la clase de cosa por la que la gente silencia al bot.
+
+Se marca **también cuando no se pudo entregar** — privados cerrados, sin Discord vinculado, nadie con el permiso. Reintentarlo en la siguiente repreparación no va a encontrar a nadie tampoco.
+
+### Al rechazar no se avisa
+
+Deliberado. Un rechazo se explica en persona o no se explica; un bot dando una mala noticia sin poder decir por qué es peor que el silencio.
+
+### Qué hace falta configurado
+
+`DISCORD_BOT_TOKEN` y `DISCORD_GUILD_ID` — los mismos del resto del bot. Sin ellos no se manda nada y todo lo demás sigue igual. `PUBLIC_URL` sólo pone el enlace del embed; sin ella el aviso llega sin enlace, que es mejor que llegar con uno roto.
+
+---
+
 # Fase 2 — Puesta en marcha
 
 El código está desplegable, pero **la funcionalidad nace apagada**: sin
