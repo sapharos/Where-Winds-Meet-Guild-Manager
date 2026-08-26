@@ -328,9 +328,12 @@ const store: Store = {
       ],
     },
     {
+      // Publicada y con video, pero SIN sincronizar: no puede ir al mosaico, y
+      // la lista tiene que decir por que. Es el caso que dejaba a oscuras --
+      // el boton contaba una menos y nada lo explicaba.
       id: 'vod-10', warId: fake.warRows[0].id, playerId: 'p-20',
-      estado: 'aprobado', duracionMs: 2_000_000, offsetMs: -400_000,
-      offsetConfianza: 'manual', fijado: false, expiraEn: vencimiento(70),
+      estado: 'aprobado', duracionMs: 2_000_000, offsetMs: null,
+      offsetConfianza: null, fijado: false, expiraEn: vencimiento(70),
       subidoEn: vencimiento(-27),
       calidades: [
         { calidad: 'origen', playlist: 'vod-10/origen.m3u8' },

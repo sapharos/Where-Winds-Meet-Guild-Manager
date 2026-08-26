@@ -140,6 +140,26 @@ const avanceDe = (vod: Vod): { texto: string | null; clase: string; barra: boole
   return null;
 };
 
+/**
+ * Por qué una grabación publicada no puede ir al mosaico. Null si sí puede.
+ *
+ * Esto existía sólo como un renglón general que aparecía cuando quedaban MENOS
+ * DE DOS aptas -- o sea, cuando el mosaico era imposible. Con tres publicadas y
+ * una sin sincronizar, el botón decía «Ver a la vez (2)» y no había nada, en
+ * ninguna parte, que explicara dónde estaba la tercera. La pregunta se hace
+ * mirando la lista, así que la respuesta va en la fila.
+ */
+const porQueNoEntraAlMosaico = (vod: Vod): string | null => {
+  if (vod.estado !== 'aprobado' || !vod.calidades.length) return null;
+  if (vod.offsetMs === null) {
+    return 'Sin sincronizar: no puede entrar en el mosaico. Ábrela con «Ver», pausa donde se lea el cronómetro del juego y dile qué marca.';
+  }
+  if (!vod.duracionMs) {
+    return 'No consta cuánto dura, así que no se sabe qué tramo de la guerra cubre y no puede entrar en el mosaico.';
+  }
+  return null;
+};
+
 const ETIQUETA: Record<Vod['estado'], { texto: string; clase: string }> = {
   subiendo: { texto: 'Subiendo', clase: 'text-slate-400' },
   procesando: { texto: 'Preparando', clase: 'text-amber-400' },
@@ -407,9 +427,14 @@ const WarVods: React.FC<Props> = ({
         .filter((f) => f.url),
     }));
 
-  const sinSincronizar = (vods ?? []).filter(
-    (v) => v.estado === 'aprobado' && v.offsetMs === null && v.calidades.length,
-  ).length;
+  /**
+   * Publicadas y con vídeo que aun así no pueden ir al mosaico.
+   *
+   * Contra `porQueNoEntraAlMosaico` y no contra `offsetMs === null` a secas,
+   * para que la cifra de arriba no pueda desmentir a los renglones de abajo:
+   * son la misma pregunta y tiene que contestarlas lo mismo.
+   */
+  const fueraDelMosaico = (vods ?? []).filter((v) => porQueNoEntraAlMosaico(v) !== null).length;
 
   const aprobadas = (vods ?? []).filter((v) => v.estado === 'aprobado' && v.calidades.length).length;
 
@@ -444,9 +469,12 @@ const WarVods: React.FC<Props> = ({
           <button
             type="button"
             onClick={() => setEligiendo(true)}
+            // Un `title` es lo que menos se ve de una interfaz: hay que
+            // acertarle con el ratón y esperar. Sirve de recordatorio, no de
+            // explicación -- la explicación va en el renglón de cada una.
             title={
-              sinSincronizar
-                ? `${sinSincronizar} grabación(es) más quedan fuera por no estar sincronizadas`
+              fueraDelMosaico
+                ? `${fueraDelMosaico} grabación(es) más quedan fuera; cada una dice por qué`
                 : undefined
             }
             className="px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium flex items-center gap-2"
@@ -545,13 +573,21 @@ const WarVods: React.FC<Props> = ({
         estaba ahí y era invisible, sin manera de averiguar qué faltaba. Un
         renglón cuesta nada y convierte un callejón sin salida en una tarea.
       */}
-      {vods !== null && paraMosaico.length < 2 && aprobadas >= 1 && (
+      {/*
+        Antes esto sólo salía cuando el mosaico era IMPOSIBLE (menos de dos
+        aptas), que es justo cuando menos falta hace explicarlo: con el botón
+        desaparecido, ya se nota. El caso que dejaba a oscuras era el otro --
+        tres publicadas y «Ver a la vez (2)» --, donde el botón sí está y la
+        cifra no cuadra con lo que se ve en la lista.
+      */}
+      {vods !== null && aprobadas >= 1 && (fueraDelMosaico > 0 || paraMosaico.length < 2) && (
         <p className="mb-3 text-[11px] text-slate-500">
-          {sinSincronizar > 0 ? (
+          {fueraDelMosaico > 0 ? (
             <>
-              Para verlas a la vez hacen falta dos grabaciones sincronizadas y hay{' '}
-              {sinSincronizar} sin sincronizar. Ábrela con «Ver» y dile en qué momento de la
-              guerra empieza.
+              De {aprobadas} grabaciones publicadas,{' '}
+              {paraMosaico.length === 1 ? 'sólo una puede' : `${paraMosaico.length} pueden`} verse a
+              la vez: {fueraDelMosaico === 1 ? 'a una le falta' : `a ${fueraDelMosaico} les falta`}{' '}
+              la sincronía. Cada una lo dice en su renglón.
             </>
           ) : (
             <>Con una segunda grabación publicada de esta guerra podréis verlas a la vez, cuadradas.</>
@@ -668,6 +704,16 @@ const WarVods: React.FC<Props> = ({
                       }`}
                     >
                       {vod.procesoError}
+                    </p>
+                  )}
+
+                  {/* Por qué no cuenta para el mosaico. En la fila y no sólo en
+                      un aviso general arriba: quien busca la que falta está
+                      mirando estas tres líneas. */}
+                  {porQueNoEntraAlMosaico(vod) && (
+                    <p className="mt-1 text-[11px] text-amber-400/90 flex items-start gap-1.5">
+                      <i className="fa-solid fa-table-cells-large mt-0.5 shrink-0" aria-hidden="true" />
+                      <span>{porQueNoEntraAlMosaico(vod)}</span>
                     </p>
                   )}
                 </div>

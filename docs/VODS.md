@@ -390,6 +390,24 @@ Los mandos ya no se repiten debajo. Dos juegos de botones para lo mismo, uno
 encima del vídeo y otro fuera, obligaban a mirar dos sitios para saber si estaba
 sonando.
 
+### Y por qué una publicada puede no entrar
+
+Al mosaico sólo van las **publicadas, con vídeo y sincronizadas**. Sin `offset_ms`
+no hay forma de saber dónde encaja una grabación respecto a las demás, así que
+meterla sería alinearla al azar.
+
+Eso ya era así; lo que faltaba era **decirlo**. La explicación existía, pero
+gateada a que quedaran menos de dos aptas -- o sea, a que el mosaico fuera
+imposible, que es justo cuando menos falta hace explicarlo: con el botón
+desaparecido, ya se nota. El caso que dejaba a oscuras era el otro: tres
+publicadas y «Ver a la vez (2)», con el botón ahí y la cifra sin cuadrar con lo
+que se ve en la lista.
+
+Ahora lo dice **cada renglón**, que es donde se hace la pregunta -- mirando las
+tres filas y buscando cuál falta --, y arriba queda el recuento. Las dos cifras
+salen de la misma función, para que el recuento no pueda desmentir a los
+renglones.
+
 ### Quiénes entran se elige antes
 
 Se cogían las cuatro primeras por orden de subida. Con seis grabaciones de una
