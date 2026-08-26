@@ -306,21 +306,24 @@ final:
   `playbackRate` (0,97-1,03) para lo pequeño.
 - **Un solo audio sin silenciar**, que además es lo que exigen los navegadores
   para autoreproducir.
-- **4 mosaicos como máximo.** Los navegadores tienen tope de decodificaciones
+- **6 como máximo.** Los navegadores tienen tope de decodificaciones
   simultáneas y en móvil es peor.
-- **El mosaico enfocado a calidad alta, el resto a 360p.** Con 900 Mbps
-  simétricos hay margen, pero cuatro mosaicos a 1080p son ~30 Mbps por espectador
-  y no hace falta.
+- **La grande a calidad alta, el resto a 360p.** Con 900 Mbps simétricos hay
+  margen, pero seis a 1080p son ~30 Mbps por espectador y no hace falta. Una que
+  no tenga copia de 360p entra con la que tenga: mejor grande de más que ausente.
 - **El reloj manda, no el vídeo.** La hora de la guerra la lleva el mosaico
   enfocado, pero **sólo mientras está reproduciendo**. Leerla siempre parecía lo
   natural y es un error: si el maestro no puede moverse --cargando, red
   atascada, o fuera de su tramo-- su posición se queda quieta y publicarla en
   cada fotograma deshace el salto que acaba de pedir quien mira. Se pulsa la
   línea de tiempo y no pasa nada, sin ninguna pista de por qué.
-- **Y si el enfocado no cubre el instante, manda otro.** A un vídeo que no llega
-  a ese momento no se le puede preguntar la hora. Pasa en cuanto alguien se
-  mueve fuera del tramo del que está oyendo, que con cobertura desigual es a
-  cada rato.
+- **Y si la grande no cubre el instante, manda otra.** A un vídeo que no llega a
+  ese momento no se le puede preguntar la hora. Pasa en cuanto alguien se mueve
+  fuera del tramo del que está oyendo, que con cobertura desigual es a cada
+  rato. El relevo es **sólo del reloj**: la grande no se mueve. Antes era estado
+  y el relevo cambiaba el mosaico enfocado, lo cual con la calidad atada al hueco
+  grande sería peor todavía -- un salto en la línea de tiempo reabriría dos
+  fuentes y pondría a otro en grande sin que nadie lo pidiera.
 - **Lo que decide va en una referencia, no en el estado de React.** El estado
   sólo se refresca al repintar, así que dos pulsaciones seguidas de «marca
   siguiente» leerían el mismo instante y saltarían las dos al mismo sitio. Vale
@@ -330,6 +333,50 @@ final:
   tiempo dibuja **la cobertura de cada uno como una barra**, y al saltar a un
   instante que un VOD no grabó, su mosaico dice **«aún no grababa»** en vez de
   quedarse en negro.
+
+### Una grande y una columna, no una rejilla
+
+Revisar una guerra no es mirar cuatro vídeos a la vez: es mirar **uno** y tener
+los otros a mano para saltar cuando algo pasa fuera de cuadro. La rejilla de
+iguales repartía la pantalla en partes iguales entre el que se mira y los que se
+vigilan, así que el que se mira quedaba a un cuarto del tamaño que podía tener.
+
+Ahora: la grande a la izquierda con todo el alto que quede, la columna a la
+derecha, y la línea de tiempo cruzando abajo. En el móvil no hay columna que
+valga -- la grande arriba y las demás en una tira horizontal que se arrastra con
+el dedo.
+
+**Pulsar una de la columna la pone en grande**, y la que estaba baja a la
+columna. La calidad va con el hueco, no con la posición en la lista: hasta ahora
+era `at === 0` quien se llevaba el 1080p pasara lo que pasara con el foco, o sea
+que pulsar otro mosaico cambiaba el audio y nada más -- seguías viendo en pequeño
+y borroso justo lo que acababas de decir que querías mirar.
+
+Tres trampas que esconde ese intercambio, y que costaron más que el resto:
+
+1. **Se reengancha sólo lo que cambia.** Rehacerlo todo dejaría el mosaico entero
+   en negro un par de segundos cada vez que alguien pulsa una miniatura.
+2. **Se suelta todo antes de enganchar nada.** React recicla el `<video>` de la
+   que baja para la que sube; en una sola pasada, el `destroy()` de la que baja
+   puede arrancarle la fuente recién puesta a la que sube. Dependía del orden de
+   la lista, que es la peor clase de fallo -- funciona hasta que alguien elige las
+   perspectivas al revés.
+3. **Se retoma contra el reloj de guerra, no contra el `currentTime` anterior.**
+   Ese elemento puede no existir ya, y su posición sería cero: copiarla mandaría
+   a todo el mundo al principio. El reloj sobrevive al intercambio; el nodo no.
+
+### Quiénes entran se elige antes
+
+Se cogían las cuatro primeras por orden de subida. Con seis grabaciones de una
+guerra eso significa que las dos últimas no existen, sin decirlo, y que quien
+quería comparar dos líneas concretas no tenía forma de pedirlo -- que es justo
+para lo que sirve un mosaico.
+
+El selector se abre siempre, aunque sólo haya dos: es también donde se ve quién
+grabó esa noche. Cada fila lleva **el tramo de guerra que cubre**, de principio a
+fin, porque la pregunta que se hace ahí es «¿estas dos vieron el mismo
+momento?», y dos extremos la contestan de un vistazo mientras que un arranque con
+una duración al lado obliga a sumarlos de cabeza para cada pareja.
 
 ---
 

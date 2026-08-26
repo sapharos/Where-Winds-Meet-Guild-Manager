@@ -303,6 +303,41 @@ const store: Store = {
         'origen: Invalid data found when processing input',
     },
     {
+      // Tres publicadas y sincronizadas más, para que el mosaico tenga de
+      // donde elegir. Con dos no se podía ensayar ni el selector ni la columna,
+      // que es justo lo que hay que poder mirar. Empiezan en momentos
+      // distintos a propósito: nadie graba la guerra entera y los huecos
+      // --«aún no grababa», «ya había parado»-- son parte de lo que se prueba.
+      id: 'vod-8', warId: fake.warRows[0].id, playerId: 'p-9',
+      estado: 'aprobado', duracionMs: 1_500_000, offsetMs: -120_000,
+      offsetConfianza: 'ocr', fijado: false, expiraEn: vencimiento(70),
+      subidoEn: vencimiento(-27),
+      calidades: [
+        { calidad: 'origen', playlist: 'vod-8/origen.m3u8' },
+        { calidad: '360p', playlist: 'vod-8/360p.m3u8' },
+      ],
+    },
+    {
+      id: 'vod-9', warId: fake.warRows[0].id, playerId: 'p-13',
+      estado: 'aprobado', duracionMs: 1_800_000, offsetMs: 300_000,
+      offsetConfianza: 'ocr', fijado: false, expiraEn: vencimiento(70),
+      subidoEn: vencimiento(-27),
+      calidades: [
+        { calidad: 'origen', playlist: 'vod-9/origen.m3u8' },
+        { calidad: '360p', playlist: 'vod-9/360p.m3u8' },
+      ],
+    },
+    {
+      id: 'vod-10', warId: fake.warRows[0].id, playerId: 'p-20',
+      estado: 'aprobado', duracionMs: 2_000_000, offsetMs: -400_000,
+      offsetConfianza: 'manual', fijado: false, expiraEn: vencimiento(70),
+      subidoEn: vencimiento(-27),
+      calidades: [
+        { calidad: 'origen', playlist: 'vod-10/origen.m3u8' },
+        { calidad: '360p', playlist: 'vod-10/360p.m3u8' },
+      ],
+    },
+    {
       // Caducada: la fila sigue, los bytes no. Sin botón de ver.
       id: 'vod-5', warId: fake.warRows[1]?.id ?? fake.warRows[0].id, playerId: 'p-2',
       estado: 'caducado', duracionMs: 2_040_000, offsetMs: -420_000,

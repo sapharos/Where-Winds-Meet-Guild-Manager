@@ -26,8 +26,16 @@ import { SALTO_MS, correccion } from '../services/relojGuerra';
  * ## Y por qué un solo audio
  *
  * Cuatro audios a la vez no es información, es ruido -- y además los
- * navegadores no dejan autoreproducir con sonido. Suena el que tiene el foco, y
- * cambiar de foco cambia de oído.
+ * navegadores no dejan autoreproducir con sonido. Suena la que está en grande,
+ * y ponerse a otra en grande cambia de oído.
+ *
+ * ## La disposición
+ *
+ * Una grande y una columna al lado, no una rejilla de iguales. Revisar una
+ * guerra no es mirar cuatro vídeos a la vez: es mirar UNO y tener los otros a
+ * mano para saltar cuando algo pasa fuera de cuadro. La rejilla repartía la
+ * pantalla en partes iguales entre un vídeo que se mira y tres que se vigilan,
+ * y así el que se mira quedaba a un cuarto del tamaño que podía tener.
  */
 
 export interface VodEnMosaico {
@@ -66,10 +74,67 @@ async function cargarHls(): Promise<any> {
   return w.Hls;
 }
 
+/**
+ * Un vídeo del mosaico, grande o de la columna.
+ *
+ * Uno solo para las dos posiciones para que las dos se pinten igual, no para
+ * conservar el nodo: al intercambiar, React **destruye y recrea** el `<video>`
+ * que cambia de contenedor -- se comprobó marcando los nodos y mirando cuáles
+ * sobreviven. Los de la columna que no se tocan sí se conservan, gracias a su
+ * `key`; los dos que se intercambian, no.
+ *
+ * Da igual, y esa es la parte que importa: esos dos son justo los que cambian
+ * de calidad, así que iban a volver a abrir su fuente de todas formas. Lo que
+ * NO puede depender de que el nodo sobreviva es dónde se retoma, y por eso se
+ * retoma contra el reloj de guerra y no contra el `currentTime` que tuviera el
+ * elemento. Ver `volver()`.
+ */
+const MosaicoVideo: React.FC<{
+  vod: VodEnMosaico;
+  dentro: boolean;
+  tGuerra: number;
+  numero: number;
+  grande?: boolean;
+  registrar: (id: string, el: HTMLVideoElement | null) => void;
+}> = ({ vod, dentro, tGuerra, numero, grande, registrar }) => (
+  <div className={`relative bg-black overflow-hidden ${grande ? 'rounded-lg ring-1 ring-slate-700' : ''}`}>
+    <video
+      ref={(el) => registrar(vod.id, el)}
+      playsInline
+      className={`w-full ${
+        grande ? 'max-h-[calc(100vh-16rem)] aspect-video object-contain' : 'aspect-video'
+      } ${dentro ? '' : 'opacity-20'}`}
+    />
+    <span className="absolute top-1 left-1 px-1.5 rounded bg-slate-950/85 text-[10px] text-slate-200 max-w-[90%] truncate">
+      {numero} · {vod.nombre}
+      {grande && <span className="text-amber-400"> · sonando</span>}
+    </span>
+    {/* Nadie graba la guerra entera. Decirlo evita que un mosaico en negro
+        parezca un fallo. */}
+    {!dentro && (
+      <span className="absolute inset-0 flex items-center justify-center text-[11px] text-slate-400">
+        {tGuerra < vod.offsetMs ? 'aún no grababa' : 'ya había parado'}
+      </span>
+    )}
+  </div>
+);
+
 const Multistream: React.FC<Props> = ({ vods, marcas, onClose }) => {
   const videos = useRef(new Map<string, HTMLVideoElement>());
-  const [foco, setFoco] = useState(vods[0]?.id ?? '');
+  /**
+   * La que ocupa el hueco grande: se ve a 1080p y es la que suena.
+   *
+   * Antes esto no existía y la calidad iba atada a la POSICIÓN en el array --
+   * `at === 0` se llevaba el 1080p y el resto 360p, pasara lo que pasara con el
+   * foco. O sea que pulsar otro mosaico cambiaba el audio y nada más: seguías
+   * viendo en pequeño y borroso justo lo que acababas de decir que querías
+   * mirar. Ahora la calidad sigue al hueco grande, que es lo que se esperaba.
+   */
+  const [principal, setPrincipal] = useState(vods[0]?.id ?? '');
   const [sonando, setSonando] = useState(false);
+  // En referencia además de en estado: lo lee `volver()`, que corre desde un
+  // oyente de `loadedmetadata` y por tanto fuera del renderizado que lo creo.
+  const sonandoRef = useRef(false);
   const [tGuerra, setTGuerra] = useState(0);
   const relojPuesto = useRef(false);
 
@@ -115,56 +180,134 @@ const Multistream: React.FC<Props> = ({ vods, marcas, onClose }) => {
     [],
   );
 
-  // --- Enganchar cada fuente ------------------------------------------------
+  // --- Enganchar cada fuente, con la calidad que le toque ahora -------------
+
+  /**
+   * Qué calidad tiene enganchada cada vídeo ahora mismo, y con qué instancia.
+   *
+   * Hace falta recordarlo para poder cambiar SÓLO las dos que se intercambian.
+   * Rehacerlo todo en cada cambio de principal volvería a bajar los primeros
+   * segmentos de las cinco, y el mosaico entero se quedaría en negro durante un
+   * par de segundos cada vez que alguien pulsa una miniatura.
+   */
+  const adjuntos = useRef(new Map<string, { calidad: string; hls: { destroy: () => void } | null }>());
+
   useEffect(() => {
-    const instancias: { destroy: () => void }[] = [];
     let vivo = true;
 
-    vods.forEach(async (vod, at) => {
-      const el = videos.current.get(vod.id);
-      if (!el) return;
-      // El enfocado a la mejor calidad; el resto a 360p. Cuatro mosaicos a
-      // 1080p son ~30 Mbps por espectador y en los pequeños no se nota.
-      const quiere = at === 0 ? 'origen' : '360p';
-      const fuente = vod.fuentes.find((f) => f.calidad === quiere) ?? vod.fuentes[0];
-      if (!fuente) return;
+    // La grande a la mejor calidad; la columna a 360p. Seis mosaicos a 1080p
+    // son ~30 Mbps por espectador y en los pequeños no se nota.
+    const cambian = vods
+      .map((vod) => {
+        const el = videos.current.get(vod.id);
+        const quiere = vod.id === principal ? 'origen' : '360p';
+        const fuente = vod.fuentes.find((f) => f.calidad === quiere) ?? vod.fuentes[0];
+        return { vod, el, fuente };
+      })
+      .filter(
+        (x) => x.el && x.fuente && adjuntos.current.get(x.vod.id)?.calidad !== x.fuente.calidad,
+      );
 
-      if (el.canPlayType('application/vnd.apple.mpegurl')) {
-        el.src = fuente.url;
-        return;
+    /*
+      Primero se sueltan TODAS las que cambian, y después se engancha.
+
+      En una sola pasada hay una carambola que muerde: al intercambiar, React
+      recicla el `<video>` de la que baja para la que sube. Si la que sube se
+      enganchara antes de que la que baja soltara, el `destroy()` de la que baja
+      --que sigue apuntando a ESE MISMO elemento-- le arrancaría la fuente
+      recién puesta, y la grande se quedaría en negro. Dependía del orden en
+      que estuvieran en la lista, que es la peor clase de fallo: funciona hasta
+      que alguien elige las perspectivas al revés.
+    */
+    for (const { vod } of cambian) adjuntos.current.get(vod.id)?.hls?.destroy();
+
+    void (async () => {
+      for (const { vod, el, fuente } of cambian) {
+        if (!el || !fuente) continue;
+
+        /**
+         * Retomar donde estaba el MOSAICO, no donde estaba el elemento.
+         *
+         * Cambiar de calidad es volver a abrir la fuente desde cero, y sin esto
+         * el intercambio mandaría al recién ascendido al segundo cero de su
+         * fichero -- que ni siquiera es el mismo instante de guerra que el
+         * resto, así que el mosaico se rompería entero por haber querido ver a
+         * alguien más grande.
+         *
+         * Y se lee del reloj de guerra en vez del `currentTime` anterior porque
+         * ese elemento puede no existir ya: React recrea el `<video>` que pasa
+         * de la columna al hueco grande, así que su posición anterior es cero y
+         * copiarla mandaría a todo el mundo al principio. El reloj sobrevive al
+         * intercambio; el nodo no.
+         */
+        const volver = () => {
+          if (!cubre(vod, relojRef.current)) return;
+          el.currentTime = (relojRef.current - vod.offsetMs) / 1000;
+          if (sonandoRef.current) void el.play().catch(() => {});
+        };
+
+        if (el.canPlayType('application/vnd.apple.mpegurl')) {
+          el.src = fuente.url;
+          adjuntos.current.set(vod.id, { calidad: fuente.calidad, hls: null });
+          el.addEventListener('loadedmetadata', volver, { once: true });
+          continue;
+        }
+        const Hls = await cargarHls().catch(() => null);
+        if (!vivo || !Hls?.isSupported()) continue;
+        const i = new Hls();
+        i.loadSource(fuente.url);
+        i.attachMedia(el);
+        adjuntos.current.set(vod.id, { calidad: fuente.calidad, hls: i });
+        el.addEventListener('loadedmetadata', volver, { once: true });
       }
-      const Hls = await cargarHls().catch(() => null);
-      if (!vivo || !Hls?.isSupported()) return;
-      const i = new Hls();
-      i.loadSource(fuente.url);
-      i.attachMedia(el);
-      instancias.push(i);
-    });
+    })();
 
     return () => {
       vivo = false;
-      instancias.forEach((i) => i.destroy());
     };
-  }, [vods]);
+  }, [vods, principal, cubre]);
+
+  // Al cerrar, todo. La limpieza NO va en el efecto de arriba: ése corre en
+  // cada cambio de principal, y destruir ahí las instancias buenas dejaría sin
+  // fuente a las que no se estaban tocando.
+  useEffect(
+    () => () => {
+      for (const a of adjuntos.current.values()) a.hls?.destroy();
+      adjuntos.current.clear();
+    },
+    [],
+  );
 
   // --- Ir a un instante de la guerra ---------------------------------------
+  /**
+   * Quién dicta la hora en este instante.
+   *
+   * La principal, mientras cubra el momento; si no, la primera que lo cubra. A
+   * un vídeo que no llega a ese momento no se le puede preguntar la hora: se
+   * quedaría parado donde estaba y devolvería el reloj de todos allí, con toda
+   * la pinta de que el salto no ha funcionado. Nadie graba la guerra entera,
+   * así que esto pasa en cuanto alguien se mueve fuera del tramo del que está
+   * mirando.
+   *
+   * Se calcula en cada uso y ya no es estado, que es lo que antes hacía que
+   * salirse del tramo CAMBIARA el mosaico enfocado. Con la calidad atada al
+   * hueco grande eso sería peor todavía: un salto de la línea de tiempo
+   * reabriría dos fuentes y pondría a otro en grande sin que nadie lo pidiera.
+   * El hueco grande sólo lo mueve quien mira.
+   */
+  const maestroEn = useCallback(
+    (t: number) => {
+      const suyo = vods.find((v) => v.id === principal);
+      if (suyo && cubre(suyo, t)) return suyo;
+      return vods.find((v) => cubre(v, t));
+    },
+    [vods, principal, cubre],
+  );
+
   const irA = useCallback(
     (t: number) => {
       const limitado = Math.max(desde, Math.min(t, hasta));
       ponerReloj(limitado);
-
-      // Si quien manda no cubre el instante al que vamos, manda otro.
-      //
-      // El reloj maestro es el mosaico enfocado, y a un vídeo que no llega a
-      // ese momento no se le puede preguntar la hora: se quedaria parado donde
-      // estaba y devolveria el reloj de todos allí, con toda la pinta de que
-      // el salto no ha funcionado. Nadie graba la guerra entera, asi que esto
-      // pasa en cuanto alguien se mueve fuera del tramo del que esta oyendo.
-      const actual = vods.find((v) => v.id === foco);
-      if (!actual || !cubre(actual, limitado)) {
-        const releva = vods.find((v) => cubre(v, limitado));
-        if (releva) setFoco(releva.id);
-      }
 
       vods.forEach((v) => {
         const el = videos.current.get(v.id);
@@ -178,7 +321,7 @@ const Multistream: React.FC<Props> = ({ vods, marcas, onClose }) => {
         }
       });
     },
-    [vods, desde, hasta, cubre, foco, ponerReloj],
+    [vods, desde, hasta, cubre, ponerReloj],
   );
 
   // --- El reloj maestro y la corrección de deriva --------------------------
@@ -190,8 +333,8 @@ const Multistream: React.FC<Props> = ({ vods, marcas, onClose }) => {
       if (!vivo) return;
       cuadro = requestAnimationFrame(tic);
 
-      const maestro = videos.current.get(foco);
-      const vodMaestro = vods.find((v) => v.id === foco);
+      const vodMaestro = maestroEn(relojRef.current);
+      const maestro = vodMaestro && videos.current.get(vodMaestro.id);
       if (!maestro || !vodMaestro) return;
 
       // El vídeo sólo dicta la hora MIENTRAS ESTÁ REPRODUCIENDO.
@@ -211,7 +354,7 @@ const Multistream: React.FC<Props> = ({ vods, marcas, onClose }) => {
       ponerReloj(ahora);
 
       for (const v of vods) {
-        if (v.id === foco) continue;
+        if (v.id === vodMaestro.id) continue;
         const el = videos.current.get(v.id);
         if (!el) continue;
 
@@ -233,11 +376,12 @@ const Multistream: React.FC<Props> = ({ vods, marcas, onClose }) => {
       vivo = false;
       cancelAnimationFrame(cuadro);
     };
-  }, [foco, vods, sonando, cubre, ponerReloj]);
+  }, [maestroEn, vods, sonando, cubre, ponerReloj]);
 
   // --- Sonar y parar --------------------------------------------------------
   const alternar = useCallback(() => {
     const siguiente = !sonando;
+    sonandoRef.current = siguiente;
     setSonando(siguiente);
     vods.forEach((v) => {
       const el = videos.current.get(v.id);
@@ -247,14 +391,14 @@ const Multistream: React.FC<Props> = ({ vods, marcas, onClose }) => {
     });
   }, [sonando, vods, cubre]);
 
-  // El audio sigue al foco. Se hace aquí y no al pulsar para que también valga
-  // cuando el foco cambia por otra vía.
+  // El audio sale de la grande. Aquí y no al pulsar, para que también valga
+  // cuando cambia por otra vía -- el teclado, o quedarse sin candidatas.
   useEffect(() => {
     vods.forEach((v) => {
       const el = videos.current.get(v.id);
-      if (el) el.muted = v.id !== foco;
+      if (el) el.muted = v.id !== principal;
     });
-  }, [foco, vods]);
+  }, [principal, vods]);
 
   const ordenadas = useMemo(
     () => [...marcas].filter((m) => m.tMs >= desde && m.tMs <= hasta).sort((a, b) => a.tMs - b.tMs),
@@ -285,12 +429,12 @@ const Multistream: React.FC<Props> = ({ vods, marcas, onClose }) => {
         n: () => saltarMarca(1),
         p: () => saltarMarca(-1),
       };
-      // 1..4 cambia de foco, que es lo que más se usa revisando: se sigue a uno
-      // hasta que pasa algo y se salta al que lo vio de cerca.
+      // 1..6 pone a uno en grande, que es lo que más se usa revisando: se sigue
+      // a uno hasta que pasa algo y se salta al que lo vio de cerca.
       const numero = Number(e.key);
       if (numero >= 1 && numero <= vods.length) {
         e.preventDefault();
-        setFoco(vods[numero - 1].id);
+        setPrincipal(vods[numero - 1].id);
         return;
       }
       const hacer = acciones[e.key] ?? acciones[e.key.toLowerCase()];
@@ -306,6 +450,32 @@ const Multistream: React.FC<Props> = ({ vods, marcas, onClose }) => {
   const anchoTotal = hasta - desde || 1;
   const pct = (t: number) => ((t - desde) / anchoTotal) * 100;
 
+  const principalVod = vods.find((v) => v.id === principal);
+  // En el orden original y no con la principal quitada del medio: la columna
+  // debe quedarse quieta al intercambiar. Reordenarla haría que la miniatura
+  // que acabas de pulsar arrastre a las de abajo un hueco hacia arriba, y la
+  // siguiente pulsación caería sobre otra persona.
+  const secundarios = vods.filter((v) => v.id !== principal);
+
+  /**
+   * Quién es el `<video>` de cada grabación.
+   *
+   * Al desmontar no se borra a ciegas. React recrea el elemento que cambia de
+   * contenedor, y según el orden en que confirme el montaje y el desmontaje, el
+   * `null` del viejo puede llegar DESPUÉS del elemento nuevo: borrar entonces
+   * dejaría a esa grabación sin nodo registrado, y el efecto de enganche la
+   * saltaría por no encontrarla. Se comprueba que el registrado siga en el
+   * documento, que es cierto exactamente cuando es el bueno.
+   */
+  const registrar = useCallback((id: string, el: HTMLVideoElement | null) => {
+    if (el) {
+      videos.current.set(id, el);
+      return;
+    }
+    const puesto = videos.current.get(id);
+    if (puesto && !puesto.isConnected) videos.current.delete(id);
+  }, []);
+
   return (
     <Sheet
       title="Mosaico"
@@ -313,45 +483,55 @@ const Multistream: React.FC<Props> = ({ vods, marcas, onClose }) => {
       size="video"
       onClose={onClose}
     >
-      <div className="space-y-3">
-        {/* Los mosaicos. Dos columnas desde sm: en un teléfono, cuatro vídeos
-            uno al lado de otro no se ven, y apilados sí. */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          {vods.map((v, at) => {
-            const dentro = cubre(v, tGuerra);
-            return (
+      <div className="space-y-2">
+        {/*
+          Una grande y una columna al lado.
+
+          En escritorio la grande se lleva todo el alto que quede de la hoja
+          --de ahí el `max-h` en viewport en vez de un `aspect-video`, que la
+          dejaría corta en pantallas anchas-- y la columna se ajusta a ese
+          mismo alto con su propio scroll. En el móvil no hay columna que valga:
+          la grande arriba y las demás en una tira horizontal debajo, que se
+          arrastra con el dedo.
+        */}
+        <div className="flex flex-col lg:flex-row gap-2">
+          <div className="lg:flex-1 min-w-0">
+            <MosaicoVideo
+              vod={principalVod ?? vods[0]}
+              grande
+              dentro={principalVod ? cubre(principalVod, tGuerra) : false}
+              tGuerra={tGuerra}
+              numero={vods.findIndex((v) => v.id === principal) + 1}
+              registrar={registrar}
+            />
+          </div>
+
+          <div
+            className="flex lg:flex-col gap-2 overflow-x-auto lg:overflow-x-visible lg:overflow-y-auto lg:w-[24%] lg:max-h-[calc(100vh-16rem)] shrink-0"
+            role="list"
+            aria-label="Otras perspectivas"
+          >
+            {secundarios.map((v) => (
               <button
                 key={v.id}
                 type="button"
-                onClick={() => setFoco(v.id)}
-                aria-label={`Escuchar a ${v.nombre}`}
-                className={`tap-suelto relative rounded-lg overflow-hidden bg-black text-left ${
-                  v.id === foco ? 'ring-2 ring-amber-500' : 'ring-1 ring-slate-800'
-                }`}
+                role="listitem"
+                onClick={() => setPrincipal(v.id)}
+                aria-label={`Poner a ${v.nombre} en grande`}
+                // `w-40` en el móvil para que la tira enseñe que hay más a la
+                // derecha; en escritorio, todo el ancho de la columna.
+                className="tap-suelto w-40 lg:w-full shrink-0 rounded-lg overflow-hidden ring-1 ring-slate-800 hover:ring-amber-500/60 transition-colors duration-micro"
               >
-                <video
-                  ref={(el) => {
-                    if (el) videos.current.set(v.id, el);
-                    else videos.current.delete(v.id);
-                  }}
-                  playsInline
-                  muted={v.id !== foco}
-                  className={`w-full aspect-video ${dentro ? '' : 'opacity-20'}`}
+                <MosaicoVideo
+                  vod={v}
+                  dentro={cubre(v, tGuerra)}
+                  tGuerra={tGuerra}
+                  numero={vods.findIndex((x) => x.id === v.id) + 1}
+                  registrar={registrar}
                 />
-                <span className="absolute top-1 left-1 px-1.5 rounded bg-slate-950/85 text-[10px] text-slate-200">
-                  {at + 1} · {v.nombre}
-                  {v.id === foco && <span className="text-amber-400"> · sonando</span>}
-                </span>
-                {/* Nadie graba la guerra entera. Decirlo evita que un mosaico
-                    en negro parezca un fallo. */}
-                {!dentro && (
-                  <span className="absolute inset-0 flex items-center justify-center text-[11px] text-slate-400">
-                    {tGuerra < v.offsetMs ? 'aún no grababa' : 'ya había parado'}
-                  </span>
-                )}
               </button>
-            );
-          })}
+            ))}
+          </div>
         </div>
 
         {/* --- La línea de tiempo, que es de la guerra y no de un vídeo --- */}
@@ -367,7 +547,7 @@ const Multistream: React.FC<Props> = ({ vods, marcas, onClose }) => {
               <div key={v.id} className="relative h-1.5 rounded-full bg-slate-800">
                 <div
                   className={`absolute h-full rounded-full ${
-                    v.id === foco ? 'bg-amber-500/70' : 'bg-slate-600'
+                    v.id === principal ? 'bg-amber-500/70' : 'bg-slate-600'
                   }`}
                   style={{
                     left: `${pct(v.offsetMs)}%`,

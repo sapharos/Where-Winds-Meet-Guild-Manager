@@ -4,6 +4,7 @@ import Sheet from './Sheet';
 import PreparaVod from './PreparaVod';
 import Reproductor, { Marca } from './Reproductor';
 import Multistream, { VodEnMosaico } from './Multistream';
+import ElegirMosaico from './ElegirMosaico';
 import { ProgresoSubida, enBytes, loQueFalta, subir } from '../services/subidaTus';
 
 /**
@@ -173,7 +174,16 @@ const WarVods: React.FC<Props> = ({
    */
   const [deQuien, setDeQuien] = useState<string>('');
   const [marcas, setMarcas] = useState<Marca[]>([]);
-  const [mosaico, setMosaico] = useState(false);
+  /**
+   * El mosaico, en dos tiempos.
+   *
+   * `eligiendo` es la pantalla de «quiénes entran» y `mosaico` son las
+   * elegidas ya montadas. Antes era un solo booleano y se cogían las cuatro
+   * primeras por orden de subida: con seis grabaciones, las dos últimas no
+   * existían y nadie lo decía.
+   */
+  const [eligiendo, setEligiendo] = useState(false);
+  const [mosaico, setMosaico] = useState<VodEnMosaico[] | null>(null);
   const archivo = useRef<HTMLInputElement>(null);
   const cancelar = useRef<AbortController | null>(null);
 
@@ -384,7 +394,8 @@ const WarVods: React.FC<Props> = ({
    */
   const paraMosaico: VodEnMosaico[] = (vods ?? [])
     .filter((v) => v.estado === 'aprobado' && v.offsetMs !== null && v.duracionMs && v.calidades.length)
-    .slice(0, 4)
+    // Sin recortar a las primeras: ahora se eligen, y para elegir hay que
+    // verlas todas. El tope lo aplica el selector sobre lo MARCADO.
     .map((v) => ({
       id: v.id,
       playerId: v.playerId,
@@ -432,7 +443,7 @@ const WarVods: React.FC<Props> = ({
         {paraMosaico.length >= 2 && (
           <button
             type="button"
-            onClick={() => setMosaico(true)}
+            onClick={() => setEligiendo(true)}
             title={
               sinSincronizar
                 ? `${sinSincronizar} grabación(es) más quedan fuera por no estar sincronizadas`
@@ -441,7 +452,7 @@ const WarVods: React.FC<Props> = ({
             className="px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium flex items-center gap-2"
           >
             <i className="fa-solid fa-table-cells-large" aria-hidden="true" />
-            Ver {paraMosaico.length} a la vez
+            Ver a la vez ({paraMosaico.length})
           </button>
         )}
 
@@ -759,8 +770,19 @@ const WarVods: React.FC<Props> = ({
         />
       )}
 
+      {eligiendo && (
+        <ElegirMosaico
+          candidatas={paraMosaico}
+          onCancelar={() => setEligiendo(false)}
+          onVer={(elegidas) => {
+            setEligiendo(false);
+            setMosaico(elegidas);
+          }}
+        />
+      )}
+
       {mosaico && (
-        <Multistream vods={paraMosaico} marcas={marcas} onClose={() => setMosaico(false)} />
+        <Multistream vods={mosaico} marcas={marcas} onClose={() => setMosaico(null)} />
       )}
 
       {viendo && (
