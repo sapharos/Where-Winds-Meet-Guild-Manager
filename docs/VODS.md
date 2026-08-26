@@ -88,6 +88,60 @@ Al ingerir:
 - **HEVC/AV1** (iPhone reciente, sobre todo) sí necesitan recodificado completo.
   Se recomienda H.264 al subir para que sea la excepción.
 
+### El nombre del códec no basta para decidir si se copia
+
+Durante un tiempo la decisión fue `codec_name === 'h264'`, y eso deja pasar
+vídeos que un navegador **no puede reproducir**:
+
+| Lo que trae | `codec_name` | ¿Lo decodifica un navegador? |
+|---|---|---|
+| H.264 8 bits 4:2:0 (`yuv420p`) | `h264` | sí |
+| H.264 **10 bits** (`yuv420p10le`, Hi10P) | `h264` | **no** |
+| H.264 croma **4:2:2 / 4:4:4** | `h264` | **no** |
+
+Copiados tal cual, esos dos últimos producen exactamente este síntoma: **el
+audio suena y la imagen se queda congelada en uno de los primeros fotogramas**.
+El decodificador no puede con el primer cuadro y la pista de sonido sigue su
+camino. En el ordenador de quien grabó se ve perfectamente —VLC y el reproductor
+de Windows los decodifican sin pestañear—, que es lo que hace el fallo tan
+confuso de diagnosticar.
+
+Así que se mira el **formato de píxel**, no el nombre: se copia sólo si es
+`yuv420p` o `yuvj420p`. Y las dos pistas se deciden por separado, porque quien
+graba en H.264 con audio Opus no tiene por qué pagar un recodificado de vídeo
+entero por una pista de sonido que se convierte en segundos.
+
+### El recodificado tenía el mismo defecto
+
+Peor que lo anterior: `-c:v libx264` sin `-pix_fmt` **conserva el formato de la
+entrada**. Es decir, el camino que existe precisamente para arreglar lo que no se
+puede copiar convertía un HEVC de 10 bits en un H.264 de 10 bits — veinte minutos
+de CPU para acabar igual de imposible de reproducir. Ahora lleva
+`-pix_fmt yuv420p -profile:v high`, y también `-fps_mode cfr`, que normaliza las
+grabaciones a tasa variable (Game Bar, algunas configuraciones de OBS) cuyas
+marcas de tiempo atascan la imagen mientras el audio corre.
+
+> `-fps_mode` necesita ffmpeg ≥ 5.1. La imagen (`node:22-alpine`) trae la 6.x.
+> Para confirmarlo en un despliegue concreto:
+> `docker exec wwm-guild-manager-api ffmpeg -version | head -1`.
+
+### Se comprueba lo que sale, no que ffmpeg terminara bien
+
+Nada comprobaba nunca que lo producido se pudiera reproducir. Se marcaba
+«listo», se borraban los 2 GB de original, y el fallo lo encontraba un miembro
+días después con la única copia buena ya en la papelera.
+
+Ahora, después de cada pase y **antes de borrar nada**, se le pregunta a ffprobe
+por la salida: que el formato de píxel sea de los reproducibles, y que
+decodifique fotogramas de verdad en los primeros cuatro segundos (un vídeo con
+marcas de tiempo rotas pasa la primera prueba y falla ésta). Si algo no cuadra se
+lanza, lo recoge la cola, el motivo queda escrito en la fila (§8) y **el fichero
+de entrada se conserva**, así que basta con «Reintentar» sin volver a subir 2 GB.
+
+Cuatro segundos y no el vídeo entero porque decodificar media hora para saber si
+el decodificador arranca sería pagar el precio del recodificado otra vez. La
+contrapartida honesta: un corte que aparezca en el minuto veinte no lo detecta.
+
 **HLS y no MP4 progresivo**, porque es lo que permite que N reproductores salten a
 un instante exacto de forma independiente. Sin eso no hay multistream.
 

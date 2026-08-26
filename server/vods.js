@@ -377,10 +377,35 @@ const correr = (programa, args, alLinea) => corredor(programa, args, alLinea);
 /** Lo que se le pide a ffmpeg para que cuente por dónde va. */
 const PROGRESO = ['-progress', 'pipe:1', '-nostats'];
 
+/**
+ * Los formatos de píxel que un navegador sabe decodificar. No hay más.
+ *
+ * H.264 de 8 bits y croma 4:2:0, que es lo que exige el perfil que implementan
+ * los navegadores. `yuvj420p` es el mismo con el rango de color completo, y
+ * también vale.
+ *
+ * Esto existe porque `codec_name` MIENTE por omisión. Un vídeo de 10 bits
+ * (`yuv420p10le`, el Hi10P que sueltan las capturadoras modernas por defecto) o
+ * uno con croma 4:2:2 o 4:4:4 se llama «h264» igual que cualquier otro, y ffprobe
+ * lo dice así. Se ve perfectamente en el ordenador de quien lo grabó --VLC y el
+ * reproductor de Windows los decodifican sin pestañear-- y en un navegador no se
+ * ve en absoluto: el audio suena y la imagen se queda clavada en uno de los
+ * primeros fotogramas, porque el decodificador no puede con el primer cuadro y
+ * la pista de sonido sigue su camino. Es exactamente ese síntoma.
+ */
+const PIX_NAVEGABLE = new Set(['yuv420p', 'yuvj420p']);
+
+/**
+ * Qué trae el fichero y qué se puede aprovechar tal cual.
+ *
+ * Las dos pistas se deciden por separado: quien graba en H.264 con audio Opus
+ * --que pasa-- no tiene por qué pagar un recodificado de vídeo entero por una
+ * pista de sonido, que se convierte en segundos.
+ */
 async function sondear(fichero) {
   const json = await correr('ffprobe', [
     '-v', 'error', '-print_format', 'json',
-    '-show_entries', 'format=duration:stream=codec_type,codec_name',
+    '-show_entries', 'format=duration:stream=codec_type,codec_name,pix_fmt,profile',
     fichero,
   ]);
   const d = JSON.parse(json);
@@ -388,12 +413,35 @@ async function sondear(fichero) {
   const audio = d.streams?.find((s) => s.codec_type === 'audio');
   return {
     duracionMs: Math.round(Number(d.format?.duration || 0) * 1000),
+    pixFmt: video?.pix_fmt ?? null,
+    perfil: video?.profile ?? null,
     // El camino barato existe sólo si ya viene en lo que HLS sabe llevar sin
     // tocar. Es lo que sueltan ShadowPlay, OBS, Steam, Medal y Game Bar por
-    // defecto, así que es el caso normal y no la excepción.
-    copiable: video?.codec_name === 'h264' && (!audio || audio.codec_name === 'aac'),
+    // defecto, así que es el caso normal y no la excepción -- pero el nombre
+    // del códec no basta para decidirlo. Ver PIX_NAVEGABLE.
+    copiarVideo: video?.codec_name === 'h264' && PIX_NAVEGABLE.has(video?.pix_fmt),
+    copiarAudio: !audio || audio.codec_name === 'aac',
   };
 }
+
+/**
+ * Recodificar a algo que se pueda ver en un navegador, pase lo que pase.
+ *
+ * `-pix_fmt yuv420p` es la línea que faltaba, y su ausencia era el fallo peor de
+ * los dos: sin ella libx264 conserva el formato de la ENTRADA, así que el camino
+ * de recodificado --el que existe precisamente para arreglar lo que no se puede
+ * copiar-- convertía un HEVC de 10 bits en un H.264 de 10 bits, igual de
+ * imposible de reproducir. Se pagaban veinte minutos de CPU para acabar en el
+ * mismo sitio.
+ *
+ * `-fps_mode cfr` normaliza la tasa de fotogramas. Game Bar y algunas
+ * configuraciones de OBS graban a tasa variable, y eso en HLS produce marcas de
+ * tiempo que hacen que la imagen se atasque mientras el audio corre.
+ */
+const recodificar = (extra = []) => [
+  '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p',
+  '-profile:v', 'high', '-fps_mode', 'cfr', ...extra,
+];
 
 /**
  * El recorte, en dos mitades porque van a distinto lado de `-i`.
@@ -422,6 +470,56 @@ const recorteArgs = (vod) => {
   };
 };
 
+/**
+ * ¿Lo que acaba de salir se puede reproducir de verdad?
+ *
+ * Se pregunta lo que un navegador necesita saber y no se fía de que ffmpeg
+ * terminara con código 0: un remux puede acabar perfectamente y dejar un vídeo
+ * que ningún navegador decodifica, que es justo el fallo que trajo esto aquí.
+ *
+ * Dos preguntas, y las dos baratas:
+ *
+ * 1. **El formato de píxel de la SALIDA.** Es la que descarta el 10 bits y los
+ *    cromas 4:2:2 y 4:4:4, que es lo que deja la imagen congelada con el audio
+ *    corriendo. No cuesta nada: ffprobe lo lee de la cabecera.
+ * 2. **Que salgan fotogramas.** Se decodifican de verdad los primeros cuatro
+ *    segundos. Un vídeo cuyos segmentos no empiezan en fotograma clave, o con
+ *    marcas de tiempo rotas, pasa la primera prueba y falla ésta.
+ *
+ * Lanzar es lo correcto: lo recoge el `catch` de la cola, que escribe el motivo
+ * en la fila y deja el original donde está para poder reintentar.
+ */
+async function comprobarSalida(destino, calidad) {
+  const playlist = path.join(destino, `${calidad}.m3u8`);
+  const json = await correr('ffprobe', [
+    '-v', 'error', '-print_format', 'json',
+    '-select_streams', 'v:0',
+    // Sólo los primeros cuatro segundos: decodificar media hora para saber si
+    // el decodificador arranca sería pagar el precio del recodificado otra vez.
+    '-read_intervals', '%+4', '-count_frames',
+    '-show_entries', 'stream=pix_fmt,profile,nb_read_frames',
+    playlist,
+  ]);
+
+  const via = JSON.parse(json).streams?.[0];
+  if (!via) throw new Error(`la copia en ${calidad} salió sin pista de vídeo`);
+
+  if (!PIX_NAVEGABLE.has(via.pix_fmt)) {
+    throw new Error(
+      `la copia en ${calidad} quedó en ${via.pix_fmt ?? 'un formato desconocido'}` +
+        `${via.profile ? ` (perfil ${via.profile})` : ''}, que ningún navegador sabe reproducir: ` +
+        'se vería el audio corriendo y la imagen congelada. Hace falta 8 bits y croma 4:2:0.',
+    );
+  }
+
+  if (!(Number(via.nb_read_frames) > 0)) {
+    throw new Error(
+      `la copia en ${calidad} no soltó ni un fotograma en los primeros cuatro segundos, ` +
+        'así que la imagen no llegaría a arrancar.',
+    );
+  }
+}
+
 const hlsArgs = (destino, calidad) => [
   '-f', 'hls',
   '-hls_time', '6',
@@ -446,8 +544,11 @@ async function procesar(id) {
     [id],
   );
 
-  const { duracionMs, copiable } = await sondear(origen);
+  const { duracionMs, copiarVideo, copiarAudio, pixFmt } = await sondear(origen);
   const corte = recorteArgs(vod);
+  if (!copiarVideo) {
+    console.log(`[vods] ${id}: se recodifica el vídeo (pix_fmt ${pixFmt ?? 'desconocido'})`);
+  }
 
   // Lo que va a durar la SALIDA, que es contra lo que se mide el avance. Se
   // calcula antes de codificar y no después porque es el denominador del
@@ -455,17 +556,29 @@ async function procesar(id) {
   const util = (vod.recorte_fin_ms || duracionMs) - (vod.recorte_ini_ms || 0);
 
   // La calidad de origen. Copiando es cuestión de segundos; recodificando, de
-  // minutos -- pero eso sólo le pasa a quien graba en HEVC.
+  // minutos -- y no le pasa sólo a quien graba en HEVC, como se creía aquí: un
+  // H.264 de 10 bits también hay que recodificarlo entero, aunque el códec sea
+  // el bueno, porque el navegador no sabe decodificar esa profundidad.
   await correr(
     'ffmpeg',
     [
       '-hide_banner', '-loglevel', 'error', '-y', ...PROGRESO,
       ...corte.antes, '-i', origen, ...corte.despues,
-      ...(copiable ? ['-c', 'copy'] : ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-c:a', 'aac']),
+      ...(copiarVideo ? ['-c:v', 'copy'] : recodificar(['-crf', '23'])),
+      ...(copiarAudio ? ['-c:a', 'copy'] : ['-c:a', 'aac']),
       ...hlsArgs(destino, 'origen'),
     ],
     seguidor(id, 'origen', util),
   );
+
+  // Antes de decir que está lista, y antes de borrar el original.
+  //
+  // Nadie comprobaba nunca que lo producido se pudiera reproducir: se marcaba
+  // «listo», se borraban los 2 GB de origen y el fallo lo encontraba un miembro
+  // días después, con la única copia buena ya en la papelera. Lanzar aquí deja
+  // la fila en `error` con el motivo escrito y --lo que importa-- CONSERVA el
+  // fichero de entrada, así que se puede reintentar sin volver a subir nada.
+  await comprobarSalida(destino, 'origen');
 
   // Reproducible ya, con una calidad. La de 360p llega después y no es motivo
   // para hacer esperar a nadie.
@@ -501,12 +614,17 @@ async function procesar(id) {
     [
       '-hide_banner', '-loglevel', 'error', '-y', ...PROGRESO,
       ...corte.antes, '-i', origen, ...corte.despues,
-      '-vf', 'scale=-2:360', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '28',
+      '-vf', 'scale=-2:360', ...recodificar(['-crf', '28']),
       '-c:a', 'aac', '-b:a', '64k',
       ...hlsArgs(destino, '360p'),
     ],
     seguidor(id, '360p', util),
   );
+  // La de los mosaicos también se comprueba: se recodifica siempre, así que
+  // arrastraba el mismo defecto de formato de píxel que la de origen -- y como
+  // el vídeo ya se veía en calidad original, un 360p roto no se descubría hasta
+  // que alguien intentaba montar un multistream.
+  await comprobarSalida(destino, '360p');
   await pool.query(
     `INSERT INTO war_vod_renditions (vod_id, calidad, ruta_playlist)
      VALUES ($1, '360p', $2)
