@@ -568,9 +568,21 @@ const WarVods: React.FC<Props> = ({
                   )}
 
                   {/* El motivo, entero. Es lo único que convierte «falló» en algo
-                      que alguien pueda hacer. */}
-                  {vod.estado === 'error' && vod.procesoError && (
-                    <p className="mt-1 text-[11px] text-red-300 break-words">{vod.procesoError}</p>
+                      que alguien pueda hacer.
+
+                      También cuando el estado NO es «error»: la copia de 360p
+                      puede fallar sola sin tumbar una grabación que se ve
+                      perfectamente, y eso hay que poder saberlo -- es la que
+                      decide si puede entrar en un mosaico. En ámbar y no en
+                      rojo, porque no está rota: le falta algo. */}
+                  {vod.procesoError && (
+                    <p
+                      className={`mt-1 text-[11px] break-words ${
+                        vod.estado === 'error' ? 'text-red-300' : 'text-amber-400/90'
+                      }`}
+                    >
+                      {vod.procesoError}
+                    </p>
                   )}
                 </div>
 

@@ -77,6 +77,33 @@ bajárselo. La infraestructura ya está en pie.
 
 ## 3. Transcodificado: copiar, no recodificar
 
+**Techo de 1080p.** Lo que llegue más grande se reduce, encajándolo en 1920×1080
+sin deformar (`force_original_aspect_ratio=decrease`, para que un ultrapanorámico
+de 3440×1440 no salga aplastado). Esto se mira para repasar una guerra —quién
+estaba dónde, quién llegó tarde a la puerta— y para eso 1080p sobra; lo que de
+verdad se paga es el almacén.
+
+**Tope de subida: 10 GiB.** Quien graba en 4K se planta en ocho o nueve gigas sin
+hacer nada raro, y ésa era la razón por la que no podía subir. Sube el tope, no lo
+que se guarda: el original se recodifica a 1080p y **se borra**, así que lo que
+queda en la retención de tres meses son las dos copias de siempre, un par de gigas
+por guerra. El tope acota lo que pasa por `entrada/` mientras se prepara.
+
+> `VODS_MAX_BYTES` lo leen **dos** servicios: la API, para contestar al gancho
+> `pre-create` antes de aceptar el primer byte, y tusd, con `-max-size`. Cambiar
+> sólo uno deja el tope efectivo en el más bajo de los dos. nginx no tiene tope
+> propio (`client_max_body_size 0`) a propósito: el que manda es tusd.
+
+**Lo que cuesta.** Un 4K de treinta y cinco minutos hay que decodificarlo entero y
+recodificarlo, y este Proxmox lo hace por software con `nice -n 15`. Eso son horas,
+no minutos. Con el porcentaje y el latido de §8 la espera al menos se ve, en vez de
+parecer que se colgó — pero si el 4K se vuelve costumbre, QuickSync (fase 5) deja
+de ser opcional.
+
+Por eso la copia de 360p se saca de **la principal recién hecha** y no del
+original. Con una grabación normal da igual; con un 4K es la diferencia entre
+decodificarlo dos veces o una.
+
 Al ingerir:
 
 - **Si llega en H.264/AAC** (lo que sueltan ShadowPlay, OBS, Steam, Medal y Game
@@ -475,9 +502,13 @@ encenderla, en las variables del stack de Portainer:
 ```
 VODS_HOOK_SECRET=<openssl rand -hex 32>
 VODS_HOST_DIR=/mnt/vods
-VODS_MAX_BYTES=6442450944
+VODS_MAX_BYTES=10737418240
 VODS_RETENTION_DAYS=90
 ```
+
+> Si el stack ya trae `VODS_MAX_BYTES=6442450944` de antes, **hay que cambiarlo
+> ahí**: el valor de las variables del stack gana al de `docker-compose.yml`, así
+> que subir el defecto del fichero no levanta un tope ya fijado a mano.
 
 Y después del redespliegue, comprobar por este orden:
 

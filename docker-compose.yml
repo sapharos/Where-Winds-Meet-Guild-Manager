@@ -61,7 +61,7 @@ services:
       # comandos.
       VODS_DIR: /vods
       VODS_HOOK_SECRET: ${VODS_HOOK_SECRET:-}
-      VODS_MAX_BYTES: ${VODS_MAX_BYTES:-6442450944}
+      VODS_MAX_BYTES: ${VODS_MAX_BYTES:-10737418240}
       VODS_RETENTION_DAYS: ${VODS_RETENTION_DAYS:-90}
     volumes:
       # El almacén del NAS, montado en el host. Aquí no se guarda nada en el
@@ -93,7 +93,7 @@ services:
       - -port=8080
       - -behind-proxy
       - -base-path=/vods-upload/
-      - -max-size=${VODS_MAX_BYTES:-6442450944}
+      - -max-size=${VODS_MAX_BYTES:-10737418240}
       # El secreto va en la ruta y no en una cabecera porque tusd reenvía las
       # cabeceras *del cliente*, no las suyas: no hay forma de que ponga una
       # constante nuestra. Esta URL no sale nunca de la red de Docker.

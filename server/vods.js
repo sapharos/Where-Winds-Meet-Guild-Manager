@@ -30,7 +30,7 @@ const ENTRADA = path.join(DIR, 'entrada');
 const HLS = path.join(DIR, 'hls');
 
 const SECRETO = process.env.VODS_HOOK_SECRET || '';
-const MAX_BYTES = Number(process.env.VODS_MAX_BYTES) || 6 * 1024 ** 3;
+const MAX_BYTES = Number(process.env.VODS_MAX_BYTES) || 10 * 1024 ** 3;
 const DIAS = Number(process.env.VODS_RETENTION_DAYS) || 90;
 
 /** Vacío el secreto, la funcionalidad no existe. */
@@ -402,24 +402,67 @@ const PIX_NAVEGABLE = new Set(['yuv420p', 'yuvj420p']);
  * --que pasa-- no tiene por qué pagar un recodificado de vídeo entero por una
  * pista de sonido, que se convierte en segundos.
  */
+/**
+ * El techo de lo que se guarda: 1080p.
+ *
+ * Quien graba en 4K se planta en ocho o nueve gigas sin hacer nada raro, y
+ * guardar eso tal cual no compra nada. Esto se mira para repasar una guerra --
+ * quién estaba dónde, quién llegó tarde a la puerta -- y para eso 1080p sobra;
+ * lo que de verdad se paga es el almacén, que es una cuota de 1,3 TB con tres
+ * meses de retención dentro.
+ *
+ * Así que lo que llegue más grande se reduce, y el original se borra igual que
+ * siempre. El tope de subida existe para acotar lo que pasa por `entrada`
+ * mientras se prepara, no lo que se queda.
+ */
+const ANCHO_MAX = 1920;
+const ALTO_MAX = 1080;
+
+/**
+ * Reducir hasta caber en 1080p sin deformar.
+ *
+ * `force_original_aspect_ratio=decrease` encaja dentro de la caja conservando la
+ * proporción, que es lo que hace falta para el ultrapanorámico: un 3440x1440 no
+ * es 16:9 y forzarlo a 1920x1080 lo dejaría aplastado. `force_divisible_by=2`
+ * porque H.264 no admite dimensiones impares y encajar en una caja las produce
+ * a poco que la proporción no sea redonda.
+ */
+const ESCALAR_A_1080 =
+  `scale=w=${ANCHO_MAX}:h=${ALTO_MAX}:force_original_aspect_ratio=decrease:force_divisible_by=2`;
+
 async function sondear(fichero) {
   const json = await correr('ffprobe', [
     '-v', 'error', '-print_format', 'json',
-    '-show_entries', 'format=duration:stream=codec_type,codec_name,pix_fmt,profile',
+    '-show_entries', 'format=duration:stream=codec_type,codec_name,pix_fmt,profile,width,height',
     fichero,
   ]);
   const d = JSON.parse(json);
   const video = d.streams?.find((s) => s.codec_type === 'video');
   const audio = d.streams?.find((s) => s.codec_type === 'audio');
+
+  // Sin dimensiones legibles no se asume que quepa: reducir de más cuesta
+  // tiempo de CPU, y no reducir cuando hacía falta cuesta almacén para siempre.
+  const grande =
+    !(Number(video?.width) > 0 && Number(video?.height) > 0) ||
+    Number(video.width) > ANCHO_MAX ||
+    Number(video.height) > ALTO_MAX;
+
   return {
     duracionMs: Math.round(Number(d.format?.duration || 0) * 1000),
     pixFmt: video?.pix_fmt ?? null,
     perfil: video?.profile ?? null,
+    ancho: Number(video?.width) || null,
+    alto: Number(video?.height) || null,
+    grande,
     // El camino barato existe sólo si ya viene en lo que HLS sabe llevar sin
     // tocar. Es lo que sueltan ShadowPlay, OBS, Steam, Medal y Game Bar por
     // defecto, así que es el caso normal y no la excepción -- pero el nombre
     // del códec no basta para decidirlo. Ver PIX_NAVEGABLE.
-    copiarVideo: video?.codec_name === 'h264' && PIX_NAVEGABLE.has(video?.pix_fmt),
+    //
+    // Y no se puede copiar lo que hay que reducir: cambiar de tamaño es
+    // recodificar, no hay atajo.
+    copiarVideo:
+      !grande && video?.codec_name === 'h264' && PIX_NAVEGABLE.has(video?.pix_fmt),
     copiarAudio: !audio || audio.codec_name === 'aac',
   };
 }
@@ -544,10 +587,15 @@ async function procesar(id) {
     [id],
   );
 
-  const { duracionMs, copiarVideo, copiarAudio, pixFmt } = await sondear(origen);
+  const { duracionMs, copiarVideo, copiarAudio, pixFmt, grande, ancho, alto } =
+    await sondear(origen);
   const corte = recorteArgs(vod);
   if (!copiarVideo) {
-    console.log(`[vods] ${id}: se recodifica el vídeo (pix_fmt ${pixFmt ?? 'desconocido'})`);
+    console.log(
+      `[vods] ${id}: se recodifica el vídeo` +
+        ` (${ancho ?? '?'}x${alto ?? '?'}, pix_fmt ${pixFmt ?? 'desconocido'}` +
+        `${grande ? ', se reduce a 1080p' : ''})`,
+    );
   }
 
   // Lo que va a durar la SALIDA, que es contra lo que se mide el avance. Se
@@ -564,6 +612,7 @@ async function procesar(id) {
     [
       '-hide_banner', '-loglevel', 'error', '-y', ...PROGRESO,
       ...corte.antes, '-i', origen, ...corte.despues,
+      ...(grande ? ['-vf', ESCALAR_A_1080] : []),
       ...(copiarVideo ? ['-c:v', 'copy'] : recodificar(['-crf', '23'])),
       ...(copiarAudio ? ['-c:a', 'copy'] : ['-c:a', 'aac']),
       ...hlsArgs(destino, 'origen'),
@@ -609,28 +658,50 @@ async function procesar(id) {
 
   // La de 360p: la que usan los mosaicos del multistream, y la única que
   // sobreviviría si algún día se recorta la retención.
-  await correr(
-    'ffmpeg',
-    [
-      '-hide_banner', '-loglevel', 'error', '-y', ...PROGRESO,
-      ...corte.antes, '-i', origen, ...corte.despues,
-      '-vf', 'scale=-2:360', ...recodificar(['-crf', '28']),
-      '-c:a', 'aac', '-b:a', '64k',
-      ...hlsArgs(destino, '360p'),
-    ],
-    seguidor(id, '360p', util),
-  );
-  // La de los mosaicos también se comprueba: se recodifica siempre, así que
-  // arrastraba el mismo defecto de formato de píxel que la de origen -- y como
-  // el vídeo ya se veía en calidad original, un 360p roto no se descubría hasta
-  // que alguien intentaba montar un multistream.
-  await comprobarSalida(destino, '360p');
-  await pool.query(
-    `INSERT INTO war_vod_renditions (vod_id, calidad, ruta_playlist)
-     VALUES ($1, '360p', $2)
-     ON CONFLICT (vod_id, calidad) DO UPDATE SET ruta_playlist = EXCLUDED.ruta_playlist`,
-    [id, path.join(id, '360p.m3u8')],
-  );
+  //
+  // Se saca de la principal RECIÉN HECHA y no del original, que es lo que hacía.
+  // Con una grabación normal da igual -- decodificar 1080p cuesta lo mismo
+  // vengan de donde vengan los bytes --, pero con un 4K de treinta minutos la
+  // diferencia es decodificarlo dos veces o una, y en este Proxmox eso son
+  // horas. Como la principal ya viene recortada, aquí no van los `-ss` ni el
+  // `-t`: aplicarlos otra vez recortaría sobre lo ya recortado.
+  const principal = path.join(destino, 'origen.m3u8');
+  try {
+    await correr(
+      'ffmpeg',
+      [
+        '-hide_banner', '-loglevel', 'error', '-y', ...PROGRESO,
+        '-i', principal,
+        '-vf', 'scale=-2:360', ...recodificar(['-crf', '28']),
+        '-c:a', 'aac', '-b:a', '64k',
+        ...hlsArgs(destino, '360p'),
+      ],
+      seguidor(id, '360p', util),
+    );
+    // La de los mosaicos también se comprueba: se recodifica siempre, así que
+    // arrastraba el mismo defecto de formato de píxel que la principal.
+    await comprobarSalida(destino, '360p');
+    await pool.query(
+      `INSERT INTO war_vod_renditions (vod_id, calidad, ruta_playlist)
+       VALUES ($1, '360p', $2)
+       ON CONFLICT (vod_id, calidad) DO UPDATE SET ruta_playlist = EXCLUDED.ruta_playlist`,
+      [id, path.join(id, '360p.m3u8')],
+    );
+  } catch (err) {
+    // Que falle la de los mosaicos NO puede tumbar una grabación que ya se ve.
+    // Lanzando aquí, el `catch` de la cola ponía la fila en `error` y borraba de
+    // un plumazo el estado «listo» de algo perfectamente reproducible: se perdía
+    // el vídeo bueno por no haber podido hacer la miniatura. Se anota y se
+    // sigue; lo único que se pierde es poder meterla en un mosaico.
+    console.error(`[vods] ${id}: la copia de 360p falló:`, err.message);
+    await pool.query(
+      `UPDATE war_vods SET proceso_error = $2 WHERE id = $1`,
+      [
+        id,
+        `Se ve bien, pero no se pudo generar la copia de 360p, así que no puede entrar en un mosaico: ${String(err?.message ?? '').slice(0, 400)}`,
+      ],
+    );
+  }
 
   // Nada en marcha: la fase vuelve a vacío y el 100 es de verdad. A partir de
   // aquí ya no hay a qué volver -- el original se borra abajo -- así que esto
@@ -641,7 +712,13 @@ async function procesar(id) {
     [id],
   );
 
-  // El original ya no hace falta: lo que se sirve son los segmentos, y son 2 GB.
+  // El original ya no hace falta: lo que se sirve son los segmentos.
+  //
+  // Y es lo que hace viable el tope de 10 GiB. Lo que llega puede ser un 4K de
+  // nueve gigas; lo que se queda en el almacén es la copia de 1080p y la de
+  // 360p, que para una guerra de treinta y cinco minutos son un par de gigas
+  // como siempre. El tope acota lo que pasa por `entrada` mientras se prepara,
+  // no lo que ocupa la retención de tres meses.
   await rm(origen, { force: true });
   await rm(`${origen}.info`, { force: true });
 }

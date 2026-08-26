@@ -816,7 +816,10 @@ CREATE INDEX IF NOT EXISTS war_vods_caducados_idx
 --
 -- `proceso_error` guarda el motivo. Antes sólo iba a `console.error`, así que
 -- «Falló al preparar» era todo lo que llegaba a la persona que había esperado
--- veinte minutos a que subieran sus 2 GB.
+-- veinte minutos a que subieran sus gigas. También recoge fallos PARCIALES, con
+-- el estado en `listo`: si la copia de 360p no sale, la grabación se ve
+-- perfectamente y lo único que pierde es poder entrar en un mosaico, y eso hay
+-- que poder contarlo sin marcar como rota una grabación que no lo está.
 ALTER TABLE war_vods ADD COLUMN IF NOT EXISTS proceso_fase   TEXT;
 ALTER TABLE war_vods ADD COLUMN IF NOT EXISTS proceso_pct    SMALLINT;
 ALTER TABLE war_vods ADD COLUMN IF NOT EXISTS proceso_desde  TIMESTAMPTZ;
