@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Sheet from './Sheet';
 import { Marca } from './Reproductor';
-import { SALTO_MS, correccion } from '../services/relojGuerra';
+import { SALTO_MS, comoReloj, correccion } from '../services/relojGuerra';
 
 /**
  * Varias grabaciones de la misma guerra, a la vez y cuadradas. Ver docs/VODS.md §5.
@@ -56,6 +56,8 @@ interface Props {
 
 const HLSJS = 'https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js';
 
+/** Cuánto va de un tramo, que siempre es positivo. Para el reloj de guerra, que
+ *  tiene signo, está `comoReloj`. */
 const mmss = (ms: number) => {
   const s = Math.max(0, Math.round(ms / 1000));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
@@ -73,6 +75,65 @@ async function cargarHls(): Promise<any> {
   });
   return w.Hls;
 }
+
+/**
+ * La barra de búsqueda de la GUERRA, con sus marcas.
+ *
+ * Una sola definición para los dos sitios donde aparece --sobre la grande y en
+ * el bloque de abajo-- porque tienen que comportarse igual. Dos copias de esto
+ * acabarían divergiendo en el reparto de las marcas o en el redondeo, y entonces
+ * pulsar el mismo sitio en una y en otra llevaría a instantes distintos.
+ *
+ * De la guerra y no del fichero: cada grabación empezó cuando quiso, así que el
+ * minuto 3 de una no es el minuto 3 de la de al lado. Aquí se pulsa un instante
+ * de la guerra y se mueven todas.
+ */
+const BarraGuerra: React.FC<{
+  desde: number;
+  hasta: number;
+  tGuerra: number;
+  marcas: Marca[];
+  irA: (t: number) => void;
+  alto?: string;
+}> = ({ desde, hasta, tGuerra, marcas, irA, alto = 'h-1.5' }) => {
+  const ancho = hasta - desde || 1;
+  const pct = (t: number) => ((t - desde) / ancho) * 100;
+  return (
+    <div
+      role="slider"
+      tabIndex={0}
+      aria-label="Momento de la guerra"
+      aria-valuenow={Math.round(tGuerra)}
+      aria-valuemin={desde}
+      aria-valuemax={hasta}
+      onClick={(e) => {
+        const caja = e.currentTarget.getBoundingClientRect();
+        irA(desde + ((e.clientX - caja.left) / caja.width) * ancho);
+      }}
+      className="tap-suelto relative h-4 flex items-center cursor-pointer"
+    >
+      <div className={`${alto} w-full rounded-full bg-slate-900 overflow-hidden`}>
+        <div className="h-full bg-amber-500" style={{ width: `${pct(tGuerra)}%` }} />
+      </div>
+      {marcas.map((m) => (
+        <button
+          key={m.id}
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            irA(m.tMs);
+          }}
+          title={m.texto}
+          aria-label={`Ir a ${comoReloj(m.tMs)}: ${m.texto}`}
+          style={{ left: `${pct(m.tMs)}%` }}
+          className={`tap-suelto absolute top-0 h-4 w-1 -translate-x-1/2 rounded-full ${
+            m.hito ? 'bg-sky-600' : 'bg-slate-100'
+          }`}
+        />
+      ))}
+    </div>
+  );
+};
 
 /**
  * Un vídeo del mosaico, grande o de la columna.
@@ -95,15 +156,25 @@ const MosaicoVideo: React.FC<{
   tGuerra: number;
   numero: number;
   grande?: boolean;
+  /** A pantalla completa la caja ES la pantalla, así que el vídeo la llena. */
+  aPantalla?: boolean;
   registrar: (id: string, el: HTMLVideoElement | null) => void;
-}> = ({ vod, dentro, tGuerra, numero, grande, registrar }) => (
-  <div className={`relative bg-black overflow-hidden ${grande ? 'rounded-lg ring-1 ring-slate-700' : ''}`}>
+}> = ({ vod, dentro, tGuerra, numero, grande, aPantalla, registrar }) => (
+  <div
+    className={`relative bg-black overflow-hidden ${
+      grande && !aPantalla ? 'rounded-lg ring-1 ring-slate-700' : ''
+    } ${aPantalla ? 'w-full h-full flex items-center justify-center' : ''}`}
+  >
     <video
       ref={(el) => registrar(vod.id, el)}
       playsInline
-      className={`w-full ${
-        grande ? 'max-h-[calc(100vh-16rem)] aspect-video object-contain' : 'aspect-video'
-      } ${dentro ? '' : 'opacity-20'}`}
+      className={
+        aPantalla
+          ? `max-h-screen max-w-full ${dentro ? '' : 'opacity-20'}`
+          : `w-full ${
+              grande ? 'max-h-[calc(100vh-16rem)] aspect-video object-contain' : 'aspect-video'
+            } ${dentro ? '' : 'opacity-20'}`
+      }
     />
     <span className="absolute top-1 left-1 px-1.5 rounded bg-slate-950/85 text-[10px] text-slate-200 max-w-[90%] truncate">
       {numero} · {vod.nombre}
@@ -137,6 +208,30 @@ const Multistream: React.FC<Props> = ({ vods, marcas, onClose }) => {
   const sonandoRef = useRef(false);
   const [tGuerra, setTGuerra] = useState(0);
   const relojPuesto = useRef(false);
+  const [silenciado, setSilenciado] = useState(false);
+
+  /**
+   * La caja de la grande, que es lo que se pone a pantalla completa.
+   *
+   * La caja y no el `<video>` a pelo: el elemento solo se llevaría el navegador
+   * sus propios mandos, y con ellos el derecho a buscar por su cuenta -- que en
+   * un mosaico significa romper la sincronía de los otros cuatro. Poniendo la
+   * caja, lo que llena la pantalla es el vídeo CON la barra de aquí, que mueve
+   * el reloj de guerra y por tanto a todos a la vez.
+   */
+  const caja = useRef<HTMLDivElement>(null);
+  const [pantallaCompleta, setPantallaCompleta] = useState(false);
+
+  useEffect(() => {
+    const mirar = () => setPantallaCompleta(document.fullscreenElement === caja.current);
+    document.addEventListener('fullscreenchange', mirar);
+    return () => document.removeEventListener('fullscreenchange', mirar);
+  }, []);
+
+  const alternarPantalla = useCallback(() => {
+    if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
+    else void caja.current?.requestFullscreen?.().catch(() => {});
+  }, []);
 
   /**
    * El reloj, en una referencia además de en el estado.
@@ -396,9 +491,9 @@ const Multistream: React.FC<Props> = ({ vods, marcas, onClose }) => {
   useEffect(() => {
     vods.forEach((v) => {
       const el = videos.current.get(v.id);
-      if (el) el.muted = v.id !== principal;
+      if (el) el.muted = silenciado || v.id !== principal;
     });
-  }, [principal, vods]);
+  }, [principal, vods, silenciado]);
 
   const ordenadas = useMemo(
     () => [...marcas].filter((m) => m.tMs >= desde && m.tMs <= hasta).sort((a, b) => a.tMs - b.tMs),
@@ -495,15 +590,121 @@ const Multistream: React.FC<Props> = ({ vods, marcas, onClose }) => {
           arrastra con el dedo.
         */}
         <div className="flex flex-col lg:flex-row gap-2">
-          <div className="lg:flex-1 min-w-0">
+          {/*
+            `group` para que la barra salga al pasar por encima. A pantalla
+            completa y en pausa se queda puesta: son los dos momentos en que se
+            busca un mando, y esconderlo justo entonces obliga a mover el ratón
+            a ciegas para encontrarlo.
+          */}
+          <div
+            ref={caja}
+            className={`group relative lg:flex-1 min-w-0 bg-black ${
+              pantallaCompleta ? 'flex items-center justify-center' : ''
+            }`}
+          >
             <MosaicoVideo
               vod={principalVod ?? vods[0]}
               grande
+              aPantalla={pantallaCompleta}
               dentro={principalVod ? cubre(principalVod, tGuerra) : false}
               tGuerra={tGuerra}
               numero={vods.findIndex((v) => v.id === principal) + 1}
               registrar={registrar}
             />
+
+            <div
+              // `pt-3` en el móvil y `pt-6` desde sm: el degradado es
+              // decoración, y sobre un vídeo de 192 px de alto se comía la
+              // mitad del cuadro. Los botones se quedan en 44 px pasen los que
+              // pasen, que ésos sí son el mínimo para el dedo.
+              className={`absolute inset-x-0 bottom-0 px-2 pb-2 pt-3 sm:pt-6 bg-gradient-to-t from-slate-950/90 to-transparent transition-opacity duration-micro ${
+                pantallaCompleta || !sonando
+                  ? 'opacity-100'
+                  : 'opacity-0 group-hover:opacity-100 focus-within:opacity-100'
+              }`}
+            >
+              {/*
+                La barra de búsqueda es la de la GUERRA, no la del fichero. En
+                un mosaico son cosas distintas: cada grabación empezó cuando
+                quiso, así que el minuto 3 de este vídeo no es el minuto 3 del
+                de al lado. Arrastrar aquí mueve a los cinco al mismo instante,
+                que es de lo que va todo esto.
+              */}
+              <BarraGuerra
+                desde={desde}
+                hasta={hasta}
+                tGuerra={tGuerra}
+                marcas={ordenadas}
+                irA={irA}
+                alto="h-1"
+              />
+
+              <div className="flex items-center gap-1 mt-1">
+                <button
+                  type="button"
+                  onClick={alternar}
+                  aria-label={sonando ? 'Pausar' : 'Reproducir'}
+                  className="min-w-tap text-slate-100"
+                >
+                  <i className={`fa-solid ${sonando ? 'fa-pause' : 'fa-play'}`} aria-hidden="true" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => saltarMarca(-1)}
+                  disabled={!ordenadas.length}
+                  aria-label="Marca anterior"
+                  className="min-w-tap text-slate-300 disabled:opacity-30"
+                >
+                  <i className="fa-solid fa-backward-step" aria-hidden="true" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => saltarMarca(1)}
+                  disabled={!ordenadas.length}
+                  aria-label="Marca siguiente"
+                  className="min-w-tap text-slate-300 disabled:opacity-30"
+                >
+                  <i className="fa-solid fa-forward-step" aria-hidden="true" />
+                </button>
+
+                <span className="text-[11px] tabular-nums text-slate-300 ml-1">
+                  {comoReloj(tGuerra)}
+                </span>
+
+                {/* A pantalla completa no hay columna, así que se recuerda cómo
+                    cambiar de perspectiva sin salir. */}
+                {pantallaCompleta && (
+                  <span className="text-[11px] text-slate-500 ml-2 hidden sm:inline">
+                    1-{vods.length} cambia de perspectiva
+                  </span>
+                )}
+
+                <span className="flex-1" />
+
+                <button
+                  type="button"
+                  onClick={() => setSilenciado((v) => !v)}
+                  aria-label={silenciado ? 'Quitar el silencio' : 'Silenciar'}
+                  className="min-w-tap text-slate-300"
+                >
+                  <i
+                    className={`fa-solid ${silenciado ? 'fa-volume-xmark' : 'fa-volume-high'}`}
+                    aria-hidden="true"
+                  />
+                </button>
+                <button
+                  type="button"
+                  onClick={alternarPantalla}
+                  aria-label={pantallaCompleta ? 'Salir de pantalla completa' : 'Pantalla completa'}
+                  className="min-w-tap text-slate-300"
+                >
+                  <i
+                    className={`fa-solid ${pantallaCompleta ? 'fa-compress' : 'fa-expand'}`}
+                    aria-hidden="true"
+                  />
+                </button>
+              </div>
+            </div>
           </div>
 
           <div
@@ -537,7 +738,9 @@ const Multistream: React.FC<Props> = ({ vods, marcas, onClose }) => {
         {/* --- La línea de tiempo, que es de la guerra y no de un vídeo --- */}
         <div className="rounded-lg border border-slate-800 bg-slate-900/40 p-3">
           <div className="flex items-center justify-between text-[11px] text-slate-400 mb-2">
-            <span className="tabular-nums">{mmss(tGuerra)} de guerra</span>
+            {/* Con signo: en negativo va la preparación, y `mmss` la recortaba
+                a cero -- toda la cuenta atrás se leía «0:00 de guerra». */}
+            <span className="tabular-nums">{comoReloj(tGuerra)} de guerra</span>
             <span>{ordenadas.length} marcas</span>
           </div>
 
@@ -558,71 +761,25 @@ const Multistream: React.FC<Props> = ({ vods, marcas, onClose }) => {
             ))}
           </div>
 
-          <div
-            role="slider"
-            tabIndex={0}
-            aria-label="Momento de la guerra"
-            aria-valuenow={Math.round(tGuerra)}
-            aria-valuemin={desde}
-            aria-valuemax={hasta}
-            onClick={(e) => {
-              const caja = e.currentTarget.getBoundingClientRect();
-              irA(desde + ((e.clientX - caja.left) / caja.width) * anchoTotal);
-            }}
-            className="tap-suelto relative h-4 flex items-center cursor-pointer"
-          >
-            <div className="h-1.5 w-full rounded-full bg-slate-900 overflow-hidden">
-              <div className="h-full bg-amber-500" style={{ width: `${pct(tGuerra)}%` }} />
-            </div>
-            {ordenadas.map((m) => (
-              <button
-                key={m.id}
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  irA(m.tMs);
-                }}
-                title={m.texto}
-                aria-label={`Ir a ${mmss(m.tMs - desde)}: ${m.texto}`}
-                style={{ left: `${pct(m.tMs)}%` }}
-                className={`tap-suelto absolute top-0 h-4 w-1 -translate-x-1/2 rounded-full ${
-                  m.hito ? 'bg-sky-600' : 'bg-slate-100'
-                }`}
-              />
-            ))}
-          </div>
+          <BarraGuerra
+            desde={desde}
+            hasta={hasta}
+            tGuerra={tGuerra}
+            marcas={ordenadas}
+            irA={irA}
+          />
 
-          <div className="flex items-center gap-1 mt-2">
-            <button
-              type="button"
-              onClick={alternar}
-              aria-label={sonando ? 'Pausar' : 'Reproducir'}
-              className="min-w-tap text-slate-100"
-            >
-              <i className={`fa-solid ${sonando ? 'fa-pause' : 'fa-play'}`} aria-hidden="true" />
-            </button>
-            <button
-              type="button"
-              onClick={() => saltarMarca(-1)}
-              disabled={!ordenadas.length}
-              aria-label="Marca anterior"
-              className="min-w-tap text-slate-300 disabled:opacity-30"
-            >
-              <i className="fa-solid fa-backward-step" aria-hidden="true" />
-            </button>
-            <button
-              type="button"
-              onClick={() => saltarMarca(1)}
-              disabled={!ordenadas.length}
-              aria-label="Marca siguiente"
-              className="min-w-tap text-slate-300 disabled:opacity-30"
-            >
-              <i className="fa-solid fa-forward-step" aria-hidden="true" />
-            </button>
-            <span className="text-[11px] text-slate-500 ml-2">
-              1-{vods.length} cambia de vista y de audio · N P entre marcas
-            </span>
-          </div>
+          {/*
+            Los mandos ya no se repiten aquí: viven sobre la grande, como en
+            cualquier reproductor, y esta barra es la que enseña la cobertura y
+            las marcas. Dos juegos de botones para lo mismo, uno encima del
+            vídeo y otro debajo, obligaban a mirar dos sitios para saber si
+            estaba sonando.
+          */}
+          <p className="text-[11px] text-slate-500 mt-2">
+            Espacio reproduce · 1-{vods.length} pone a uno en grande · N P entre marcas ·
+            ← → 5 s
+          </p>
         </div>
 
         {ordenadas.length > 0 && (

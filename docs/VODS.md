@@ -365,6 +365,31 @@ Tres trampas que esconde ese intercambio, y que costaron más que el resto:
    Ese elemento puede no existir ya, y su posición sería cero: copiarla mandaría
    a todo el mundo al principio. El reloj sobrevive al intercambio; el nodo no.
 
+### La grande lleva sus mandos, y va a pantalla completa
+
+Como cualquier reproductor: barra de búsqueda, reproducir, salto entre marcas,
+silencio y pantalla completa, sobre el vídeo. Sale al pasar por encima, y se
+queda puesta a pantalla completa y en pausa -- que son los dos momentos en que se
+busca un mando, y esconderlo justo entonces obliga a moverse a ciegas.
+
+Lo que va a pantalla completa es **la caja, no el `<video>`**. Poniendo el
+elemento a pelo, el navegador monta sus propios mandos, y con ellos el derecho a
+buscar por su cuenta: en un mosaico eso significa romper la sincronía de los
+otros cuatro. Con la caja, lo que llena la pantalla es el vídeo **con la barra
+de aquí**, que mueve el reloj de guerra y por tanto a todos a la vez.
+
+La barra de búsqueda es una sola definición usada en los dos sitios donde
+aparece --sobre la grande y en el bloque de abajo--. Dos copias acabarían
+divergiendo en el reparto de las marcas o en el redondeo, y entonces pulsar el
+mismo sitio en una y en otra llevaría a instantes distintos.
+
+A pantalla completa no hay columna, así que la barra recuerda que **1-6 cambia
+de perspectiva** sin salir: el atajo escucha en la ventana y sigue valiendo.
+
+Los mandos ya no se repiten debajo. Dos juegos de botones para lo mismo, uno
+encima del vídeo y otro fuera, obligaban a mirar dos sitios para saber si estaba
+sonando.
+
 ### Quiénes entran se elige antes
 
 Se cogían las cuatro primeras por orden de subida. Con seis grabaciones de una
