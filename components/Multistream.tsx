@@ -155,25 +155,35 @@ const MosaicoVideo: React.FC<{
   dentro: boolean;
   tGuerra: number;
   numero: number;
+  /**
+   * La que ocupa el hueco grande. Se ajusta a su caja por los dos lados, y por
+   * eso ya no hace falta un caso aparte para la pantalla completa: entonces la
+   * caja ES la pantalla, y el vídeo la llena sin que este componente se entere.
+   */
   grande?: boolean;
-  /** A pantalla completa la caja ES la pantalla, así que el vídeo la llena. */
-  aPantalla?: boolean;
   registrar: (id: string, el: HTMLVideoElement | null) => void;
-}> = ({ vod, dentro, tGuerra, numero, grande, aPantalla, registrar }) => (
+}> = ({ vod, dentro, tGuerra, numero, grande, registrar }) => (
   <div
-    className={`relative bg-black overflow-hidden ${
-      grande && !aPantalla ? 'rounded-lg ring-1 ring-slate-700' : ''
-    } ${aPantalla ? 'w-full h-full flex items-center justify-center' : ''}`}
+    className={`relative bg-black ${
+      grande ? 'w-full h-full flex items-center justify-center' : 'overflow-hidden'
+    }`}
   >
     <video
       ref={(el) => registrar(vod.id, el)}
       playsInline
       className={
-        aPantalla
-          ? `max-h-screen max-w-full ${dentro ? '' : 'opacity-20'}`
-          : `w-full ${
-              grande ? 'max-h-[calc(100vh-16rem)] aspect-video object-contain' : 'aspect-video'
-            } ${dentro ? '' : 'opacity-20'}`
+        grande
+          ? // Llena la caja y se ajusta dentro con `object-contain`, en vez de
+            // llevar `aspect-video` propio: la caja puede no ser 16:9 --a
+            // pantalla entera en un monitor 16:10 no lo es-- y una proporción
+            // fija ahí desperdicia justo el hueco que se acaba de ganar.
+            //
+            // `w-full h-full` y no `max-w/max-h`: sin fuente cargada un
+            // `<video>` no tiene tamaño propio y se queda en los 300x150 de
+            // fábrica, así que el mosaico aparecía diminuto hasta que llegaba
+            // el primer fotograma. La caja manda; el vídeo se acomoda.
+            `w-full h-full object-contain ${dentro ? '' : 'opacity-20'}`
+          : `w-full aspect-video ${dentro ? '' : 'opacity-20'}`
       }
     />
     <span className="absolute top-1 left-1 px-1.5 rounded bg-slate-950/85 text-[10px] text-slate-200 max-w-[90%] truncate">
@@ -575,10 +585,20 @@ const Multistream: React.FC<Props> = ({ vods, marcas, onClose }) => {
     <Sheet
       title="Mosaico"
       subtitle={`${vods.length} grabaciones de la misma guerra, cuadradas`}
-      size="video"
+      size="lleno"
       onClose={onClose}
     >
-      <div className="space-y-2">
+      {/*
+        `h-full` y `min-h-0` en cadena hasta el vídeo.
+
+        Sin la cadena entera, ocupar la pantalla no sirve de nada: un hijo con
+        `flex-1` dentro de un padre sin altura definida se queda en su altura
+        natural, y el hueco de más se lo reparte el aire de abajo en vez de la
+        imagen. Y `min-h-0` porque un elemento flex se niega a encogerse por
+        debajo de su contenido salvo que se le diga -- que es lo que hace que la
+        línea de tiempo se salga por el pie en vez de que el vídeo ceda.
+      */}
+      <div className="h-full flex flex-col gap-2 min-h-0">
         {/*
           Una grande y una columna al lado.
 
@@ -589,7 +609,7 @@ const Multistream: React.FC<Props> = ({ vods, marcas, onClose }) => {
           la grande arriba y las demás en una tira horizontal debajo, que se
           arrastra con el dedo.
         */}
-        <div className="flex flex-col lg:flex-row gap-2">
+        <div className="flex flex-col lg:flex-row gap-2 grow min-h-0">
           {/*
             `group` para que la barra salga al pasar por encima. A pantalla
             completa y en pausa se queda puesta: son los dos momentos en que se
@@ -598,14 +618,20 @@ const Multistream: React.FC<Props> = ({ vods, marcas, onClose }) => {
           */}
           <div
             ref={caja}
-            className={`group relative lg:flex-1 min-w-0 bg-black ${
-              pantallaCompleta ? 'flex items-center justify-center' : ''
+            // `aspect-video` sólo hasta `lg`. Ahí la columna es una tira debajo
+            // y esta caja se apila, así que sin proporción propia no tiene de
+            // dónde sacar alto y se queda en una rendija. Desde `lg` manda
+            // `flex-1`: la caja se lleva todo el alto de la hoja y el vídeo se
+            // acomoda dentro, que es de lo que va ocupar la pantalla.
+            className={`group relative min-w-0 min-h-0 bg-black flex items-center justify-center ${
+              pantallaCompleta
+                ? 'w-full h-full'
+                : 'aspect-video lg:aspect-auto lg:flex-1 rounded-lg overflow-hidden'
             }`}
           >
             <MosaicoVideo
               vod={principalVod ?? vods[0]}
               grande
-              aPantalla={pantallaCompleta}
               dentro={principalVod ? cubre(principalVod, tGuerra) : false}
               tGuerra={tGuerra}
               numero={vods.findIndex((v) => v.id === principal) + 1}
@@ -708,7 +734,7 @@ const Multistream: React.FC<Props> = ({ vods, marcas, onClose }) => {
           </div>
 
           <div
-            className="flex lg:flex-col gap-2 overflow-x-auto lg:overflow-x-visible lg:overflow-y-auto lg:w-[24%] lg:max-h-[calc(100vh-16rem)] shrink-0"
+            className="flex lg:flex-col gap-2 overflow-x-auto lg:overflow-x-visible lg:overflow-y-auto lg:w-[22%] shrink-0 min-h-0"
             role="list"
             aria-label="Otras perspectivas"
           >
@@ -736,7 +762,11 @@ const Multistream: React.FC<Props> = ({ vods, marcas, onClose }) => {
         </div>
 
         {/* --- La línea de tiempo, que es de la guerra y no de un vídeo --- */}
-        <div className="rounded-lg border border-slate-800 bg-slate-900/40 p-3">
+        {/* `shrink-0`: es el bloque de altura fija, y lo que cede al repartir el
+            hueco tiene que ser el vídeo -- que es lo que se mira -- y no al
+            revés. Sin esto, la línea de tiempo se encoge hasta hacerse ilegible
+            en cuanto el vídeo pide sitio. */}
+        <div className="shrink-0 rounded-lg border border-slate-800 bg-slate-900/40 p-3">
           <div className="flex items-center justify-between text-[11px] text-slate-400 mb-2">
             {/* Con signo: en negativo va la preparación, y `mmss` la recortaba
                 a cero -- toda la cuenta atrás se leía «0:00 de guerra». */}
@@ -782,8 +812,14 @@ const Multistream: React.FC<Props> = ({ vods, marcas, onClose }) => {
           </p>
         </div>
 
+        {/*
+          Acotada y con su propio scroll. Es el único bloque de aquí que crece
+          con los datos --una guerra bien anotada trae veinte marcas-- y sin
+          tope se comería el alto que se acaba de ganar para el vídeo. Que ceda
+          la lista, que se puede desplazar, y no la imagen, que no.
+        */}
         {ordenadas.length > 0 && (
-          <ul className="space-y-1">
+          <ul className="space-y-1 shrink-0 max-h-28 overflow-y-auto overscroll-contain">
             {ordenadas.map((m) => (
               <li key={m.id} className="flex items-baseline gap-2">
                 <button

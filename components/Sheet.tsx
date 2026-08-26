@@ -21,7 +21,7 @@ interface Props {
   title: string;
   subtitle?: React.ReactNode;
   /** Ancho máximo en escritorio. En móvil siempre ocupa todo. */
-  size?: 'sm' | 'md' | 'lg' | 'xl' | 'video';
+  size?: 'sm' | 'md' | 'lg' | 'xl' | 'video' | 'lleno';
   /** Va pegado al pie, fuera del área que hace scroll. */
   footer?: React.ReactNode;
   onClose: () => void;
@@ -37,7 +37,22 @@ const ANCHOS: Record<NonNullable<Props['size']>, string> = {
   // monitor ancho, y aquí lo que se mira es la imagen: cuanto más grande,
   // mejor se ve quién estaba dónde.
   video: 'sm:max-w-[min(96rem,95vw)]',
+  // La pantalla entera, sin marco. Para el mosaico: son cinco vídeos a la vez
+  // y cada píxel que se va en velo, en margen y en esquinas redondeadas sale
+  // del único sitio donde importa, que es la imagen. Hasta el tope de 96rem
+  // dejaba franjas negras a los lados en un monitor ancho.
+  lleno: 'sm:max-w-none',
 };
+
+/**
+ * A pantalla entera se quitan también el margen exterior y el tope de alto.
+ *
+ * Van juntos porque por separado no sirven de nada: un ancho sin tope dentro de
+ * un contenedor con `p-6` sigue dejando cuarenta y ocho píxeles de aire, y el
+ * `92dvh` de las demás hojas -- que existe para que se vea que hay algo detrás --
+ * aquí sólo recorta la imagen por arriba y por abajo.
+ */
+const esLleno = (size: NonNullable<Props['size']>) => size === 'lleno';
 
 /** Lo que puede recibir el foco dentro de la hoja. */
 const FOCO =
@@ -209,7 +224,9 @@ const Sheet: React.FC<Props> = ({ title, subtitle, size = 'md', footer, onClose,
    */
   return createPortal(
     <div
-      className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center sm:p-6"
+      className={`fixed inset-0 z-[60] flex items-end sm:items-center justify-center ${
+        esLleno(size) ? '' : 'sm:p-6'
+      }`}
       style={{
         backgroundColor: `rgb(var(--scrim) / var(--scrim-alpha))`,
         // La hoja se apoya sobre el teclado, no debajo de él.
@@ -228,16 +245,15 @@ const Sheet: React.FC<Props> = ({ title, subtitle, size = 'md', footer, onClose,
         className={`
           w-full ${ANCHOS[size]}
           flex flex-col
-          bg-slate-900 border border-slate-800
-          rounded-t-vessel sm:rounded-lg
-          shadow-2
+          bg-slate-900
+          ${esLleno(size) ? 'h-full' : 'border border-slate-800 rounded-t-vessel sm:rounded-lg shadow-2'}
           animate-hoja
         `}
         style={{
           // La hoja se queda con lo que el teclado no ocupa. Sin esto la hoja
           // seguía midiendo el 92% de la pantalla y el teclado se le ponía
           // encima, tapando justo el campo que se acababa de tocar.
-          maxHeight: 'calc(92dvh - var(--teclado))',
+          maxHeight: esLleno(size) ? 'calc(100dvh - var(--teclado))' : 'calc(92dvh - var(--teclado))',
           ...(arrastre ? { transform: `translateY(${arrastre}px)`, transition: 'none' } : null),
         }}
       >
@@ -275,7 +291,13 @@ const Sheet: React.FC<Props> = ({ title, subtitle, size = 'md', footer, onClose,
           </button>
         </div>
 
-        <div className="overflow-y-auto overscroll-contain px-4 sm:px-6 pt-4 pb-5 grow">{children}</div>
+        <div
+          className={`overflow-y-auto overscroll-contain grow ${
+            esLleno(size) ? 'p-2' : 'px-4 sm:px-6 pt-4 pb-5'
+          }`}
+        >
+          {children}
+        </div>
 
         {footer && (
           <div className="shrink-0 border-t border-slate-800 px-4 sm:px-6 py-3 pb-safe-b sm:pb-3">

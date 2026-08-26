@@ -365,6 +365,40 @@ Tres trampas que esconde ese intercambio, y que costaron más que el resto:
    Ese elemento puede no existir ya, y su posición sería cero: copiarla mandaría
    a todo el mundo al principio. El reloj sobrevive al intercambio; el nodo no.
 
+### El mosaico ocupa la pantalla entera
+
+El mosaico se abre en una hoja `size="lleno"`: sin margen exterior, sin borde,
+sin esquinas y sin el tope de `92dvh` que llevan las demás. Los cuatro van
+juntos, porque por separado no sirven de nada -- un ancho sin tope dentro de un
+contenedor con `p-6` sigue dejando cuarenta y ocho píxeles de aire.
+
+Se ganó el triple de imagen: en 1920x1080 la grande pasa de 835x470 a
+**1477x787**. Cada píxel que se iba en velo, margen y marco salía del único
+sitio donde importa.
+
+Que la hoja mida la pantalla no basta: hace falta la cadena de `h-full` y
+`min-h-0` hasta el vídeo. Un hijo con `flex-1` dentro de un padre sin altura
+definida se queda en su altura natural y el hueco de más se lo reparte el aire
+de abajo; y un elemento flex se niega a encogerse por debajo de su contenido
+salvo que se le diga, que es lo que hace que la línea de tiempo se salga por el
+pie en vez de que ceda el vídeo.
+
+Tres detalles que costaron una vuelta cada uno:
+
+- **La grande lleva `w-full h-full object-contain`, no `aspect-video`.** La caja
+  puede no ser 16:9 --a pantalla entera en un monitor 16:10 no lo es-- y una
+  proporción fija ahí desperdicia justo el hueco que se acaba de ganar. Y con
+  `max-w/max-h` en vez de `w-full h-full`, un `<video>` sin fuente cargada no
+  tiene tamaño propio: se queda en los 300x150 de fábrica hasta que llega el
+  primer fotograma.
+- **Salvo en móvil**, donde la columna es una tira debajo y la caja se apila:
+  sin proporción propia no tiene de dónde sacar alto y queda en una rendija. De
+  ahí el `aspect-video lg:aspect-auto`.
+- **Lo que crece con los datos va acotado.** La línea de tiempo es `shrink-0` y
+  la lista de marcas lleva su propio scroll: una guerra bien anotada trae veinte
+  marcas, y sin tope se comerían el alto recién ganado. Cede la lista, que se
+  puede desplazar, y no la imagen, que no.
+
 ### La grande lleva sus mandos, y va a pantalla completa
 
 Como cualquier reproductor: barra de búsqueda, reproducir, salto entre marcas,
