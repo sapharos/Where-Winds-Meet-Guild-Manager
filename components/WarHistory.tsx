@@ -607,6 +607,7 @@ const WarHistory: React.FC<Props> = ({
                 puedeAprobar={canApproveVod}
                 puedeFijar={canPinVod}
                 puedeBorrarVod={canDeleteVod}
+                participantes={detail.participants.map((p) => ({ id: p.playerId, nombre: p.name }))}
               />
 
               {/*

@@ -361,6 +361,32 @@ Los dos primeros resuelven el «suben cualquier cosa»: entra en estado
 *pendiente*, con tope de tamaño y duración, y no existe para nadie hasta que
 alguien lo mira.
 
+### Subir la grabación de otro
+
+Media plantilla manda su vídeo por Discord a un oficial en vez de entrar aquí. Sin
+esto, ese oficial sólo podía subirla **a su propio nombre**: el acta decía que la
+había grabado él, y quien de verdad jugaba se quedaba sin su vídeo.
+
+Quien tiene `war.vod.approve` elige de quién es antes de subir, en el desplegable
+**«Subir como»** de la cabecera de Grabaciones. Va ahí y no dentro de la pantalla
+de preparación a propósito: es lo primero que hay que decidir —cambia a nombre de
+quién queda el acta— y puesto entre el recorte y el cronómetro se quedaría en un
+ajuste más de los que se pasan de largo. El botón cambia a «Subir la de <nombre>»,
+y el desplegable vuelve solo a «yo» al terminar, para que la siguiente no se le
+cuelgue al mismo sin que nadie lo pida.
+
+Sólo salen **los que pelearon esa guerra**, porque el servidor exige figurar en
+`war_participants` de ella: ofrecer al resto del gremio sería ofrecer un 403 con
+el nombre de un compañero puesto.
+
+El servidor ya lo permitía desde el primer día —`autorizarSubida` acepta un
+`playerId` distinto del propio si quien sube puede aprobar—; lo que faltaba era
+que la pantalla lo mandara. Viaja como un metadato de tus más, junto al recorte y
+la sincronía.
+
+Un miembro raso no puede: la comprobación existe para que nadie le cuelgue a un
+compañero un vídeo que no es suyo.
+
 ### Tres formas de que una grabación deje de verse, y sólo una borra la fila
 
 | | Qué queda | Quién |

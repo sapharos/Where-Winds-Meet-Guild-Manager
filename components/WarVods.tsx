@@ -74,6 +74,14 @@ interface Props {
    * ya existía. Por defecto sólo administración y liderazgo.
    */
   puedeBorrarVod: boolean;
+  /**
+   * Quiénes pelearon esta guerra, para poder subir la grabación de otro.
+   *
+   * Sólo los de ESTA guerra y no el gremio entero, porque el servidor exige
+   * figurar en `war_participants` de ella: ofrecer a los demás sería ofrecer
+   * un 403 con el nombre de un compañero puesto.
+   */
+  participantes: { id: string; nombre: string }[];
 }
 
 const duracion = (ms: number | null) => {
@@ -143,7 +151,7 @@ const ETIQUETA: Record<Vod['estado'], { texto: string; clase: string }> = {
 
 const WarVods: React.FC<Props> = ({
   warId, nombres, miPlayerId, miUserId, puedeEditar, puedeSubir, puedeAprobar, puedeFijar,
-  puedeBorrarVod,
+  puedeBorrarVod, participantes,
 }) => {
   const [vods, setVods] = useState<Vod[] | null>(null);
   const [viendo, setViendo] = useState<Vod | null>(null);
@@ -151,6 +159,19 @@ const WarVods: React.FC<Props> = ({
   const [progreso, setProgreso] = useState<ProgresoSubida | null>(null);
   const [aviso, setAviso] = useState<{ texto: string; ok: boolean } | null>(null);
   const [preparando, setPreparando] = useState<File | null>(null);
+  /**
+   * De quién es la grabación que se va a subir. Vacío significa «mía».
+   *
+   * Existe porque en la práctica media plantilla manda su vídeo por Discord a
+   * un oficial en vez de entrar aquí, y hasta ahora ese oficial sólo podía
+   * subirla a su propio nombre -- con lo que el acta decía que la había grabado
+   * él, y el puntaje de quien de verdad jugaba se quedaba sin su vídeo.
+   *
+   * El servidor ya lo permitía desde el principio: `autorizarSubida` acepta un
+   * `playerId` distinto del propio si quien sube tiene `war.vod.approve`. Lo
+   * que faltaba era mandarlo.
+   */
+  const [deQuien, setDeQuien] = useState<string>('');
   const [marcas, setMarcas] = useState<Marca[]>([]);
   const [mosaico, setMosaico] = useState(false);
   const archivo = useRef<HTMLInputElement>(null);
@@ -225,6 +246,10 @@ const WarVods: React.FC<Props> = ({
         metadatos: {
           warId,
           filename: fichero.name,
+          // Sólo cuando es de otro. Mandar el propio `playerId` siempre sería
+          // decir lo mismo con más palabras, y el servidor ya sabe de quién es
+          // la sesión.
+          ...(deQuien ? { playerId: deQuien } : {}),
           ...(extra.recorteIniMs !== null ? { recorteIniMs: String(extra.recorteIniMs) } : {}),
           ...(extra.recorteFinMs !== null ? { recorteFinMs: String(extra.recorteFinMs) } : {}),
           ...(extra.offsetMs !== null ? { offsetMs: String(extra.offsetMs) } : {}),
@@ -233,7 +258,18 @@ const WarVods: React.FC<Props> = ({
         alProgresar: setProgreso,
         señal: cancelar.current.signal,
       });
-      setAviso({ texto: 'Subida. Queda esperar a que un oficial la publique.', ok: true });
+      // Se dice a nombre de quién quedó. Subir la de otro es justo donde un
+      // desplegable que se quedó puesto de la vez anterior hace daño, y esta
+      // línea es la única oportunidad de verlo antes de que se publique.
+      setAviso({
+        texto: deQuien
+          ? `Subida a nombre de ${nombres[deQuien] ?? 'ese miembro'}. Queda publicarla.`
+          : 'Subida. Queda esperar a que un oficial la publique.',
+        ok: true,
+      });
+      // Vuelve a «yo»: dejarlo puesto haría que la siguiente subida se le
+      // colgara al mismo sin que nadie lo pidiera.
+      setDeQuien('');
       await cargar();
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') {
@@ -368,6 +404,18 @@ const WarVods: React.FC<Props> = ({
 
   const pendientes = vods?.filter((v) => v.estado === 'listo').length ?? 0;
 
+  /**
+   * A quién se le puede atribuir una grabación, aparte de a uno mismo.
+   *
+   * Los de esta guerra y nadie más: el servidor exige figurar en
+   * `war_participants` de ella, así que ofrecer al resto del gremio sería
+   * ofrecer un 403 con el nombre de un compañero puesto. Ordenados por nombre
+   * porque el orden en que se desplegaron no ayuda a encontrar a nadie.
+   */
+  const otros = participantes
+    .filter((p) => p.id !== miPlayerId)
+    .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
+
   return (
     <section className="mt-6">
       <header className="flex items-center justify-between gap-3 mb-3">
@@ -399,13 +447,40 @@ const WarVods: React.FC<Props> = ({
 
         {puedeSubir && !subiendo && (
           <>
+            {/*
+              De quién es. Sólo para quien puede aprobar, que es a quien el
+              servidor se lo consiente, y sólo si queda alguien a quien
+              atribuírsela: en una guerra de uno el desplegable sobra.
+
+              Va antes del botón y no dentro de la preparación a propósito. Es
+              lo primero que hay que decidir -- cambia a nombre de quién queda
+              el acta -- y puesto después, entre el recorte y el cronómetro, se
+              queda en un ajuste más de los que se pasan de largo.
+            */}
+            {puedeAprobar && otros.length > 0 && (
+              <label className="flex items-center gap-2 text-[11px] text-slate-500">
+                Subir como
+                <select
+                  value={deQuien}
+                  onChange={(e) => setDeQuien(e.target.value)}
+                  className="bg-slate-950 border border-slate-800 rounded px-2 min-h-tap text-sm text-slate-200 outline-none focus:ring-1 focus:ring-amber-500"
+                >
+                  <option value="">yo</option>
+                  {otros.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.nombre}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             <button
               type="button"
               onClick={() => archivo.current?.click()}
               className="px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium flex items-center gap-2"
             >
               <i className="fa-solid fa-upload" aria-hidden="true" />
-              Subir la mía
+              {deQuien ? `Subir la de ${nombres[deQuien] ?? 'ese miembro'}` : 'Subir la mía'}
             </button>
             <input
               ref={archivo}

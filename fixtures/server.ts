@@ -1353,8 +1353,13 @@ function instalarTusFalso(real: typeof window.fetch): void {
       const reloj = setInterval(() => {
         paso++;
         const enviado = Math.round((tamaño * paso) / pasos);
+        // Las cifras van en el constructor y no con `Object.assign`.
+        // `loaded` y `total` son getters de sólo lectura, así que asignarlos
+        // lanza en modo estricto -- que es el de un módulo ES. Reventaba en el
+        // primer latido de cada subida: la barra no se movía, la subida no
+        // terminaba nunca y no se podía ensayar nada de esta pantalla.
         this.upload.dispatchEvent(
-          Object.assign(new ProgressEvent('progress'), { loaded: enviado, total: tamaño }),
+          new ProgressEvent('progress', { loaded: enviado, total: tamaño, lengthComputable: true }),
         );
         if (paso < pasos) return;
 
@@ -1376,7 +1381,11 @@ function instalarTusFalso(real: typeof window.fetch): void {
           const fin = Number(subida.meta.recorteFinMs ?? 0);
           store.vods.push({
             id, warId: subida.meta.warId ?? fake.warRows[0].id,
-            playerId: fake.session.user.playerId, estado: 'procesando',
+            // A nombre de quien diga el metadato, que es como lo resuelve el
+            // servidor de verdad: un oficial puede subir la de otro. Sin el, la
+            // suya.
+            playerId: subida.meta.playerId ?? fake.session.user.playerId,
+            estado: 'procesando',
             duracionMs: fin > recorte ? fin - recorte : null,
             offsetMs: subida.meta.offsetMs ? Number(subida.meta.offsetMs) : null,
             offsetConfianza: subida.meta.offsetConfianza ?? null,
