@@ -77,11 +77,27 @@ async function crear(fichero: File, metadatos: Record<string, string>): Promise<
       'Upload-Metadata': cabeceraMetadatos(metadatos),
     },
   });
-  if (res.status === 413) throw new Error('El fichero pasa del tamaño permitido.');
   if (!res.ok) {
     // El servidor explica el rechazo en el cuerpo: «no consta que jugaras esa
     // guerra» vale mucho más que «error 403».
-    throw new Error((await res.text()).trim() || `El servidor rechazó la subida (${res.status})`);
+    const motivo = (await res.text()).trim();
+    // El 413 se cortaba aquí arriba con una frase fija y SIN leer el cuerpo, y
+    // eso costó una tarde: el cuerpo trae la cifra --«el máximo son 6 GiB»--,
+    // que es lo único que distingue «el tope es el que crees y tu fichero se
+    // pasa» de «el tope no es el que crees porque el despliegue todavía lleva
+    // el viejo». Sin la cifra, las dos cosas se ven exactamente igual.
+    //
+    // Y hay dos topes distintos detrás de este mismo 413: el de la API, que
+    // contesta al gancho `pre-create`, y el `-max-size` de tusd. Cada uno se
+    // explica con sus palabras, así que el cuerpo también dice cuál saltó.
+    if (res.status === 413) {
+      throw new Error(
+        motivo
+          ? `El fichero pasa del tamaño permitido: ${motivo}.`
+          : 'El fichero pasa del tamaño permitido.',
+      );
+    }
+    throw new Error(motivo || `El servidor rechazó la subida (${res.status})`);
   }
   const url = res.headers.get('Location');
   if (!url) throw new Error('El servidor no dijo dónde subir.');
