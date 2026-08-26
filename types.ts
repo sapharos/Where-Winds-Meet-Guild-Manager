@@ -432,6 +432,7 @@ export const PERMISSION_LABELS: Record<string, string> = {
   'war.vod.upload': 'Subir grabaciones de guerra',
   'war.vod.approve': 'Aprobar grabaciones de guerra',
   'war.vod.pin': 'Fijar una grabación para que no caduque',
+  'war.vod.delete': 'Borrar una grabación del acta',
   'events.manage': 'Programar eventos',
   'events.reset': 'Reiniciar una encuesta',
   'data.export': 'Exportar datos',

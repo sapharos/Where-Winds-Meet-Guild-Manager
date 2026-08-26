@@ -36,6 +36,7 @@ interface Props {
   canUploadVod: boolean;
   canApproveVod: boolean;
   canPinVod: boolean;
+  canDeleteVod: boolean;
   miPlayerId: string | null;
   miUserId: string | null;
   onChanged: () => void;

@@ -570,6 +570,7 @@ const App: React.FC = () => {
             canUploadVod={can('war.vod.upload')}
             canApproveVod={can('war.vod.approve')}
             canPinVod={can('war.vod.pin')}
+            canDeleteVod={can('war.vod.delete')}
             miPlayerId={session.user.playerId ?? null}
             miUserId={session.user.id}
             onChanged={() => {}}
@@ -600,6 +601,7 @@ const App: React.FC = () => {
             canUploadVod={can('war.vod.upload')}
             canApproveVod={can('war.vod.approve')}
             canPinVod={can('war.vod.pin')}
+            canDeleteVod={can('war.vod.delete')}
             miPlayerId={session.user.playerId ?? null}
             miUserId={session.user.id}
           />

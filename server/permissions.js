@@ -36,6 +36,12 @@ export const PERMISSIONS = [
   // Salvar un VOD de la retención de 3 meses. Aparte de aprobar porque es la
   // única acción aquí que gasta disco para siempre.
   'war.vod.pin',
+  // Borrar una grabación del acta, con sus bytes y su fila. Aparte de rechazar
+  // --y más arriba-- porque rechazar es una decisión sobre algo que está a
+  // revisión y esto no deshace nada: quita del registro algo que ya existía,
+  // sin dejar el rastro que sí deja una caducada. Es para lo que no debería
+  // constar en absoluto -- una subida rota, la guerra equivocada, un duplicado.
+  'war.vod.delete',
   'events.manage',
   // Borrar todo lo contestado de una encuesta y empezarla de cero. Aparte de
   // programar porque no se deshace: quien organiza corrige la hora a diario,
@@ -67,6 +73,10 @@ export const DEFAULT_PERMISSIONS = {
     'events.reset',
     'data.export',
   ],
+  // El sublider no borra grabaciones, ni el oficial: aprobar y rechazar es
+  // revisar, y borrar es quitar del registro. Se puede cambiar en la matriz,
+  // pero el valor de partida es el que menos se lamenta.
+
   officer: [
     'roster.view',
     'war.view',

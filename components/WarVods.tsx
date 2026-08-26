@@ -63,6 +63,17 @@ interface Props {
   puedeSubir: boolean;
   puedeAprobar: boolean;
   puedeFijar: boolean;
+  /**
+   * Quitar una grabación del acta, con sus bytes y su fila.
+   *
+   * `puedeBorrarVod` y no `puedeBorrar` porque en este mismo archivo ya hay un
+   * `puedeBorrar` que decide quién borra una MARCA, y son cosas distintas.
+   *
+   * Permiso propio (`war.vod.delete`) y no el de aprobar: rechazar es una
+   * decisión sobre algo que está a revisión, y esto quita del registro algo que
+   * ya existía. Por defecto sólo administración y liderazgo.
+   */
+  puedeBorrarVod: boolean;
 }
 
 const duracion = (ms: number | null) => {
@@ -132,6 +143,7 @@ const ETIQUETA: Record<Vod['estado'], { texto: string; clase: string }> = {
 
 const WarVods: React.FC<Props> = ({
   warId, nombres, miPlayerId, miUserId, puedeEditar, puedeSubir, puedeAprobar, puedeFijar,
+  puedeBorrarVod,
 }) => {
   const [vods, setVods] = useState<Vod[] | null>(null);
   const [viendo, setViendo] = useState<Vod | null>(null);
@@ -259,6 +271,41 @@ const WarVods: React.FC<Props> = ({
       setAviso({ texto: err instanceof Error ? err.message : 'No se pudo reintentar', ok: false });
     }
     await cargar();
+  };
+
+  /**
+   * Quitarla del acta.
+   *
+   * Se avisa de lo que de verdad pasa y no con un «¿seguro?»: que no se puede
+   * deshacer, y que a diferencia de una rechazada o una caducada no va a quedar
+   * constancia de que existió. Con el nombre de quien la subió dentro, porque
+   * en una lista de seis filas es fácil pulsar en la de al lado.
+   *
+   * Las marcas se quedan. Están en tiempo de guerra y valen para cualquier
+   * grabación de esa noche, así que quien anotó «cae la puerta del medio» no
+   * pierde su nota porque se borre el vídeo desde el que la escribió.
+   */
+  const borrar = async (vod: Vod) => {
+    const quien = nombres[vod.playerId] ?? vod.playerId;
+    const aviso =
+      `Se va a borrar del acta la grabación de ${quien}, con el vídeo entero.\n\n` +
+      'No se puede deshacer y no queda constancia de que existió, a diferencia de ' +
+      'una rechazada o una caducada. Las marcas de la guerra se conservan.\n\n' +
+      '¿Borrarla?';
+    if (!confirm(aviso)) return;
+
+    setAviso(null);
+    try {
+      await api(`/vods/${vod.id}`, { method: 'DELETE' });
+      // Si estaba abierta en el reproductor, se cierra: se acaba de quedar sin
+      // vídeo detrás y el reproductor sólo sabría enseñar un error.
+      setViendo((v) => (v?.id === vod.id ? null : v));
+      setAviso({ texto: `Grabación de ${quien} borrada del acta.`, ok: true });
+    } catch (err) {
+      setAviso({ texto: err instanceof Error ? err.message : 'No se pudo borrar', ok: false });
+    }
+    await cargar();
+    await cargarMarcas();
   };
 
   const fijar = async (vod: Vod) => {
@@ -570,6 +617,29 @@ const WarVods: React.FC<Props> = ({
                         Rechazar
                       </button>
                     </>
+                  )}
+
+                  {/*
+                    En cualquier estado, que es el sentido de esto: rechazar
+                    sólo aparece mientras está a revisión, así que una ya
+                    publicada -- o una que quedó inservible después de
+                    prepararse -- no había forma de quitarla.
+
+                    Al final de la fila y sin color de alarma: es destructivo,
+                    pero pintarlo de rojo junto a «Publicar» sólo aumenta las
+                    probabilidades de darle al que no era. Lo que protege es el
+                    aviso, que dice lo que pasa.
+                  */}
+                  {puedeBorrarVod && (
+                    <button
+                      type="button"
+                      onClick={() => void borrar(vod)}
+                      title="Borrar esta grabación del acta"
+                      aria-label={`Borrar la grabación de ${nombres[vod.playerId] ?? vod.playerId}`}
+                      className="min-w-tap rounded-lg bg-slate-800 text-slate-400 hover:bg-red-900/60 hover:text-red-300 text-xs flex items-center justify-center transition-colors duration-micro"
+                    >
+                      <i className="fa-solid fa-trash" aria-hidden="true" />
+                    </button>
                   )}
 
                   {puedeFijar && vod.estado === 'aprobado' && (

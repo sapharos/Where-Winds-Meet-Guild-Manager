@@ -1198,6 +1198,15 @@ const ESCRITURAS: [string, RegExp, Ruta][] = [
     if (!body.aprobado) vod.calidades = [];
     return { id: vod.id, estado: vod.estado };
   }],
+  ['DELETE', /^\/vods\/([^/]+)$/, (m) => {
+    const at = store.vods.findIndex((v) => v.id === m[1]);
+    if (at < 0) return { error: 'no existe' };
+    store.vods.splice(at, 1);
+    // Las marcas se quedan, sin la grabacion de la que salieron: es lo que hace
+    // el ON DELETE SET NULL del esquema, y hay que poder verlo aqui tambien.
+    for (const marca of store.marcas) if (marca.vodId === m[1]) marca.vodId = null;
+    return { id: m[1] };
+  }],
   ['POST', /^\/vods\/([^/]+)\/retry$/, (m) => {
     const vod = store.vods.find((v) => v.id === m[1]);
     if (!vod) return { error: 'no such vod' };

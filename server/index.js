@@ -100,6 +100,7 @@ import {
   vodAccesible,
   tipoDeFichero,
   resolverVod,
+  borrarVod,
   fijarVod,
   ajustarSincronia,
   marcasDeLaGuerra,
@@ -1360,6 +1361,15 @@ app.post('/api/vods/:id/retry', requireAuth, requirePermission('war.vod.upload')
   const hecho = await reintentarVod(req.params.id, req.user, req.permissions);
   if (!hecho.ok) return res.status(hecho.codigo).json({ error: hecho.motivo });
   res.json({ ok: true });
+}));
+
+// Borrar del acta. Permiso propio y no `war.vod.approve`: rechazar es una
+// decisión sobre algo que está a revisión, y esto quita del registro algo que ya
+// existía, sin dejar el rastro que sí deja una caducada.
+app.delete('/api/vods/:id', requireAuth, requirePermission('war.vod.delete'), asHandler(async (req, res) => {
+  const hecho = await borrarVod(req.params.id);
+  if (!hecho) return res.status(404).json({ error: 'no such vod' });
+  res.json(hecho);
 }));
 
 app.post('/api/vods/:id/pin', requireAuth, requirePermission('war.vod.pin'), asHandler(async (req, res) => {

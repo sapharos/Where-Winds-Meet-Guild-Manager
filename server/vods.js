@@ -1002,6 +1002,49 @@ export async function resolverVod(id, aprobado, userId) {
 }
 
 /** Fijar salva de la caducidad; soltar le devuelve una cuenta nueva desde hoy. */
+/**
+ * Borrar una grabación del acta: sus bytes y su fila.
+ *
+ * Es lo único que borra la FILA de algo que llegó a existir, y por eso está
+ * detrás de su propio permiso. Las otras dos formas de que una grabación deje
+ * de verse conservan el registro a propósito: `rechazado` dice «se miró y no
+ * valía» y `caducado` dice «hubo grabación, se fue con la retención», que es lo
+ * que permite al acta contarlo en vez de dar un enlace roto.
+ *
+ * Esto es para lo que no debería constar en absoluto. Una subida que salió
+ * inservible, la guerra equivocada, un duplicado: casos donde dejar rastro no
+ * documenta nada, sólo ensucia la lista con algo que nadie va a poder abrir
+ * nunca.
+ *
+ * Las marcas NO se van con ella. `war_marcas.vod_id` es `ON DELETE SET NULL`
+ * por diseño: una marca está en tiempo de guerra y vale para cualquier
+ * grabación de esa noche, así que sobrevive a la que la originó -- «vod_id es
+ * de dónde salió, no dónde vive». Quien anotó «cae la puerta del medio» no
+ * pierde su nota porque el vídeo desde el que la escribió se borre.
+ *
+ * Se borra de los dos sitios: los segmentos de `hls/` y, por si estaba a medio
+ * preparar, el original de `entrada/`. Lo segundo importa: son 2 GB, y sin esto
+ * borrar algo atascado en «Preparando» dejaría el fichero grande huérfano en el
+ * almacén sin ninguna fila que lo mencione.
+ */
+export async function borrarVod(id) {
+  const { rows } = await pool.query(
+    `SELECT v.id FROM war_vods v JOIN wars w ON w.id = v.war_id
+      WHERE v.id = $1 AND w.guild_id = $2`,
+    [id, GUILD_ID],
+  );
+  if (!rows.length) return null;
+
+  await rm(path.join(HLS, id), { recursive: true, force: true });
+  await rm(path.join(ENTRADA, id), { force: true });
+  await rm(path.join(ENTRADA, `${id}.info`), { force: true });
+  // Las calidades se van solas: su clave ajena es ON DELETE CASCADE. Las marcas
+  // no, que es ON DELETE SET NULL, y ésa es la diferencia que importa aquí.
+  await pool.query(`DELETE FROM war_vods WHERE id = $1`, [id]);
+  console.log(`[vods] ${id} borrada del acta`);
+  return { id };
+}
+
 export async function fijarVod(id, fijado) {
   const expira = fijado ? null : new Date(Date.now() + DIAS * 24 * 3600 * 1000);
   const { rows } = await pool.query(

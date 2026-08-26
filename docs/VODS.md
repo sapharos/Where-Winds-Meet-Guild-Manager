@@ -327,10 +327,51 @@ Permisos, sobre el `permissions.js` que ya existe:
   `war_participants`**
 - `war.vod.approve` — publicar; nada se ve hasta que un oficial lo aprueba
 - `war.vod.pin` — marcar como permanente
+- `war.vod.delete` — borrar del acta. Por defecto **sólo administración y
+  liderazgo**
 
 Los dos primeros resuelven el «suben cualquier cosa»: entra en estado
 *pendiente*, con tope de tamaño y duración, y no existe para nadie hasta que
 alguien lo mira.
+
+### Tres formas de que una grabación deje de verse, y sólo una borra la fila
+
+| | Qué queda | Quién |
+|---|---|---|
+| **Rechazar** | la fila, en estado `rechazado` | `war.vod.approve` |
+| **Caducar** (retención) | la fila, en estado `caducado` | la barrida, sola |
+| **Borrar** | **nada** | `war.vod.delete` |
+
+Las dos primeras conservan el registro a propósito: `rechazado` dice «se miró y
+no valía» y `caducado` dice «hubo grabación, se fue con la retención», que es lo
+que permite al acta contarlo en vez de dar un enlace roto.
+
+Borrar es para lo que **no debería constar en absoluto**: una subida que salió
+inservible, la guerra equivocada, un duplicado. Casos donde dejar rastro no
+documenta nada y sólo ensucia la lista con algo que nadie va a poder abrir.
+
+Permiso propio y no `war.vod.approve` porque son decisiones distintas: rechazar
+es revisar algo que está a revisión —y por eso ese botón sólo sale en estado
+`listo`—, mientras que borrar quita del registro algo que ya existía. Ésa es
+justamente la carencia que lo trajo aquí: una grabación ya publicada, o una que
+se preparó y quedó inservible, no había forma de quitarla. El botón de borrar
+sale en **cualquier estado**.
+
+**Las marcas no se van con ella.** `war_marcas.vod_id` es `ON DELETE SET NULL`
+por diseño: una marca está en tiempo de guerra y vale para cualquier grabación de
+esa noche, así que sobrevive a la que la originó —«`vod_id` es de dónde salió, no
+dónde vive»—. Quien anotó «cae la puerta del medio» no pierde su nota porque se
+borre el vídeo desde el que la escribió.
+
+Se borra de los dos sitios del almacén: los segmentos de `hls/` y, por si estaba
+a medio preparar, el original de `entrada/`. Lo segundo importa —son 2 GB— porque
+si no, borrar algo atascado en «Preparando» dejaría el fichero grande huérfano
+sin ninguna fila que lo mencione.
+
+> Un permiso nuevo llega a un despliegue que ya existe por `seedPermissions`, que
+> aplica el valor por defecto **sólo a los nombres que nunca ha visto** y no
+> repone nada que un líder haya revocado a mano. No hay que tocar la matriz
+> después de desplegar.
 
 **Servido protegido:** la API firma URLs con caducidad usando el mismo secreto de
 `app_settings` que ya firma `wwm_session`, y nginx las valida con `secure_link`.

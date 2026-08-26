@@ -63,6 +63,7 @@ interface Props {
   canUploadVod: boolean;
   canApproveVod: boolean;
   canPinVod: boolean;
+  canDeleteVod: boolean;
   /** La ficha de quien mira, para saber cuál de las grabaciones es la suya. */
   miPlayerId: string | null;
   /** Su cuenta, que es lo que firma las marcas de los vídeos. */
@@ -138,6 +139,7 @@ const WarBoard: React.FC<Props> = ({
   canUploadVod,
   canApproveVod,
   canPinVod,
+  canDeleteVod,
   miPlayerId,
   miUserId,
 }) => {
@@ -2086,6 +2088,7 @@ const WarBoard: React.FC<Props> = ({
           canUploadVod={canUploadVod}
           canApproveVod={canApproveVod}
           canPinVod={canPinVod}
+          canDeleteVod={canDeleteVod}
           miPlayerId={miPlayerId}
           miUserId={miUserId}
           onClose={() => setHistory(false)}
