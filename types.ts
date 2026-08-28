@@ -575,6 +575,11 @@ export interface GuildEvent {
   id: string;
   kind: EventKind;
   title: string;
+  /**
+   * Si lleva encuesta. En false es un aviso: se anuncia y se recuerda, pero no
+   * se contesta -- la Fiesta de Gremio no se vota, se va.
+   */
+  poll: boolean;
   startsAt: string;
   minutes: number;
   notes: string | null;
@@ -632,8 +637,12 @@ export interface EventSeries {
   id: string;
   kind: EventKind;
   title: string;
-  /** 0 = domingo … 6 = sábado. */
+  /** Si sus eventos llevan encuesta, o son sólo avisos. */
+  poll: boolean;
+  /** 0 = domingo … 6 = sábado. Es el primero de `weekdays`, para ordenar. */
   weekday: number;
+  /** En qué días de la semana cae. Vacío: sólo en `weekday`. */
+  weekdays: number[];
   timeLocal: string;
   timezone: string;
   minutes: number;
@@ -651,6 +660,16 @@ export interface EventSeries {
 }
 
 export const DIAS = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+
+/**
+ * Los días como se marcan en una fila apretada, indexados como los cuenta
+ * JavaScript (0 = domingo). La X es del miércoles, como en cualquier horario
+ * español, para que la M sola siga siendo el martes.
+ */
+export const DIAS_CORTOS = ['D', 'L', 'M', 'X', 'J', 'V', 'S'];
+
+/** El orden en que se lee una semana: de lunes a domingo. */
+export const SEMANA: number[] = [1, 2, 3, 4, 5, 6, 0];
 
 /** Un sonido del panel de sonidos del servidor de Discord. */
 export interface DiscordSoundboardSound {

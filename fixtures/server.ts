@@ -467,6 +467,7 @@ const eventos: Record<string, unknown>[] = [
   {
     id: 'ev-sabado',
     kind: 'war',
+    poll: true,
     title: 'Guerra del sábado',
     startsAt: enDias(2),
     minutes: 150,
@@ -483,6 +484,7 @@ const eventos: Record<string, unknown>[] = [
   {
     id: 'ev-domingo',
     kind: 'war',
+    poll: true,
     title: 'Guerra del domingo',
     startsAt: enDias(3),
     minutes: 150,
@@ -500,6 +502,7 @@ const eventos: Record<string, unknown>[] = [
   {
     id: 'ev-pve',
     kind: 'pve',
+    poll: true,
     title: 'Reino del Héroe',
     startsAt: enDias(4, 21, 0),
     minutes: 90,
@@ -513,12 +516,32 @@ const eventos: Record<string, unknown>[] = [
     cancelledAt: null,
     createdBy: 'u-1',
   },
+  // Un aviso: sin encuesta, sin ventana y sin nada que contestar. Es el cuarto
+  // estado que se ve distinto en pantalla y hay que poder ensayarlo aquí.
+  {
+    id: 'ev-fiesta',
+    kind: 'casual',
+    poll: false,
+    title: 'Fiesta de Gremio',
+    startsAt: enDias(5, 20, 0),
+    minutes: 60,
+    notes: 'Fuegos artificiales en la sede. Traed los abanicos.',
+    allowedRoles: ['200000000000000001'],
+    reminderMode: 'channel',
+    reminderEveryDays: null,
+    reminderTime: null,
+    opensAt: null,
+    closesAt: null,
+    cancelledAt: null,
+    createdBy: 'u-1',
+  },
 ];
 
 const respuestas: Record<string, RespuestaFalsa[]> = {
   'ev-sabado': [],
   'ev-domingo': [],
   'ev-pve': [],
+  'ev-fiesta': [],
 };
 
 // Unos cuantos ya contestados, para que el recuento no salga en cero y se vea
@@ -556,17 +579,30 @@ let canalPorTipo: Record<string, string | null> = {};
 /** Las dos series que siembra el servidor de verdad al arrancar. */
 const seriesFalsas: Record<string, unknown>[] = [
   {
-    id: 'serie-guerra-domingo', kind: 'war', title: 'Guerra del domingo', weekday: 0,
+    id: 'serie-guerra-domingo', kind: 'war', title: 'Guerra del domingo', poll: true,
+    weekday: 0, weekdays: [0],
     timeLocal: '19:30', timezone: 'America/Bogota', minutes: 150, notes: null, allowedRoles: [],
     reminderMode: 'channel', reminderEveryDays: null, reminderTime: null,
     opensDaysBefore: 6, opensTime: '00:00', closesDaysBefore: 1, closesTime: '12:00',
     autoPublish: true, active: true,
   },
   {
-    id: 'serie-guerra-sabado', kind: 'war', title: 'Guerra del sábado', weekday: 6,
+    id: 'serie-guerra-sabado', kind: 'war', title: 'Guerra del sábado', poll: true,
+    weekday: 6, weekdays: [6],
     timeLocal: '19:30', timezone: 'America/Bogota', minutes: 150, notes: null, allowedRoles: [],
     reminderMode: 'dm', reminderEveryDays: 2, reminderTime: '19:00',
     opensDaysBefore: 5, opensTime: '00:00', closesDaysBefore: 0, closesTime: '12:00',
+    autoPublish: true, active: true,
+  },
+  // Una serie de avisos en dos días, para ensayar las dos cosas nuevas juntas:
+  // sin encuesta y cayendo martes y jueves con una sola regla.
+  {
+    id: 'serie-pvp', kind: 'practice', title: 'Enfrentamientos PvP', poll: false,
+    weekday: 2, weekdays: [2, 4],
+    timeLocal: '20:00', timezone: 'America/Bogota', minutes: 90, notes: null,
+    allowedRoles: ['200000000000000002'],
+    reminderMode: 'channel', reminderEveryDays: null, reminderTime: null,
+    opensDaysBefore: 1, opensTime: '00:00', closesDaysBefore: 0, closesTime: '12:00',
     autoPublish: true, active: true,
   },
 ];
@@ -599,6 +635,10 @@ const anotar = (id: string, playerId: string, body: Record<string, unknown>, por
   // Como el servidor: quien anota por otro queda fuera de la regla, porque
   // apuntar lo que alguien dijo por voz no es votar en su lugar.
   const evento = eventos.find((x) => x.id === id);
+  // Y como el servidor con los avisos: no se contestan por ninguna puerta.
+  if (evento?.poll === false) {
+    return { error: 'ese evento es un aviso y no lleva encuesta' };
+  }
   const abierta = (evento?.allowedRoles ?? []) as string[];
   if (!porOtro && abierta.length && !abierta.some((r) => MIS_ROLES_DISCORD.includes(r))) {
     return { error: 'esta convocatoria no está abierta a tus roles de Discord' };

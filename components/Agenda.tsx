@@ -79,6 +79,8 @@ const ORDEN: EventAnswer[] = ['yes', 'maybe', 'no'];
  * falta. Se enseña lo que hay, se ofrece lo que se pregunta.
  */
 const mostradas = (event: GuildEvent): EventAnswer[] => {
+  // Un aviso no pregunta nada, así que no hay listas que enseñar.
+  if (event.poll === false) return [];
   const ofrecidas = respuestasDe(event.kind);
   // En la lista sólo llegan los recuentos; en el detalle, las respuestas.
   const dadas = event.responses
@@ -535,6 +537,15 @@ const TarjetaEvento: React.FC<{
     </div>
 
     <div className="flex items-center gap-2 mt-2 pl-11 flex-wrap">
+      {/* Un aviso se distingue de una encuesta a cero: lo primero es normal y
+          lo segundo es una alarma, y confundirlos hace ruido en los dos
+          sentidos. */}
+      {event.poll === false && (
+        <span className="text-[11px] leading-none px-1.5 py-[3px] rounded border border-slate-700 text-slate-400 uppercase font-bold tracking-tighter">
+          <i className="fa-solid fa-bullhorn mr-1"></i>
+          aviso
+        </span>
+      )}
       {mostradas(event).map((answer) => (
         <span
           key={answer}
@@ -717,6 +728,7 @@ const DetalleEvento: React.FC<{
   // Discord. Sin campo -- un detalle traído antes de que esto existiera -- se
   // supone que sí, que es como se comportaba hasta ahora.
   const invitado = event.mayAnswer !== false;
+  const aviso = event.poll === false;
   // Reiniciar no se deshace y borra el trabajo de treinta personas, así que
   // pide pulsar dos veces. El segundo botón dice lo que va a pasar y cuánto
   // cuesta -- no «¿seguro?», que no informa de nada.
@@ -742,6 +754,15 @@ const DetalleEvento: React.FC<{
   return (
     <div className="space-y-5">
       {event.notes && <p className="text-sm text-slate-300 whitespace-pre-line">{event.notes}</p>}
+
+      {/* Que no lleva encuesta se dice, no se deja adivinar: si no, la falta
+          de botones parece un permiso que falta o una pantalla rota. */}
+      {aviso && (
+        <p className="text-meta text-slate-500">
+          <i className="fa-solid fa-bullhorn mr-1.5"></i>
+          Es un aviso: se anuncia y se recuerda, pero no se contesta.
+        </p>
+      )}
 
       {event.closesAt && (
         <p className="text-meta text-slate-500">
@@ -791,7 +812,7 @@ const DetalleEvento: React.FC<{
       {event.allowedRoles?.length > 0 && (
         <p className="text-meta text-slate-500 flex items-center gap-1.5 flex-wrap">
           <i className="fa-brands fa-discord"></i>
-          Abierta a
+          {aviso ? 'Se avisa a' : 'Abierta a'}
           {event.allowedRoles.map((id) => (
             <ChapaRol key={id} id={id} roles={rolesDiscord} />
           ))}
@@ -814,15 +835,17 @@ const DetalleEvento: React.FC<{
           ></i>
           {event.reminderMode === 'none'
             ? 'Sin recordatorios.'
-            : `Se recuerda ${event.reminderMode === 'dm' ? 'por privado' : 'en el canal'} ${
+            : `${aviso ? 'Se avisa' : 'Se recuerda'} ${event.reminderMode === 'dm' ? 'por privado' : 'en el canal'} ${
                 event.reminderEveryDays && event.reminderTime
                   ? `cada ${event.reminderEveryDays === 1 ? 'día' : `${event.reminderEveryDays} días`} a las ${event.reminderTime}`
-                  : 'una vez, seis horas antes de que cierre'
+                  : aviso
+                    ? 'una vez, seis horas antes de que empiece'
+                    : 'una vez, seis horas antes de que cierre'
               }.`}
         </p>
       )}
 
-      {myPlayerId && !event.cancelledAt && (
+      {myPlayerId && !event.cancelledAt && !aviso && (
         <div>
           <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-2">Tu respuesta</p>
           {invitado ? (
@@ -880,7 +903,7 @@ const DetalleEvento: React.FC<{
         );
       })}
 
-      {canManage && sinContestar.length > 0 && (
+      {canManage && !aviso && sinContestar.length > 0 && (
         <div>
           <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-2">
             Sin contestar · {sinContestar.length}
@@ -918,11 +941,11 @@ const DetalleEvento: React.FC<{
             disabled={Boolean(event.cancelledAt)}
             title={[
               event.discordMessageId
-                ? 'Manda un mensaje nuevo al canal actual y retira el anterior. Las respuestas no se tocan.'
+                ? `Manda un mensaje nuevo al canal actual y retira el anterior.${aviso ? '' : ' Las respuestas no se tocan.'}`
                 : null,
               event.allowedRoles?.length
                 ? 'Les suena a los roles convocados, y sólo a ellos.'
-                : 'No avisa a nadie: la encuesta queda en el canal para quien lo mire.',
+                : `No avisa a nadie: ${aviso ? 'el anuncio queda' : 'la encuesta queda'} en el canal para quien lo mire.`,
             ]
               .filter(Boolean)
               .join(' ')}
@@ -956,8 +979,9 @@ const DetalleEvento: React.FC<{
 
           {/* Empezar la encuesta de cero. Cuando lo que se preguntó cambia
               debajo de las respuestas -- otra hora, otros roles -- lo guardado
-              deja de decir lo que parece que dice. */}
-          {canReset && (
+              deja de decir lo que parece que dice. Un aviso no tiene encuesta
+              que reiniciar, así que el botón sobra entero. */}
+          {canReset && !aviso && (
             <button
               onClick={() => {
                 if (!confirmando) return setConfirmando(true);
@@ -1057,16 +1081,19 @@ const ChapaRol: React.FC<{ id: string; roles: DiscordRole[] }> = ({ id, roles })
 const RolesQuePueden: React.FC<{
   seleccionados: string[];
   roles: DiscordRole[];
+  /** En un aviso los roles no acotan quién vota: dicen a quién se le avisa. */
+  aviso?: boolean;
   onCambiar: (roles: string[]) => void;
-}> = ({ seleccionados, roles, onCambiar }) => (
+}> = ({ seleccionados, roles, aviso = false, onCambiar }) => (
   <div>
     <label className="block text-xs uppercase tracking-wider text-slate-500 mb-1">
-      Quién puede votar
+      {aviso ? 'A quién se avisa' : 'Quién puede votar'}
     </label>
     {roles.length === 0 ? (
       <p className="text-meta text-slate-500">
         No puedo leer los roles del servidor de Discord. Comprueba en Administración que el bot está
-        configurado; mientras tanto la encuesta queda abierta a todo el gremio.
+        configurado; mientras tanto {aviso ? 'el aviso queda' : 'la encuesta queda abierta'} para
+        todo el gremio.
       </p>
     ) : (
       <>
@@ -1103,9 +1130,13 @@ const RolesQuePueden: React.FC<{
           })}
         </div>
         <p className="text-meta text-slate-500 mt-1">
-          {seleccionados.length === 0
-            ? 'Sin marcar nada, la encuesta es para todo el gremio y al publicarla no se avisa a nadie.'
-            : `Sólo contestan quienes tengan ${listaDeRoles(seleccionados, roles)} en Discord. Los demás la ven, pero no votan, y al publicarla les suena sólo a ellos.`}
+          {aviso
+            ? seleccionados.length === 0
+              ? 'Sin marcar nada, el anuncio sale al canal sin sonarle a nadie: para quien lo mire.'
+              : `Al publicarlo y al recordarlo les suena a ${listaDeRoles(seleccionados, roles)}, y sólo a ellos.`
+            : seleccionados.length === 0
+              ? 'Sin marcar nada, la encuesta es para todo el gremio y al publicarla no se avisa a nadie.'
+              : `Sólo contestan quienes tengan ${listaDeRoles(seleccionados, roles)} en Discord. Los demás la ven, pero no votan, y al publicarla les suena sólo a ellos.`}
         </p>
       </>
     )}
@@ -1121,12 +1152,25 @@ const RolesQuePueden: React.FC<{
  * opcional a propósito -- lo normal es un solo aviso poco antes de que cierre, y
  * repetir cada día tiene sentido en una encuesta que lleva la semana abierta.
  */
+/**
+ * El mismo selector vale para las dos clases de evento, pero no dice lo mismo:
+ * en una encuesta el recordatorio persigue a quien no ha contestado, y en un
+ * aviso le recuerda el evento a los roles convocados. Cambian los textos, no
+ * los datos que se guardan.
+ */
+const PISTAS_AVISO: Record<ReminderMode, string> = {
+  channel: 'Un mensaje en el canal de la agenda mencionando a los roles convocados.',
+  dm: 'Un mensaje privado a cada convocado, con el aviso dentro.',
+  none: 'Se publica el anuncio y no se recuerda más.',
+};
+
 const ComoRecordar: React.FC<{
   modo: ReminderMode;
   cada: number | null;
   hora: string;
+  aviso?: boolean;
   onCambiar: (cambio: { reminderMode?: ReminderMode; reminderEveryDays?: number | null; reminderTime?: string }) => void;
-}> = ({ modo, cada, hora, onCambiar }) => {
+}> = ({ modo, cada, hora, aviso = false, onCambiar }) => {
   const campo = 'w-full bg-slate-950 border border-slate-800 rounded p-2 text-sm outline-none focus:ring-1 focus:ring-amber-500';
   // Los dos van juntos: el servidor descarta una cadencia sin hora, así que
   // encender la repetición propone una hora en vez de guardar algo a medias.
@@ -1135,7 +1179,7 @@ const ComoRecordar: React.FC<{
   return (
     <div>
       <label className="block text-xs uppercase tracking-wider text-slate-500 mb-1">
-        Cómo recordarlo
+        {aviso ? 'Cómo avisar' : 'Cómo recordarlo'}
       </label>
       <div className="flex flex-wrap gap-2">
         {REMINDER_MODES.map((m) => (
@@ -1159,7 +1203,9 @@ const ComoRecordar: React.FC<{
           </button>
         ))}
       </div>
-      <p className="text-meta text-slate-500 mt-1">{REMINDER_MODE_HINTS[modo]}</p>
+      <p className="text-meta text-slate-500 mt-1">
+        {aviso ? PISTAS_AVISO[modo] : REMINDER_MODE_HINTS[modo]}
+      </p>
 
       {modo !== 'none' && (
         <div className="mt-3">
@@ -1214,7 +1260,9 @@ const ComoRecordar: React.FC<{
             </div>
           ) : (
             <p className="text-meta text-slate-500 mt-1">
-              Sin repetir, sale uno solo seis horas antes de que cierre la encuesta.
+              {aviso
+                ? 'Sin repetir, sale uno solo seis horas antes de que empiece.'
+                : 'Sin repetir, sale uno solo seis horas antes de que cierre la encuesta.'}
             </p>
           )}
         </div>
@@ -1235,6 +1283,7 @@ const FormularioEvento: React.FC<{
     id: borrador.id,
     kind: (borrador.kind ?? 'war') as EventKind,
     title: borrador.title ?? '',
+    poll: borrador.poll !== false,
     startsAt: paraCampo(borrador.startsAt),
     minutes: borrador.minutes ?? 150,
     notes: borrador.notes ?? '',
@@ -1262,10 +1311,12 @@ const FormularioEvento: React.FC<{
             onClick={() =>
               onGuardar({
                 ...datos,
-                // El campo da hora local; el servidor guarda el instante.
+                // El campo da hora local; el servidor guarda el instante. Un
+                // aviso no lleva ventana: el servidor la descartaría igual,
+                // pero mandarla sería pedirle que descarte lo que se ve puesto.
                 startsAt: new Date(datos.startsAt).toISOString(),
-                opensAt: datos.opensAt ? new Date(datos.opensAt).toISOString() : null,
-                closesAt: datos.closesAt ? new Date(datos.closesAt).toISOString() : null,
+                opensAt: datos.poll && datos.opensAt ? new Date(datos.opensAt).toISOString() : null,
+                closesAt: datos.poll && datos.closesAt ? new Date(datos.closesAt).toISOString() : null,
               } as Partial<GuildEvent>)
             }
             className="min-h-tap px-4 rounded-md bg-amber-600 hover:bg-amber-500 text-white font-bold"
@@ -1301,6 +1352,42 @@ const FormularioEvento: React.FC<{
           />
         </div>
 
+        {/* Encuesta o aviso. Es la decisión que cambia todo lo de abajo, así
+            que va arriba: una Fiesta de Gremio no se vota, se anuncia. */}
+        <div>
+          <label className="block text-xs uppercase tracking-wider text-slate-500 mb-1">
+            Qué se publica
+          </label>
+          <div className="flex gap-2 flex-wrap">
+            {(
+              [
+                { valor: true, texto: 'Con encuesta', icono: 'fa-square-poll-vertical' },
+                { valor: false, texto: 'Solo aviso', icono: 'fa-bullhorn' },
+              ] as const
+            ).map(({ valor, texto, icono }) => (
+              <button
+                key={texto}
+                type="button"
+                aria-pressed={datos.poll === valor}
+                onClick={() => setDatos({ ...datos, poll: valor })}
+                className={`min-h-tap px-3 rounded-md border text-sm font-bold transition-colors duration-micro ${
+                  datos.poll === valor
+                    ? 'bg-amber-600 border-amber-500 text-white'
+                    : 'bg-slate-950 border-slate-700 text-slate-300'
+                }`}
+              >
+                <i className={`fa-solid ${icono} mr-2 text-[10px]`}></i>
+                {texto}
+              </button>
+            ))}
+          </div>
+          <p className="text-meta text-slate-500 mt-1">
+            {datos.poll
+              ? 'Se pregunta quién va y se lleva la cuenta.'
+              : 'Se anuncia y se recuerda, sin preguntar nada: nadie contesta.'}
+          </p>
+        </div>
+
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="block text-xs uppercase tracking-wider text-slate-500 mb-1">Empieza</label>
@@ -1330,6 +1417,7 @@ const FormularioEvento: React.FC<{
         <RolesQuePueden
           seleccionados={datos.allowedRoles}
           roles={rolesDiscord}
+          aviso={!datos.poll}
           onCambiar={(allowedRoles) => setDatos({ ...datos, allowedRoles })}
         />
 
@@ -1337,33 +1425,38 @@ const FormularioEvento: React.FC<{
           modo={datos.reminderMode}
           cada={datos.reminderEveryDays}
           hora={datos.reminderTime}
+          aviso={!datos.poll}
           onCambiar={(cambio) => setDatos({ ...datos, ...cambio })}
         />
 
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="block text-xs uppercase tracking-wider text-slate-500 mb-1">
-              Se abre
-            </label>
-            <input
-              type="datetime-local"
-              className={campo}
-              value={datos.opensAt}
-              onChange={(e) => setDatos({ ...datos, opensAt: e.target.value })}
-            />
+        {/* La ventana es de la encuesta: en un aviso no hay nada que se abra
+            ni que se cierre, y los campos desaparecen en vez de apagarse. */}
+        {datos.poll && (
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs uppercase tracking-wider text-slate-500 mb-1">
+                Se abre
+              </label>
+              <input
+                type="datetime-local"
+                className={campo}
+                value={datos.opensAt}
+                onChange={(e) => setDatos({ ...datos, opensAt: e.target.value })}
+              />
+            </div>
+            <div>
+              <label className="block text-xs uppercase tracking-wider text-slate-500 mb-1">
+                Se cierra
+              </label>
+              <input
+                type="datetime-local"
+                className={campo}
+                value={datos.closesAt}
+                onChange={(e) => setDatos({ ...datos, closesAt: e.target.value })}
+              />
+            </div>
           </div>
-          <div>
-            <label className="block text-xs uppercase tracking-wider text-slate-500 mb-1">
-              Se cierra
-            </label>
-            <input
-              type="datetime-local"
-              className={campo}
-              value={datos.closesAt}
-              onChange={(e) => setDatos({ ...datos, closesAt: e.target.value })}
-            />
-          </div>
-        </div>
+        )}
 
         <div>
           <label className="block text-xs uppercase tracking-wider text-slate-500 mb-1">Notas</label>

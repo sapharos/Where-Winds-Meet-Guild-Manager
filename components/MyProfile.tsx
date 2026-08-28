@@ -59,7 +59,9 @@ const MyProfile: React.FC<Props> = ({ player, weaponSets, onEditBuilds }) => {
   // no hay nada que recordar; lo que no he contestado se cuenta aparte, que es
   // lo único que aquí queda pendiente de hacer.
   const apuntado = agenda.filter((e) => e.mine?.answer === 'yes' || e.mine?.answer === 'maybe');
-  const sinContestar = agenda.filter((e) => !e.mine && !e.cancelledAt).length;
+  // Los avisos no se contestan, así que no pueden quedar «por contestar»:
+  // contarlos sería reclamar una deuda que no existe.
+  const sinContestar = agenda.filter((e) => e.poll !== false && !e.mine && !e.cancelledAt).length;
 
   const latest = scans[scans.length - 1];
   const previous = scans[scans.length - 2];

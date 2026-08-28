@@ -738,6 +738,23 @@ ALTER TABLE event_series ADD COLUMN IF NOT EXISTS reminder_mode TEXT NOT NULL DE
 ALTER TABLE event_series ADD COLUMN IF NOT EXISTS reminder_every_days INT;
 ALTER TABLE event_series ADD COLUMN IF NOT EXISTS reminder_time TEXT;
 
+-- Si el evento lleva encuesta o es sólo un aviso.
+--
+-- La Fiesta de Gremio no se vota: se anuncia. Un evento con `poll` en false no
+-- acepta respuestas, su mensaje de Discord sale sin botones, y el recordatorio
+-- deja de perseguir a quien no contestó -- no hay nada que contestar -- y pasa a
+-- avisar del evento a los roles convocados, por el canal o por privado.
+-- `true` de fábrica: todo lo ya guardado era una encuesta y lo sigue siendo.
+ALTER TABLE guild_events ADD COLUMN IF NOT EXISTS poll BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE event_series ADD COLUMN IF NOT EXISTS poll BOOLEAN NOT NULL DEFAULT true;
+
+-- En qué días de la semana cae una serie, como lista: [1,3,5] son lunes,
+-- miércoles y viernes, con los números de JavaScript (0 = domingo). Vacía, la
+-- serie sigue valiendo por su `weekday` de siempre, que se mantiene como el
+-- primero de la lista para que el orden de la pantalla no cambie. Una sola
+-- serie y no una por día: «los PvP de martes y jueves» es una regla, no dos.
+ALTER TABLE event_series ADD COLUMN IF NOT EXISTS weekdays JSONB NOT NULL DEFAULT '[]'::jsonb;
+
 -- Las grabaciones de una guerra, subidas por quien la jugó. Ver docs/VODS.md.
 --
 -- Los bytes no están aquí ni en este contenedor: viven en el Synology, montado

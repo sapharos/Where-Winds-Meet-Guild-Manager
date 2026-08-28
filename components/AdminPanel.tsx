@@ -28,6 +28,8 @@ import {
   VoiceChannelMap,
   EventSeries,
   DIAS,
+  DIAS_CORTOS,
+  SEMANA,
 } from '../types';
 
 // Mirrors the server's LOCKED table so the boxes it will refuse to clear are
@@ -1406,16 +1408,39 @@ const SerieFila: React.FC<{
           <span className={etiqueta}>Nombre</span>
           <input className={campo} value={b.title} onChange={(e) => setB({ ...b, title: e.target.value })} />
         </label>
-        <label>
-          <span className={etiqueta}>Día</span>
-          <select className={campo} value={b.weekday} onChange={(e) => setB({ ...b, weekday: Number(e.target.value) })}>
-            {DIAS.map((d, i) => (
-              <option key={d} value={i}>
-                {d}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div>
+          <span className={etiqueta}>Días</span>
+          {/* Una serie puede caer en varios días -- los PvP de martes y jueves
+              son una regla, no dos filas. Al menos uno se queda marcado:
+              «ningún día» ya existe y se llama desactivarla. */}
+          <div className="flex gap-1">
+            {SEMANA.map((d) => {
+              const puestos = b.weekdays?.length ? b.weekdays : [b.weekday];
+              const marcado = puestos.includes(d);
+              return (
+                <button
+                  key={d}
+                  type="button"
+                  title={DIAS[d]}
+                  aria-pressed={marcado}
+                  onClick={() => {
+                    const nuevos = marcado ? puestos.filter((x) => x !== d) : [...puestos, d];
+                    if (!nuevos.length) return;
+                    const orden = [...nuevos].sort((a, z) => a - z);
+                    setB({ ...b, weekdays: orden, weekday: orden[0] });
+                  }}
+                  className={`min-h-tap min-w-[34px] grow rounded-md border text-sm font-bold transition-colors duration-micro ${
+                    marcado
+                      ? 'bg-amber-600 border-amber-500 text-white'
+                      : 'bg-slate-950 border-slate-800 text-slate-400'
+                  }`}
+                >
+                  {DIAS_CORTOS[d]}
+                </button>
+              );
+            })}
+          </div>
+        </div>
         <label>
           <span className={etiqueta}>Hora ({b.timezone})</span>
           <input className={campo} value={b.timeLocal} onChange={(e) => setB({ ...b, timeLocal: e.target.value })} />
@@ -1424,11 +1449,11 @@ const SerieFila: React.FC<{
         {/* A qué roles de Discord se les pregunta en cada convocatoria que
             salga de esta serie. Sin marcar nada, a todo el gremio. */}
         <div className="sm:col-span-2 lg:col-span-4">
-          <span className={etiqueta}>Quién puede votar</span>
+          <span className={etiqueta}>{b.poll === false ? 'A quién se avisa' : 'Quién puede votar'}</span>
           {rolesDiscord.length === 0 ? (
             <p className="text-xs text-slate-500">
-              No puedo leer los roles del servidor de Discord. Con el bot sin configurar, las
-              encuestas de esta serie quedan abiertas a todo el gremio.
+              No puedo leer los roles del servidor de Discord. Con el bot sin configurar, los
+              eventos de esta serie quedan abiertos a todo el gremio.
             </p>
           ) : (
           <div className="flex flex-wrap gap-2">
@@ -1468,8 +1493,11 @@ const SerieFila: React.FC<{
           </div>
           )}
         </div>
+        {/* Sin encuesta la fecha de apertura sigue mandando -- es cuándo se
+            anuncia -- pero el cierre desaparece: no se cierra lo que no se
+            contesta. */}
         <label>
-          <span className={etiqueta}>Abre (días antes)</span>
+          <span className={etiqueta}>{b.poll === false ? 'Se anuncia (días antes)' : 'Abre (días antes)'}</span>
           <div className="flex gap-2">
             <input
               type="number"
@@ -1480,23 +1508,25 @@ const SerieFila: React.FC<{
             <input className={campo} value={b.opensTime} onChange={(e) => setB({ ...b, opensTime: e.target.value })} />
           </div>
         </label>
-        <label>
-          <span className={etiqueta}>Cierra (días antes)</span>
-          <div className="flex gap-2">
-            <input
-              type="number"
-              className={campo}
-              value={b.closesDaysBefore}
-              onChange={(e) => setB({ ...b, closesDaysBefore: Number(e.target.value) || 0 })}
-            />
-            <input className={campo} value={b.closesTime} onChange={(e) => setB({ ...b, closesTime: e.target.value })} />
-          </div>
-        </label>
+        {b.poll !== false && (
+          <label>
+            <span className={etiqueta}>Cierra (días antes)</span>
+            <div className="flex gap-2">
+              <input
+                type="number"
+                className={campo}
+                value={b.closesDaysBefore}
+                onChange={(e) => setB({ ...b, closesDaysBefore: Number(e.target.value) || 0 })}
+              />
+              <input className={campo} value={b.closesTime} onChange={(e) => setB({ ...b, closesTime: e.target.value })} />
+            </div>
+          </label>
+        )}
 
         {/* Cómo se recuerda cada convocatoria que salga de esta serie. Lo
             heredan al crearse; cambiarlo aquí no toca las ya creadas. */}
         <label>
-          <span className={etiqueta}>Cómo recordarlo</span>
+          <span className={etiqueta}>{b.poll === false ? 'Cómo avisar' : 'Cómo recordarlo'}</span>
           <select
             className={campo}
             value={b.reminderMode ?? 'channel'}
@@ -1552,6 +1582,17 @@ const SerieFila: React.FC<{
             onChange={(e) => setB({ ...b, active: e.target.checked })}
           />
           Activa
+        </label>
+        {/* Con encuesta se pregunta quién va; sin ella la serie es un aviso
+            que se repite -- la Fiesta de Gremio no se vota, se anuncia. */}
+        <label className="flex items-center gap-2 text-sm text-slate-300 tap-suelto">
+          <input
+            type="checkbox"
+            className="accent-amber-500 tap-suelto"
+            checked={b.poll !== false}
+            onChange={(e) => setB({ ...b, poll: e.target.checked })}
+          />
+          Con encuesta
         </label>
         <label className="flex items-center gap-2 text-sm text-slate-300 tap-suelto">
           <input

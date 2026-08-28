@@ -137,8 +137,12 @@ function limpiar(body) {
   if (!title) throw Object.assign(new Error('el evento necesita un nombre'), { status: 400 });
 
   const startsAt = fecha(body?.startsAt);
-  const opensAt = body?.opensAt ? fecha(body.opensAt) : null;
-  const closesAt = body?.closesAt ? fecha(body.closesAt) : null;
+  // Sin encuesta no hay ventana: no se abre ni se cierra lo que no se contesta.
+  // `opens_at` se conserva en los que vienen de una serie -- ahí es la fecha en
+  // que se anuncia -- pero eso lo escribe la serie, no este formulario.
+  const poll = body?.poll !== false;
+  const opensAt = poll && body?.opensAt ? fecha(body.opensAt) : null;
+  const closesAt = poll && body?.closesAt ? fecha(body.closesAt) : null;
 
   if (opensAt && closesAt && closesAt <= opensAt) {
     throw Object.assign(new Error('la encuesta no puede cerrarse antes de abrirse'), { status: 400 });
@@ -147,6 +151,7 @@ function limpiar(body) {
   return {
     kind,
     title,
+    poll,
     startsAt,
     minutes: entero(body?.minutes, MAX_MINUTES, 60),
     allowedRoles: limpiarRolesDiscord(body?.allowedRoles),
@@ -165,7 +170,7 @@ function limpiar(body) {
 // `notes` existe también en `event_responses`, y en cuanto una de
 // ellas se une con las respuestas, sin el prefijo Postgres no sabe cuál se le
 // está pidiendo.
-const CAMPOS = `e.id, e.kind, e.title, e.starts_at AS "startsAt", e.minutes, e.notes,
+const CAMPOS = `e.id, e.kind, e.title, e.poll, e.starts_at AS "startsAt", e.minutes, e.notes,
                 e.allowed_discord_roles AS "allowedRoles",
                 e.reminder_mode AS "reminderMode",
                 e.reminder_every_days AS "reminderEveryDays",
@@ -428,11 +433,11 @@ export async function saveEvent(body, createdBy) {
 
   await pool.query(
     `INSERT INTO guild_events
-       (id, guild_id, kind, title, starts_at, minutes, allowed_discord_roles, notes, opens_at, closes_at,
+       (id, guild_id, kind, title, poll, starts_at, minutes, allowed_discord_roles, notes, opens_at, closes_at,
         reminder_mode, reminder_every_days, reminder_time, created_by)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
      ON CONFLICT (guild_id, id) DO UPDATE
-       SET kind = EXCLUDED.kind, title = EXCLUDED.title, starts_at = EXCLUDED.starts_at,
+       SET kind = EXCLUDED.kind, title = EXCLUDED.title, poll = EXCLUDED.poll, starts_at = EXCLUDED.starts_at,
            minutes = EXCLUDED.minutes, allowed_discord_roles = EXCLUDED.allowed_discord_roles, notes = EXCLUDED.notes,
            opens_at = EXCLUDED.opens_at, closes_at = EXCLUDED.closes_at,
            reminder_mode = EXCLUDED.reminder_mode,
@@ -443,6 +448,7 @@ export async function saveEvent(body, createdBy) {
       GUILD_ID,
       limpio.kind,
       limpio.title,
+      limpio.poll,
       limpio.startsAt,
       limpio.minutes,
       JSON.stringify(limpio.allowedRoles),
@@ -527,7 +533,7 @@ export async function respond(
   if (!answer) throw Object.assign(new Error('respuesta desconocida'), { status: 400 });
 
   const { rows } = await pool.query(
-    `SELECT kind, allowed_discord_roles AS "allowedRoles", cancelled_at AS "cancelledAt",
+    `SELECT kind, poll, allowed_discord_roles AS "allowedRoles", cancelled_at AS "cancelledAt",
             opens_at AS "opensAt", closes_at AS "closesAt"
        FROM guild_events WHERE guild_id = $1 AND id = $2`,
     [GUILD_ID, eventId],
@@ -536,6 +542,12 @@ export async function respond(
   if (!evento) throw Object.assign(new Error('no existe ese evento'), { status: 404 });
   if (evento.cancelledAt) {
     throw Object.assign(new Error('ese evento está cancelado'), { status: 409 });
+  }
+  // Un aviso no se contesta, venga de donde venga la respuesta: la pantalla no
+  // enseña botones, pero esta puerta es la misma para la web, el bot y el
+  // oficial que anota, y la regla tiene que vivir donde entran los tres.
+  if (evento.poll === false) {
+    throw Object.assign(new Error('ese evento es un aviso y no lleva encuesta'), { status: 409 });
   }
 
   // Se comprueba aquí y no arriba porque depende del tipo, que hay que ir a

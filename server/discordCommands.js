@@ -1088,6 +1088,9 @@ const mostradas = (evento) => {
  * no existe se lee como si nadie dudara.
  */
 const recuento = (e) => {
+  // Un aviso no tiene nada que contar: decir «0 · 0» parecería una encuesta
+  // que nadie ha contestado, que es justo lo que no es.
+  if (e.poll === false) return '📣 aviso, sin encuesta';
   const partes = [`✅ ${e.yes}`];
   if (respuestasDe(e.kind).includes('maybe') || e.maybe > 0) partes.push(`❔ ${e.maybe}`);
   partes.push(`✖ ${e.no}`);
@@ -1107,6 +1110,7 @@ const marca = (iso, formato) => `<t:${Math.floor(new Date(iso).getTime() / 1000)
  */
 export function eventoMensaje(evento) {
   const tipo = EVENTO_TIPOS[evento.kind] ?? EVENTO_TIPOS.casual;
+  const aviso = evento.poll === false;
   const cerrada =
     Boolean(evento.cancelledAt) ||
     Boolean(evento.closesAt && new Date() > new Date(evento.closesAt));
@@ -1117,15 +1121,32 @@ export function eventoMensaje(evento) {
     // rol renombrado no deja atrás una encuesta que dice otra cosa. No avisa a
     // nadie: el mensaje va con allowed_mentions vacío.
     evento.allowedRoles?.length
-      ? `Abierta a: ${evento.allowedRoles.map((r) => `<@&${r}>`).join(' ')}`
+      ? `${aviso ? 'Para' : 'Abierta a'}: ${evento.allowedRoles.map((r) => `<@&${r}>`).join(' ')}`
       : null,
     evento.notes ? literal(evento.notes) : null,
     evento.cancelledAt
       ? '**Cancelado.**'
-      : evento.closesAt
+      : !aviso && evento.closesAt
         ? `Se puede contestar hasta ${marca(evento.closesAt, 'f')}.`
         : null,
   ].filter(Boolean);
+
+  // Un aviso es sólo el anuncio: ni listas ni botones, porque no pregunta
+  // nada. El pie lo dice para que nadie busque dónde se contesta.
+  if (aviso) {
+    return {
+      embeds: [
+        {
+          author: { name: tipo.label },
+          title: `${tipo.emoji}  ${literal(evento.title)}`,
+          description: cabecera.join('\n'),
+          color: evento.cancelledAt ? 0x74251a : LATON,
+          footer: { text: 'Es un aviso: no hay nada que contestar.' },
+        },
+      ],
+      components: [],
+    };
+  }
 
   const de = (answer) => (evento.responses ?? []).filter((r) => r.answer === answer);
 
@@ -1358,6 +1379,23 @@ export async function avisarPendientes(id) {
   const evento = await getEvent(id);
   if (!evento.discordChannelId) return null;
 
+  // El aviso de un evento sin encuesta no persigue a nadie: no hay «sin
+  // contestar» que perseguir. En el canal suena a los roles convocados -- o a
+  // nadie, como la publicación, si el evento es para todo el gremio -- y por
+  // privado sigue por el camino de abajo, que ya reparte uno a uno y ya filtra
+  // por roles: para un aviso, «no ha contestado» es sencillamente todo el mundo.
+  if (evento.poll === false && evento.reminderMode !== 'dm') {
+    const roles = evento.allowedRoles ?? [];
+    await postMessage(evento.discordChannelId, {
+      content: [cuandoCierra(evento), roles.length ? roles.map((r) => `<@&${r}>`).join(' ') : null]
+        .filter(Boolean)
+        .join('\n'),
+      allowed_mentions: { parse: [], roles: roles.slice(0, 100) },
+    });
+    await marcarAvisado(id);
+    return null;
+  }
+
   let faltan = await sinContestar(id);
   if (!faltan.length) return null;
 
@@ -1419,9 +1457,11 @@ export async function avisarPendientes(id) {
  * el final: decir «se cierra en null» sería peor que no decir nada.
  */
 const cuandoCierra = (evento) =>
-  evento.closesAt
-    ? `⏳  **${literal(evento.title)}** — la encuesta se cierra ${marca(evento.closesAt, 'R')}.`
-    : `⏳  **${literal(evento.title)}** — es ${marca(evento.startsAt, 'R')} y no has contestado.`;
+  evento.poll === false
+    ? `📣  **${literal(evento.title)}** — empieza ${marca(evento.startsAt, 'R')}.`
+    : evento.closesAt
+      ? `⏳  **${literal(evento.title)}** — la encuesta se cierra ${marca(evento.closesAt, 'R')}.`
+      : `⏳  **${literal(evento.title)}** — es ${marca(evento.startsAt, 'R')} y no has contestado.`;
 
 /**
  * El reloj de la agenda.
@@ -1544,10 +1584,14 @@ async function comandoAgenda(interaction) {
       // El enlace a la encuesta, cuando está publicada: es lo que convierte
       // esta lista en un sitio desde el que se puede contestar, y no sólo
       // enterarse. El mensaje del lunes no se encuentra el viernes.
-      const donde = e.discordUrl ? `  ·  [ir a la encuesta](${e.discordUrl})` : '';
+      const donde = e.discordUrl
+        ? `  ·  [${e.poll === false ? 'ir al aviso' : 'ir a la encuesta'}](${e.discordUrl})`
+        : '';
       return {
         name: `${tipo.emoji}  ${literal(e.title)}${e.cancelledAt ? '  ·  CANCELADO' : ''}`,
-        value: `${marca(e.startsAt, 'F')}\n${recuento(e)}  —  tú: ${tuya}${donde}`,
+        // A un aviso no se le debe respuesta, así que no se dice «tú: sin
+        // contestar»: parecería una deuda que no existe.
+        value: `${marca(e.startsAt, 'F')}\n${recuento(e)}${e.poll === false ? '' : `  —  tú: ${tuya}`}${donde}`,
         inline: false,
       };
     }),
