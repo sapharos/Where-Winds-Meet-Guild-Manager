@@ -7,7 +7,13 @@ WORKDIR /app
 # bloquea el bucle de Node: la cola es de uno en uno y se lanza con `nice`, que
 # cede el turno cuando el resto del Proxmox lo necesita -- mejor que un tope de
 # CPU fijo, que lo frena también cuando la máquina está ociosa.
-RUN apk add --no-cache ffmpeg
+#
+# yt-dlp trae al almacén las grabaciones que viven en YouTube, para servirlas
+# por HLS como cualquier subida en vez de depender del iframe. Si algún día
+# YouTube le cambia el terreno y la versión empaquetada deja de poder (pasa),
+# la grabación se queda en modo enlace -- se ve igual, embebida -- y la
+# actualización es reconstruir esta imagen.
+RUN apk add --no-cache ffmpeg yt-dlp
 
 COPY package.json ./
 RUN npm install --omit=dev

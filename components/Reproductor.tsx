@@ -31,9 +31,11 @@ export interface Marca {
 interface Props {
   src: string | null;
   /**
-   * Si la grabación vive en YouTube, el id de su vídeo, y `src` viene nulo.
-   * El resto del reproductor no distingue: la fachada de YouTubeVideo imita a
-   * un HTMLVideoElement, así que marcas, teclado y sincronía valen igual.
+   * Si la grabación vino de YouTube, el id de su vídeo -- el RESPALDO, no el
+   * camino preferido: con `src` (la copia ya traída al almacén) se reproduce
+   * por HLS como cualquiera, y el iframe sólo entra cuando no hay copia. El
+   * resto del reproductor no distingue: la fachada de YouTubeVideo imita a un
+   * HTMLVideoElement, así que marcas, teclado y sincronía valen igual.
    */
   youtubeId?: string | null;
   /** Dónde cae el primer fotograma en tiempo de guerra. Sin esto no hay marcas. */
@@ -89,11 +91,11 @@ const Reproductor: React.FC<Props> = ({
 
   // --- HLS ------------------------------------------------------------------
   useEffect(() => {
-    // Con YouTube no hay HLS que enganchar: el iframe se trae su propio vídeo.
-    // Y como en esa rama no se pinta `<video>`, la referencia es la fachada.
-    if (youtubeId) return;
+    // Sin `src` no hay HLS que enganchar: es el modo enlace de YouTube, donde
+    // el iframe se trae su propio vídeo y la referencia es la fachada.
+    if (!src) return;
     const el = video.current as HTMLVideoElement | null;
-    if (!el || !src) return;
+    if (!el) return;
 
     // Safari lo lleva de fábrica; el resto necesita hls.js, que se baja sólo al
     // abrir un vídeo y no en el paquete de todo el mundo.
@@ -374,8 +376,10 @@ const Reproductor: React.FC<Props> = ({
           mandosVisibles ? '' : 'cursor-none'
         }`}
       >
-        {youtubeId ? (
+        {!src && youtubeId ? (
           /*
+            El respaldo embebido, sólo cuando no hay copia en el almacén.
+
             La caja recibe el clic, no el iframe: YouTubeVideo le quita el
             ratón al iframe a propósito, para que los controles sean los de
             aquí -- que son los que llevan las marcas -- y no dos barras

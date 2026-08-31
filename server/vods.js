@@ -20,7 +20,7 @@
 
 import { spawn } from 'node:child_process';
 import { timingSafeEqual } from 'node:crypto';
-import { mkdir, rm, stat } from 'node:fs/promises';
+import { mkdir, rename, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { pool, GUILD_ID } from './db.js';
 import { avisarAprobada, avisarRevision, sinRomperNada } from './vodAvisos.js';
@@ -297,22 +297,41 @@ export async function registrarYoutube({
 
   const offset = Number.isInteger(offsetMs) ? offsetMs : null;
   const id = `vodyt_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
-  // `expira_en` queda nulo a conciencia: la retención existe para liberar
-  // nuestro almacén, y un enlace no ocupa nada. Si YouTube lo borra, el acta
-  // enseñará el error del reproductor, que es la verdad disponible.
+
+  /*
+    Con el almacén configurado, el enlace se trae a casa: la cola lo descarga
+    con yt-dlp y lo mete por la misma tubería que una subida, así que acaba
+    servido por HLS como todas -- con su copia de 360p, que es lo que hace que
+    en las miniaturas del mosaico se vea de verdad (el iframe de YouTube exige
+    200x200 y una miniatura mide menos). El iframe queda de respaldo: si la
+    descarga falla, la fila vuelve a modo enlace y el vídeo se ve embebido.
+
+    `expira_en` nace nulo en los dos modos: en modo enlace no hay bytes
+    nuestros que retener, y en modo copia la cuenta atrás empieza cuando la
+    descarga termina, que es cuando el almacén empieza a pagar algo.
+  */
+  const ingerir = vodsHabilitados();
   await pool.query(
     `INSERT INTO war_vods (id, war_id, player_id, estado, youtube_id, duracion_ms,
-                           offset_ms, offset_confianza, expira_en)
-     VALUES ($1, $2, $3, 'listo', $4, $5, $6, $7, NULL)`,
+                           offset_ms, offset_confianza, expira_en, proceso_fase)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULL, $9)`,
     [
-      id, warId, dueño, youtubeId,
+      id, warId, dueño,
+      ingerir ? 'subiendo' : 'listo',
+      youtubeId,
       Number.isInteger(duracionMs) && duracionMs > 0 ? duracionMs : null,
       offset,
       offset !== null && CONFIANZAS.includes(confianza) ? confianza : null,
+      ingerir ? 'cola' : null,
     ],
   );
-  // Igual que al quedar lista una subida: es ahora cuando hay algo que mirar.
-  sinRomperNada(avisarRevision(id));
+  if (ingerir) {
+    encolar(id);
+  } else {
+    // En modo enlace ya hay algo que mirar; con descarga avisa la cola al
+    // dejarla lista, igual que con una subida.
+    sinRomperNada(avisarRevision(id));
+  }
   return { ok: true, id, youtubeId };
 }
 
@@ -362,15 +381,9 @@ async function arrancar() {
         // `docker logs`, así que a quien había esperado veinte minutos a que
         // subieran sus 2 GB le llegaba «Falló al preparar» y nada más.
         console.error(`[vods] ${id} falló:`, err.message);
-        await pool
-          .query(
-            `UPDATE war_vods
-                SET estado = 'error', proceso_fase = NULL, proceso_latido = now(),
-                    proceso_error = $2
-              WHERE id = $1`,
-            [id, String(err?.message ?? 'falló sin decir por qué').slice(0, ERROR_MAX)],
-          )
-          .catch((otro) => console.error(`[vods] ${id} ni se pudo anotar el fallo:`, otro.message));
+        await manejarFallo(id, err).catch((otro) =>
+          console.error(`[vods] ${id} ni se pudo anotar el fallo:`, otro.message),
+        );
       } finally {
         enCurso = null;
       }
@@ -382,6 +395,54 @@ async function arrancar() {
 
 /** Lo que cabe de un mensaje de ffmpeg en la fila. Sobra: lo útil va al final. */
 const ERROR_MAX = 600;
+
+/**
+ * Qué queda cuando la preparación revienta, según de dónde venía el vídeo.
+ *
+ * Una subida se queda en `error`: sin sus bytes preparados no hay nada que ver,
+ * y el estado es la petición de que alguien reintente o vuelva a subir. Una de
+ * YouTube no -- el enlace sigue siendo un vídeo que se puede ver embebido --,
+ * así que vuelve a «listo» en modo enlace con el motivo anotado: peor que la
+ * copia en casa, pero se ve, que es lo que importa la noche de la revisión.
+ * Lo descargado a medias se tira: sin copia que lo reclame, 2 GB en `entrada/`
+ * serían basura que ninguna barrida mira.
+ */
+async function manejarFallo(id, err) {
+  const motivo = String(err?.message ?? 'falló sin decir por qué').slice(0, ERROR_MAX);
+  const { rows } = await pool.query(
+    `SELECT youtube_id AS "youtubeId" FROM war_vods WHERE id = $1`,
+    [id],
+  );
+
+  if (rows[0]?.youtubeId) {
+    const origen = path.join(ENTRADA, id);
+    await rm(origen, { force: true });
+    await rm(`${origen}.mp4`, { force: true });
+    await rm(`${origen}.mp4.part`, { force: true });
+    await rm(path.join(HLS, id), { recursive: true, force: true });
+    await pool.query(`DELETE FROM war_vod_renditions WHERE vod_id = $1`, [id]);
+    await pool.query(
+      `UPDATE war_vods
+          SET estado = 'listo', ruta = NULL, expira_en = NULL,
+              proceso_fase = NULL, proceso_pct = NULL, proceso_latido = now(),
+              proceso_error = $2
+        WHERE id = $1`,
+      [id, `No se pudo traer la copia al almacén, así que se verá embebida desde YouTube. ${motivo}`],
+    );
+    // Embebida ya se puede revisar; la marca de `vodAvisos` evita el duplicado
+    // si el aviso ya salió en un intento anterior.
+    sinRomperNada(avisarRevision(id));
+    return;
+  }
+
+  await pool.query(
+    `UPDATE war_vods
+        SET estado = 'error', proceso_fase = NULL, proceso_latido = now(),
+            proceso_error = $2
+      WHERE id = $1`,
+    [id, motivo],
+  );
+}
 
 /**
  * Cada cuánto se anota el avance.
@@ -673,6 +734,67 @@ const hlsArgs = (destino, calidad) => [
   path.join(destino, `${calidad}.m3u8`),
 ];
 
+/**
+ * Traer del canal de YouTube el fichero que la tubería va a preparar.
+ *
+ * Pide H.264 hasta 1080p si lo hay, que es lo que el remux copia sin
+ * recodificar; si YouTube sólo ofrece VP9 o AV1 se acepta igual y el
+ * recodificado de siempre se encarga -- más lento, pero el comprobador de
+ * salida garantiza que lo que quede se pueda ver.
+ *
+ * Se descarga a un nombre temporal y se renombra al final: una descarga
+ * cortada no puede dejar en `entrada/` un fichero con el nombre bueno, que la
+ * recuperación del arranque tomaría por entero.
+ */
+async function descargar(id, youtubeId, origen) {
+  await pool.query(
+    `UPDATE war_vods
+        SET estado = 'procesando', proceso_fase = 'descarga', proceso_pct = 0,
+            proceso_desde = now(), proceso_latido = now(), proceso_error = NULL
+      WHERE id = $1`,
+    [id],
+  );
+
+  const temporal = `${origen}.mp4`;
+  let ultimo = 0;
+  await correr(
+    'yt-dlp',
+    [
+      '-f',
+      'bv*[vcodec^=avc1][height<=1080]+ba[ext=m4a]/bv*[height<=1080]+ba/b[height<=1080]/b',
+      '--merge-output-format', 'mp4',
+      '--no-playlist', '--no-warnings', '--newline',
+      '-o', temporal,
+      `https://www.youtube.com/watch?v=${youtubeId}`,
+    ],
+    // El avance, con el mismo pulso que ffmpeg: `--newline` hace que yt-dlp
+    // escriba cada línea de progreso suelta en vez de redibujarla encima.
+    (linea) => {
+      const m = /\[download\]\s+([\d.]+)%/.exec(linea);
+      if (!m) return;
+      const ahora = Date.now();
+      if (ahora - ultimo < LATIDO_MS) return;
+      ultimo = ahora;
+      void pool
+        .query(
+          `UPDATE war_vods SET proceso_pct = $2, proceso_latido = now()
+            WHERE id = $1 AND proceso_fase = 'descarga'`,
+          [id, Math.max(0, Math.min(99, Math.round(Number(m[1]))))],
+        )
+        .catch(() => {});
+    },
+  );
+  await rename(temporal, origen);
+
+  // Ahora sí hay bytes nuestros: la cuenta de la retención empieza aquí. El
+  // día que la barrida se lleve la copia, la fila vuelve a modo enlace -- el
+  // vídeo sigue en YouTube -- en vez de quedarse en «caducada».
+  await pool.query(
+    `UPDATE war_vods SET expira_en = now() + make_interval(days => $2::int) WHERE id = $1`,
+    [id, DIAS],
+  );
+}
+
 async function procesar(id) {
   const { rows } = await pool.query(`SELECT * FROM war_vods WHERE id = $1`, [id]);
   const vod = rows[0];
@@ -681,6 +803,12 @@ async function procesar(id) {
   const origen = path.join(ENTRADA, id);
   const destino = path.join(HLS, id);
   await mkdir(destino, { recursive: true });
+
+  // Una de YouTube llega sin fichero: primero se trae. Con fichero ya en
+  // `entrada/` (un reintento tras un fallo del remux) no se descarga otra vez.
+  if (vod.youtube_id && !(await stat(origen).catch(() => null))) {
+    await descargar(id, vod.youtube_id, origen);
+  }
   await pool.query(
     `UPDATE war_vods
         SET estado = 'procesando', proceso_fase = 'origen', proceso_pct = 0,
@@ -850,13 +978,16 @@ async function procesar(id) {
 export async function recuperarPendientes() {
   if (!vodsHabilitados()) return { recuperados: 0, perdidos: 0 };
   const { rows } = await pool.query(
-    `SELECT id FROM war_vods WHERE estado IN ('subiendo', 'procesando') ORDER BY subido_en`,
+    `SELECT id, youtube_id AS "youtubeId" FROM war_vods
+      WHERE estado IN ('subiendo', 'procesando') ORDER BY subido_en`,
   );
 
   let recuperados = 0;
   let perdidos = 0;
-  for (const { id } of rows) {
-    if (await stat(path.join(ENTRADA, id)).catch(() => null)) {
+  for (const { id, youtubeId } of rows) {
+    // Una de YouTube no necesita el fichero para rehacerse: se vuelve a
+    // descargar. Su origen sigue en el canal, no en `entrada/`.
+    if (youtubeId || (await stat(path.join(ENTRADA, id)).catch(() => null))) {
       await pool.query(
         `UPDATE war_vods
             SET proceso_fase = 'cola', proceso_pct = NULL, proceso_error = NULL,
@@ -899,7 +1030,8 @@ export async function reintentarVod(id, user, permisos = []) {
   if (!vodsHabilitados()) return { ok: false, codigo: 503, motivo: 'grabaciones desactivadas' };
 
   const { rows } = await pool.query(
-    `SELECT v.player_id AS "playerId", v.estado
+    `SELECT v.player_id AS "playerId", v.estado, v.youtube_id AS "youtubeId",
+            EXISTS (SELECT 1 FROM war_vod_renditions r WHERE r.vod_id = v.id) AS "conCopia"
        FROM war_vods v JOIN wars w ON w.id = v.war_id
       WHERE v.id = $1 AND w.guild_id = $2`,
     [id, GUILD_ID],
@@ -910,13 +1042,21 @@ export async function reintentarVod(id, user, permisos = []) {
   if (vod.playerId !== user?.playerId && !permisos.includes('war.vod.approve')) {
     return { ok: false, codigo: 403, motivo: 'sólo puedes reintentar tus propias grabaciones' };
   }
-  if (!['error', 'procesando', 'subiendo'].includes(vod.estado)) {
+  // Una de YouTube caída a modo enlace no está en `error` -- quedó en «listo»
+  // porque embebida se ve --, pero reintentar la descarga tiene que poderse:
+  // es el botón que vale la pena pulsar después de reconstruir la imagen.
+  const rehacible = vod.youtubeId
+    ? ['error', 'procesando', 'subiendo'].includes(vod.estado) ||
+      (vod.estado === 'listo' && !vod.conCopia)
+    : ['error', 'procesando', 'subiendo'].includes(vod.estado);
+  if (!rehacible) {
     return { ok: false, codigo: 409, motivo: 'esa grabación no está pendiente de preparar' };
   }
   if (estaEnLaCola(id)) {
     return { ok: false, codigo: 409, motivo: 'ya está en la cola; sigue trabajando' };
   }
-  if (!(await stat(path.join(ENTRADA, id)).catch(() => null))) {
+  // A una de YouTube no le hace falta el fichero: se vuelve a descargar.
+  if (!vod.youtubeId && !(await stat(path.join(ENTRADA, id)).catch(() => null))) {
     return { ok: false, codigo: 409, motivo: 'el fichero de origen ya no está; hay que subirla otra vez' };
   }
 
@@ -944,14 +1084,21 @@ export async function reintentarVod(id, user, permisos = []) {
 export async function barrerCaducados() {
   if (!vodsHabilitados()) return { borrados: 0 };
   const { rows } = await pool.query(
-    `SELECT id FROM war_vods
+    `SELECT id, youtube_id AS "youtubeId" FROM war_vods
       WHERE NOT fijado AND ruta IS NOT NULL AND expira_en < now()`,
   );
-  for (const { id } of rows) {
+  for (const { id, youtubeId } of rows) {
     await rm(path.join(HLS, id), { recursive: true, force: true });
     await rm(path.join(ENTRADA, id), { force: true });
     await pool.query(`DELETE FROM war_vod_renditions WHERE vod_id = $1`, [id]);
-    await pool.query(`UPDATE war_vods SET ruta = NULL, estado = 'caducado' WHERE id = $1`, [id]);
+    if (youtubeId) {
+      // La copia local de una de YouTube es una caché: al barrerla, la fila
+      // vuelve a modo enlace -- el vídeo sigue viéndose, embebido -- y deja de
+      // haber nada nuestro que caduque. «Caducada» sería mentir: no se perdió.
+      await pool.query(`UPDATE war_vods SET ruta = NULL, expira_en = NULL WHERE id = $1`, [id]);
+    } else {
+      await pool.query(`UPDATE war_vods SET ruta = NULL, estado = 'caducado' WHERE id = $1`, [id]);
+    }
   }
   if (rows.length) console.log(`[vods] caducados ${rows.length}`);
   return { borrados: rows.length };
@@ -1228,12 +1375,13 @@ export async function borrarVod(id) {
 export async function fijarVod(id, fijado) {
   const expira = fijado ? null : new Date(Date.now() + DIAS * 24 * 3600 * 1000);
   const { rows } = await pool.query(
-    // Un enlace de YouTube no caduca nunca: la retención libera NUESTRO
-    // almacén, y ahí no hay nada suyo. Sin la guarda, soltarle el fijado le
-    // pondría una cuenta atrás que la barrida ni siquiera mira.
+    // La caducidad es de los BYTES LOCALES, no de la fila: una de YouTube en
+    // modo enlace (sin `ruta`) no tiene nada nuestro que retener, y ponerle
+    // cuenta atrás sería una cifra que la barrida ni siquiera mira. Con copia
+    // en el almacén se retiene y se fija exactamente igual que una subida.
     `UPDATE war_vods
         SET fijado = $2,
-            expira_en = CASE WHEN youtube_id IS NULL THEN $3::timestamptz ELSE NULL END
+            expira_en = CASE WHEN ruta IS NOT NULL THEN $3::timestamptz ELSE NULL END
       WHERE id = $1 RETURNING id, fijado`,
     [id, Boolean(fijado), expira],
   );

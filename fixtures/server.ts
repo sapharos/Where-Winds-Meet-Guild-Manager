@@ -91,7 +91,7 @@ interface VodFalso {
   // Como va la preparacion. El servidor de verdad resuelve `procesoParado` y
   // `procesoSegundos` en SQL, contra su propio reloj; aqui llegan puestos a
   // mano porque lo que hay que poder mirar es como se pinta cada caso.
-  procesoFase?: 'cola' | 'origen' | '360p' | null;
+  procesoFase?: 'cola' | 'descarga' | 'origen' | '360p' | null;
   procesoPct?: number | null;
   procesoError?: string | null;
   procesoSegundos?: number | null;
@@ -263,13 +263,25 @@ const store: Store = {
       calidades: [{ calidad: 'origen', playlist: 'vod-2/origen.m3u8' }],
     },
     {
-      // La que vive en YouTube: publicada y sincronizada, así que entra al
-      // mosaico. El id es el vídeo de demostración de la API del iframe, que
-      // es embebible; el banco lo carga de verdad desde YouTube.
+      // La que vino de YouTube y quedó en modo enlace (sin copia local):
+      // publicada y sincronizada, así que entra al mosaico embebida. El id es
+      // el vídeo de demostración de la API del iframe, que es embebible; el
+      // banco lo carga de verdad desde YouTube.
       id: 'vod-yt', warId: fake.warRows[0].id, playerId: 'p-5',
       estado: 'aprobado', duracionMs: 1_860_000, offsetMs: -240_000,
       offsetConfianza: 'manual', fijado: false, expiraEn: null,
       subidoEn: vencimiento(-15), calidades: [], youtubeId: 'M7lc1UVf-VE',
+      procesoError:
+        'No se pudo traer la copia al almacén, así que se verá embebida desde YouTube. ' +
+        'yt-dlp salió 1: ERROR: unable to download video data',
+    },
+    {
+      // Otra de YouTube a medio traer: la fase de descarga, con su barra.
+      id: 'vod-yt-2', warId: fake.warRows[0].id, playerId: 'p-6',
+      estado: 'procesando', duracionMs: null, offsetMs: null,
+      offsetConfianza: null, fijado: false, expiraEn: null,
+      subidoEn: new Date().toISOString(), calidades: [], youtubeId: 'aqz-KE-bpKQ',
+      procesoFase: 'descarga', procesoPct: 43, procesoSegundos: 95, procesoParado: false,
     },
     {
       // Esperando revisión: es lo que ve un oficial al entrar.

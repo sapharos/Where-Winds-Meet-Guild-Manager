@@ -35,11 +35,13 @@ export interface Vod {
   subidoEn: string;
   calidades: VodCalidad[];
   /**
-   * Grabación que vive en YouTube: el id de su vídeo, con `calidades` vacías.
+   * Grabación que vino de YouTube: el id de su vídeo.
    *
    * Existe para quien no puede subir 2 GB aquí pero ya tiene el vídeo en su
-   * canal. Pasa por la misma revisión y la misma sincronía; no caduca nunca
-   * porque no ocupa almacén, y por eso tampoco tiene sentido fijarla.
+   * canal. El servidor intenta traerse una copia al almacén (y entonces tiene
+   * `calidades` y se ve por HLS como cualquiera); si no pudo, queda en modo
+   * enlace -- `calidades` vacías -- y se ve embebida. Sólo en modo enlace deja
+   * de tener sentido la caducidad y el fijado: no hay bytes nuestros.
    */
   youtubeId: string | null;
   /**
@@ -50,7 +52,7 @@ export interface Vod {
    * pantalla se veían igual -- igual que se veía un trabajo que ya no existía
    * porque la API se había reiniciado con la cola en memoria.
    */
-  procesoFase: 'cola' | 'origen' | '360p' | null;
+  procesoFase: 'cola' | 'descarga' | 'origen' | '360p' | null;
   /** De 0 a 100. Null si ffprobe no supo decir la duración. */
   procesoPct: number | null;
   procesoError: string | null;
@@ -132,6 +134,16 @@ const avanceDe = (vod: Vod): { texto: string | null; clase: string; barra: boole
 
   if (vod.procesoFase === 'cola') {
     return { texto: 'En cola', clase: 'text-slate-400', barra: false };
+  }
+  // Trayendo la copia desde el canal: la fase previa que sólo tienen las de
+  // YouTube. Con nombre propio porque «Preparando 43%» haría creer que el
+  // remux va por la mitad cuando aún no ha llegado ni un byte.
+  if (vod.procesoFase === 'descarga') {
+    return {
+      texto: pct === null ? 'Descargando de YouTube' : `Descargando de YouTube ${pct}%`,
+      clase: 'text-amber-400',
+      barra: pct !== null,
+    };
   }
   // La etiqueta del estado ya dice «Preparando»; aquí sólo se le pone cifra.
   if (vod.estado === 'procesando') {
@@ -673,9 +685,15 @@ const WarVods: React.FC<Props> = ({
             const avance = avanceDe(vod);
             // Reintentar la suya, quien la subió; la de otro, quien aprueba --
             // el servidor manda igual, esto sólo evita enseñar un botón que va
-            // a contestar 403.
+            // a contestar 403. Una de YouTube caída a modo enlace no está en
+            // `error` -- embebida se ve --, pero la descarga se puede rehacer.
             const puedeReintentar =
-              (mia || puedeAprobar) && (vod.estado === 'error' || vod.procesoParado);
+              (mia || puedeAprobar) &&
+              (vod.estado === 'error' ||
+                vod.procesoParado ||
+                Boolean(
+                  vod.youtubeId && vod.estado === 'listo' && !vod.calidades.length && vod.procesoError,
+                ));
             return (
               <li
                 key={vod.id}
@@ -695,8 +713,9 @@ const WarVods: React.FC<Props> = ({
                         fila sólo existe a partir del gancho `post-finish`, así
                         que «Subiendo» ahí significa que los bytes están enteros
                         y falta el turno. Dicho junto a «En cola» eran dos
-                        etiquetas contradictorias sobre lo mismo. */}
-                    {vod.procesoFase !== 'cola' && (
+                        etiquetas contradictorias sobre lo mismo. Y lo mismo en
+                        la descarga: «Descargando de YouTube» ya lo dice todo. */}
+                    {vod.procesoFase !== 'cola' && vod.procesoFase !== 'descarga' && (
                       <span className={etiqueta.clase}>{etiqueta.texto}</span>
                     )}
                     {avance?.texto && (
@@ -856,9 +875,13 @@ const WarVods: React.FC<Props> = ({
                     </button>
                   )}
 
-                  {/* Fijar salva de la retención, y un enlace de YouTube no
-                      caduca: el botón sólo confundiría. */}
-                  {puedeFijar && vod.estado === 'aprobado' && !vod.youtubeId && (
+                  {/* Fijar salva de la retención, así que sólo tiene sentido
+                      cuando hay bytes nuestros que retener: una de YouTube en
+                      modo enlace (sin copia local) no caduca y el botón sólo
+                      confundiría. */}
+                  {puedeFijar &&
+                    vod.estado === 'aprobado' &&
+                    (!vod.youtubeId || vod.calidades.length > 0) && (
                     <button
                       type="button"
                       onClick={() => void fijar(vod)}

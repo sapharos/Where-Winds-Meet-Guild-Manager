@@ -125,6 +125,7 @@ const YouTubeVideo: React.FC<Props> = ({
 
     let player: any = null;
     let pulso: number | null = null;
+    let ro: ResizeObserver | null = null;
     let vivo = true;
 
     void cargarApi()
@@ -146,9 +147,37 @@ const YouTubeVideo: React.FC<Props> = ({
             onReady: () => {
               if (!vivo) return;
               const iframe = player.getIframe() as HTMLIFrameElement;
-              iframe.style.width = '100%';
-              iframe.style.height = '100%';
               if (!interactivo) iframe.style.pointerEvents = 'none';
+
+              /*
+                YouTube se niega a reproducir en un lienzo menor de 200x200:
+                el player se queda con la rueda girando para siempre, que es
+                exactamente lo que pasaba en las miniaturas de la columna del
+                mosaico (160x90 en el móvil). Así que el iframe se dibuja
+                siempre a por lo menos ese mínimo y, cuando la caja es más
+                pequeña, se encoge con `transform` para caber: YouTube mide la
+                caja del elemento, no lo que ocupa en pantalla, y un transform
+                no cambia lo primero.
+              */
+              const MINIMO = 200;
+              iframe.style.position = 'absolute';
+              iframe.style.top = '0';
+              iframe.style.left = '0';
+              iframe.style.transformOrigin = 'top left';
+              const ajustar = () => {
+                const w = contenedor.clientWidth;
+                const h = contenedor.clientHeight;
+                if (!w || !h) return;
+                const factor = Math.max(1, MINIMO / w, MINIMO / h);
+                iframe.style.width = `${Math.ceil(w * factor)}px`;
+                iframe.style.height = `${Math.ceil(h * factor)}px`;
+                iframe.style.transform = factor > 1 ? `scale(${1 / factor})` : '';
+              };
+              ajustar();
+              // La caja cambia con la ventana, al girar el teléfono y al
+              // pasar de la columna al hueco grande.
+              ro = new ResizeObserver(ajustar);
+              ro.observe(contenedor);
 
               const fuente: FuenteVideo = {
                 get currentTime() {
@@ -227,6 +256,7 @@ const YouTubeVideo: React.FC<Props> = ({
     return () => {
       vivo = false;
       if (pulso !== null) window.clearInterval(pulso);
+      ro?.disconnect();
       avisos.current.registrar?.(null);
       try {
         player?.destroy();
@@ -239,7 +269,9 @@ const YouTubeVideo: React.FC<Props> = ({
     // `interactivo` no cambia en vida de un mismo vídeo; sólo el id recrea.
   }, [videoId, interactivo]);
 
-  return <div ref={caja} className={`relative bg-black ${className ?? ''}`} />;
+  // `overflow-hidden` por el redondeo del ajuste de tamaño mínimo: el iframe
+  // sobredimensionado y encogido puede sobrar un píxel.
+  return <div ref={caja} className={`relative overflow-hidden bg-black ${className ?? ''}`} />;
 };
 
 export default YouTubeVideo;

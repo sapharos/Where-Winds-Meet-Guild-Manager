@@ -48,12 +48,13 @@ export interface VodEnMosaico {
   /** Playlist ya resuelta para cada calidad disponible. Vacío si es de YouTube. */
   fuentes: { calidad: string; url: string }[];
   /**
-   * Grabación que vive en YouTube: su vídeo, en vez de fuentes propias.
+   * Grabación que vino de YouTube: su vídeo, como RESPALDO de las fuentes.
    *
-   * Entra al mosaico por la misma puerta -- publicada, sincronizada y con
-   * duración -- y se maneja por la misma fachada que un `<video>`. La única
-   * diferencia honesta es la corrección de deriva: YouTube no acepta el ±3 %
-   * fino, así que a su mosaico sólo se le corrige a saltos.
+   * Con fuentes (la copia ya está en el almacén) se reproduce por HLS como
+   * cualquiera y esto ni se mira. Sin ellas entra embebida, por la misma
+   * fachada que un `<video>`, con dos diferencias honestas: la deriva sólo se
+   * corrige a saltos (YouTube no acepta el ±3 % fino), y en una miniatura el
+   * iframe se dibuja al mínimo que YouTube exige y se encoge con transform.
    */
   youtubeId?: string | null;
 }
@@ -184,9 +185,10 @@ const MosaicoVideo: React.FC<{
       grande ? 'w-full h-full flex items-center justify-center' : 'overflow-hidden'
     }`}
   >
-    {vod.youtubeId ? (
-      // Sin ratón para el iframe (lo apaga YouTubeVideo): los clics tienen que
-      // llegar a la miniatura de la columna y a los mandos de la grande.
+    {!vod.fuentes.length && vod.youtubeId ? (
+      // El respaldo embebido, sólo sin copia en el almacén. Sin ratón para el
+      // iframe (lo apaga YouTubeVideo): los clics tienen que llegar a la
+      // miniatura de la columna y a los mandos de la grande.
       <YouTubeVideo
         videoId={vod.youtubeId}
         className={
@@ -362,11 +364,12 @@ const Multistream: React.FC<Props> = ({ vods, marcas, onClose }) => {
     // La grande a la mejor calidad; la columna a 360p. Seis mosaicos a 1080p
     // son ~30 Mbps por espectador y en los pequeños no se nota.
     //
-    // Los de YouTube no pasan por aquí: no tienen fuentes que enganchar (la
-    // calidad la decide su propio reproductor) y su «retomar al recrearse» va
-    // por `alListo`, que es su equivalente del `loadedmetadata` de abajo.
+    // Los embebidos de YouTube no pasan por aquí: sin fuentes no hay nada que
+    // enganchar (la calidad la decide su propio reproductor) y su «retomar al
+    // recrearse» va por `alListo`, el equivalente del `loadedmetadata` de
+    // abajo. Uno de YouTube CON copia en el almacén es un vídeo normal.
     const cambian = vods
-      .filter((vod) => !vod.youtubeId)
+      .filter((vod) => vod.fuentes.length > 0)
       .map((vod) => {
         const el = videos.current.get(vod.id) as HTMLVideoElement | undefined;
         const quiere = vod.id === principal ? 'origen' : '360p';

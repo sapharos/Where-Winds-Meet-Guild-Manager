@@ -457,22 +457,42 @@ una duración al lado obliga a sumarlos de cabeza para cada pareja.
 
 ---
 
-## 5b. Grabaciones que viven en YouTube
+## 5b. Grabaciones que vienen de YouTube
 
 A algunos miembros no les sale subir 2 GB aquí --conexión que se corta,
 navegador que no puede-- pero el vídeo ya lo tienen publicado en su canal. Para
 ellos existe **«Traer de YouTube»**: pegan el enlace y nace la misma fila de
 siempre, con la misma revisión, la misma sincronía manual y las mismas marcas.
-Sólo cambia dónde viven los bytes.
 
-Decisiones y sus porqués:
+### La copia se trae a casa; el iframe es el respaldo
 
-- **No pasa por tusd ni por ffmpeg, y funciona sin `VODS_HOOK_SECRET`.** No hay
-  bytes que recibir ni preparar: la fila nace directamente en `listo`.
-- **No caduca y no se puede fijar.** La retención existe para liberar nuestro
-  almacén, y un enlace no ocupa nada. Si YouTube borra el vídeo, el reproductor
-  lo dice («ese vídeo ya no existe / el dueño no permite verlo fuera de
-  YouTube»), que es la verdad disponible.
+Con el almacén configurado, la cola **descarga el vídeo con yt-dlp** (fase
+`descarga`, con su barra) y lo mete por la tubería de siempre: remux o
+recodificado, HLS, copia de 360p, comprobación de salida. A partir de ahí es
+una grabación normal en todo --se sirve firmada desde el NAS, entra al mosaico
+por su copia de 360p, caduca a los 90 días y se puede fijar. Se pide H.264
+≤1080p si lo hay (se copia sin recodificar); si YouTube sólo da VP9/AV1, el
+recodificado de siempre lo arregla.
+
+Si la descarga (o la preparación) falla, la fila **cae a modo enlace** en vez
+de a `error`: vuelve a `listo` con el motivo anotado y el vídeo se ve
+**embebido** con el iframe de YouTube -- peor que la copia, pero se ve. El
+botón de reintentar rehace la descarga (mientras no esté publicada; una
+publicada en modo enlace se rehace borrándola y pegando el enlace otra vez).
+También queda en modo enlace todo despliegue sin `VODS_HOOK_SECRET`: sin
+almacén no hay a dónde traerla, y el enlace funciona igual.
+
+Cuando la retención barre la copia local de una de éstas, la fila **vuelve a
+modo enlace, no a «caducada»**: el vídeo sigue en su canal y no se perdió nada.
+La copia local es una caché de 90 días; el enlace es el registro permanente.
+
+**yt-dlp envejece.** YouTube le cambia el terreno cada pocos meses y la versión
+congelada en la imagen deja de poder descargar. No rompe nada --las nuevas caen
+a modo enlace con el motivo escrito-- y el arreglo es reconstruir la imagen,
+que trae el yt-dlp del día.
+
+### El modo enlace, en detalle
+
 - **La duración la lee el navegador del propio reproductor de YouTube** al
   pegar el enlace (hay que darle al play un momento: hasta que arranca,
   YouTube no la dice). Sin llave de la Data API no hay otra vía, y sin duración
@@ -487,9 +507,16 @@ Decisiones y sus porqués:
   YouTube sólo acepta velocidades a peldaños, así que la corrección fina del
   ±3 % no existe para estos mosaicos y la sincronía se mantiene sólo a saltos
   (uno cada varios minutos, cuando pasa el umbral).
+- **El player de YouTube exige 200×200 px** y se queda con la rueda girando
+  para siempre en un lienzo menor -- que es lo que miden las miniaturas de la
+  columna del mosaico. La fachada dibuja el iframe al mínimo y lo encoge con
+  `transform`, que ajusta lo que se ve sin cambiar lo que YouTube mide.
 - **El iframe no recibe el ratón** salvo en la pantalla de pegar el enlace: los
   controles son los nuestros --que llevan las marcas-- y los clics tienen que
   llegar a las miniaturas de la columna.
+- **No caduca y no se puede fijar**: no hay bytes nuestros. Si YouTube borra el
+  vídeo, el reproductor lo dice («ese vídeo ya no existe / el dueño no permite
+  verlo fuera de YouTube»), que es la verdad disponible.
 - **Duplicados**: el mismo vídeo no puede entrar dos veces en la misma guerra
   (`war_id + youtube_id`).
 
