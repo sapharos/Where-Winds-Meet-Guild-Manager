@@ -47,7 +47,7 @@ interface Store {
   lineups: LineupGuardado[];
   active: Record<WarSide, string | null>;
   locked: Record<WarSide, boolean>;
-  current: ReturnType<typeof fake.board>['current'] | null;
+  session: ReturnType<typeof fake.board>['session'] | null;
   usuarios: ManagedUser[];
   vods: VodFalso[];
   marcas: MarcaFalsa[];
@@ -239,7 +239,7 @@ const store: Store = {
   ],
   active: { attack: 'st-1', defense: 'st-2' },
   locked: { attack: false, defense: false },
-  current: null,
+  session: null,
   // Una guerra del historial con las cuatro situaciones a la vez.
   vods: [
     {
@@ -713,7 +713,7 @@ const GET: [RegExp, Ruta][] = [
     () => ({
       active: store.active,
       locked: store.locked,
-      current: store.current,
+      session: store.session,
       now: new Date().toISOString(),
     }),
   ],
@@ -1206,34 +1206,32 @@ const ESCRITURAS: [string, RegExp, Ruta][] = [
     store.locked = { ...store.locked, [m[1]]: body.locked };
     return { ok: true };
   }],
-  ['POST', /^\/war\/wars$/, (_m, _req, body) => {
-    store.current = {
-      id: 'w-nueva',
-      name: body.name,
-      startedAt: new Date().toISOString(),
-      matchType: body.matchType,
+  // El cronómetro. Iniciar arranca los relojes desde lo que marque la cuenta
+  // atrás del juego; el acta sólo existe si al finalizar se registra.
+  ['POST', /^\/war\/session$/, (_m, _req, body) => {
+    const restante = Number(body?.remaining) * 1000;
+    store.session = {
+      id: `w-cron-${Date.now()}`,
+      startedAt: new Date(
+        body?.phase === 'preparacion' ? Date.now() + restante : Date.now() - (30 * 60_000 - restante),
+      ).toISOString(),
     };
-    return { ok: true };
+    return store.session;
   }],
-  ['POST', /^\/war\/wars\/([^/]+)\/end$/, () => {
-    store.current = null;
-    return { ok: true };
+  ['POST', /^\/war\/session\/register$/, () => {
+    store.session = null;
+    store.locked = { attack: false, defense: false };
+    return { id: 'w-registrada', participants: store.deployments.length };
   }],
-  // El cambio. Con la guerra en marcha mueve el tablero: quien sale lo deja y
-  // quien entra ocupa su sitio con su línea. Sobre un acta ya cerrada no hay
-  // tablero que tocar, así que sólo se anota en el anexo de esa guerra.
+  ['POST', /^\/war\/session\/discard$/, () => {
+    store.session = null;
+    store.locked = { attack: false, defense: false };
+    return { discarded: true };
+  }],
+  // El cambio, sobre un acta ya registrada: no hay tablero que tocar, así que
+  // sólo se anota en el anexo de esa guerra. (Con la guerra en marcha ya no
+  // pasa por aquí: un cambio en caliente es mover las fichas del tablero.)
   ['POST', /^\/war\/wars\/([^/]+)\/substitute$/, (m, _req, body) => {
-    const enCurso = store.current?.id === m[1];
-    const sale = enCurso ? store.deployments.find((d) => d.playerId === body.out) : undefined;
-
-    if (enCurso && sale) {
-      store.deployments = [
-        ...store.deployments.filter((d) => d.playerId !== body.out),
-        ...(body.in ? [{ ...sale, playerId: body.in as string }] : []),
-      ];
-      return { out: body.out, in: body.in ?? null, side: sale.side, lane: sale.lane };
-    }
-
     const anexo = anexoDe(m[1]);
     const acta = (fake.warDetail(m[1])?.participants ?? []) as Record<string, unknown>[];
     const relevado = acta.find((p) => p.playerId === body.out);
@@ -1339,7 +1337,7 @@ const ESCRITURAS: [string, RegExp, Ruta][] = [
  */
 if (!new URLSearchParams(location.search).has('enpaz')) {
   const arranque = fake.board();
-  store.current = arranque.current;
+  store.session = arranque.session;
   store.locked = arranque.locked;
 }
 

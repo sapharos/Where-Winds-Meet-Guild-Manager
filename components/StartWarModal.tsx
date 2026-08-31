@@ -1,43 +1,59 @@
 import React, { useState } from 'react';
-import { WAR_MATCH_TYPE_LABELS, WarMatchType } from '../types';
+import { WAR_PHASE_LABELS, WAR_PHASE_MINUTES, WarPhase } from '../types';
 import Sheet from './Sheet';
 
-const TYPES: WarMatchType[] = ['league', 'ranked', 'custom'];
+const PHASES: WarPhase[] = ['preparacion', 'partida'];
 
-const ICONS: Record<WarMatchType, string> = {
-  league: 'fa-shield-halved',
-  ranked: 'fa-ranking-star',
-  custom: 'fa-handshake',
+const ICONS: Record<WarPhase, string> = {
+  preparacion: 'fa-hourglass-half',
+  partida: 'fa-khanda',
+};
+
+/** «4», «4:30» o «0:47» → segundos, o null si no es una cifra de reloj. */
+const aSegundos = (texto: string): number | null => {
+  const m = texto.trim().match(/^(\d{1,2})(?::([0-5]?\d))?$/);
+  if (!m) return null;
+  return Number(m[1]) * 60 + Number(m[2] ?? 0);
 };
 
 interface Props {
   onClose: () => void;
-  onStart: (name: string, matchType: WarMatchType) => Promise<void>;
+  onStart: (phase: WarPhase, remainingSeconds: number) => Promise<void>;
 }
 
 /**
- * What kind of match this was is worth more than a text field: it decides
- * whether this war belongs next to the guild's ranked history or stands on
- * its own as a one-off challenge. Asked here, at the one moment someone is
- * already looking at the board and knows the answer, rather than left to be
- * reconstructed later from a name nobody agreed on.
+ * Iniciar ya no crea nada: arranca los relojes, y ya está.
+ *
+ * Antes pedía nombre y tipo de partida y escribía la guerra en el historial,
+ * lo que obligaba a decidir papeleo justo cuando hay que estar jugando -- y a
+ * bloquear las dos formaciones antes. Ahora pide lo único que hace falta para
+ * que los relojes digan la verdad: en qué fase se está y qué marca la cuenta
+ * atrás del juego. Lo normal es iniciarlo desde la preparación, con calma; el
+ * acta, con su nombre y su resultado, se decide al finalizar.
  */
 const StartWarModal: React.FC<Props> = ({ onClose, onStart }) => {
-  const [name, setName] = useState(`Guerra ${new Date().toLocaleDateString('es')}`);
-  const [matchType, setMatchType] = useState<WarMatchType | null>(null);
+  const [phase, setPhase] = useState<WarPhase>('preparacion');
+  const [reloj, setReloj] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const tope = WAR_PHASE_MINUTES[phase];
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!matchType) {
-      setError('Elige qué tipo de partida fue.');
+    const restante = aSegundos(reloj);
+    if (restante === null) {
+      setError('Escribe lo que marca la cuenta atrás, como «4:30».');
+      return;
+    }
+    if (restante > tope * 60) {
+      setError(`La cuenta atrás de ${WAR_PHASE_LABELS[phase].toLowerCase()} va de 0:00 a ${tope}:00.`);
       return;
     }
     setBusy(true);
     setError(null);
     try {
-      await onStart(name, matchType);
+      await onStart(phase, restante);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo iniciar la guerra');
       setBusy(false);
@@ -47,7 +63,7 @@ const StartWarModal: React.FC<Props> = ({ onClose, onStart }) => {
   return (
     <Sheet
       title="Iniciar guerra"
-      subtitle="Congela quién está desplegado y dónde. No hay vuelta atrás sin finalizarla."
+      subtitle="Arranca los relojes de jungla y boss para todas las pantallas y para el cuerno del bot. El acta se decide al finalizar: registrarla o descartarla."
       size="sm"
       onClose={onClose}
     >
@@ -55,38 +71,48 @@ const StartWarModal: React.FC<Props> = ({ onClose, onStart }) => {
         <div className="space-y-4">
           <div>
             <label className="block text-xs uppercase tracking-wider text-slate-500 mb-1.5">
-              Nombre
+              ¿En qué fase estás?
             </label>
-            <input
-              type="text"
-              autoFocus
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-sm outline-none focus:ring-1 focus:ring-amber-500"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs uppercase tracking-wider text-slate-500 mb-1.5">
-              Tipo de partida
-            </label>
-            <div className="grid grid-cols-3 gap-2">
-              {TYPES.map((type) => (
+            <div className="grid grid-cols-2 gap-2">
+              {PHASES.map((p) => (
                 <button
-                  key={type}
+                  key={p}
                   type="button"
-                  onClick={() => setMatchType(type)}
+                  onClick={() => {
+                    setPhase(p);
+                    setError(null);
+                  }}
                   className={`min-h-tap flex flex-col items-center justify-center gap-1.5 rounded-lg border py-3 text-xs font-bold transition-all ${
-                    matchType === type
+                    phase === p
                       ? 'border-amber-500 text-amber-400 bg-amber-500/10'
                       : 'border-slate-800 text-slate-400 hover:border-slate-600'
                   }`}
                 >
-                  <i className={`fa-solid ${ICONS[type]} text-base`}></i>
-                  {WAR_MATCH_TYPE_LABELS[type]}
+                  <i className={`fa-solid ${ICONS[p]} text-base`}></i>
+                  {WAR_PHASE_LABELS[p]}
                 </button>
               ))}
             </div>
+          </div>
+
+          <div>
+            <label className="block text-xs uppercase tracking-wider text-slate-500 mb-1.5">
+              ¿Qué marca la cuenta atrás del juego?
+            </label>
+            <input
+              type="text"
+              inputMode="numeric"
+              autoFocus
+              value={reloj}
+              onChange={(e) => setReloj(e.target.value)}
+              placeholder={phase === 'preparacion' ? 'p. ej. 4:30' : 'p. ej. 27:10'}
+              autoComplete="off"
+              className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-sm tabular-nums outline-none focus:ring-1 focus:ring-amber-500"
+            />
+            <p className="text-[11px] text-slate-500 mt-1.5 leading-relaxed">
+              El número que el juego enseña ahora mismo, de {tope}:00 hacia abajo. Con eso los
+              relojes de todos cuentan lo mismo que el de tu pantalla.
+            </p>
           </div>
 
           {error && (
@@ -102,7 +128,7 @@ const StartWarModal: React.FC<Props> = ({ onClose, onStart }) => {
             className="w-full min-h-tap bg-red-700 hover:bg-red-600 disabled:bg-slate-800 disabled:text-slate-600 text-white text-sm font-bold px-5 rounded transition-all flex items-center justify-center gap-2"
           >
             <i className={`fa-solid ${busy ? 'fa-circle-notch fa-spin' : 'fa-flag'}`}></i>
-            Iniciar guerra
+            Arrancar los relojes
           </button>
         </div>
       </form>

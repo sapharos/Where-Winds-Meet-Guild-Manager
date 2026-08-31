@@ -20,8 +20,9 @@
  */
 
 const GATEWAY = 'wss://gateway.discord.gg/?v=10&encoding=json';
-/** GUILD_VOICE_STATES: para recibir la confirmación de nuestro propio estado. */
-const INTENTS = 1 << 7;
+/** GUILDS: sin él no llega el GUILD_CREATE, que es donde viene la foto de la
+    voz. GUILD_VOICE_STATES: la rellena, y confirma nuestro propio estado. */
+const INTENTS = (1 << 0) | (1 << 7);
 const CONNECT_TIMEOUT = 15_000;
 const JOIN_TIMEOUT = 8_000;
 
@@ -30,6 +31,10 @@ export class GatewayVoice {
   #heartbeat = null;
   #botUserId = null;
   #esperas = new Set();
+  // Quién está en qué canal, según el GUILD_CREATE que sigue al READY: viene
+  // con los estados de voz del momento, que es lo único que el REST no cuenta.
+  #vozPorCanal = null;
+  #esperandoGuild = [];
 
   /** Abre la conexión y espera el READY. Lanza si Discord no nos deja entrar. */
   async connect() {
@@ -67,6 +72,19 @@ export class GatewayVoice {
           resolve();
           return;
         }
+        if (msg.t === 'GUILD_CREATE' && msg.d.id === process.env.DISCORD_GUILD_ID) {
+          // La foto de la voz al conectar. Sin contar al propio bot, que puede
+          // haberse quedado plantado de un barrido anterior.
+          const enVoz = new Set();
+          for (const estado of msg.d.voice_states ?? []) {
+            if (estado.channel_id && estado.user_id !== this.#botUserId) {
+              enVoz.add(estado.channel_id);
+            }
+          }
+          this.#vozPorCanal = enVoz;
+          for (const espera of this.#esperandoGuild.splice(0)) espera(enVoz);
+          return;
+        }
         if (msg.t === 'VOICE_STATE_UPDATE' && msg.d.user_id === this.#botUserId) {
           for (const espera of [...this.#esperas]) espera(msg.d.channel_id);
         }
@@ -91,6 +109,30 @@ export class GatewayVoice {
         );
         this.#cleanup();
       });
+    });
+  }
+
+  /**
+   * En qué canales hay alguien conectado, o null si Discord no llegó a
+   * decirlo a tiempo.
+   *
+   * El GUILD_CREATE llega solo, justo detrás del READY; esto sólo lo espera.
+   * Devuelve null y no un conjunto vacío cuando no llega, porque son
+   * respuestas distintas: «no hay nadie» recorta el barrido y «no lo sé» debe
+   * dejarlo entero.
+   */
+  async occupied(timeoutMs = 4_000) {
+    if (this.#vozPorCanal) return this.#vozPorCanal;
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.#esperandoGuild = this.#esperandoGuild.filter((e) => e !== espera);
+        resolve(null);
+      }, timeoutMs);
+      const espera = (enVoz) => {
+        clearTimeout(timer);
+        resolve(enVoz);
+      };
+      this.#esperandoGuild.push(espera);
     });
   }
 
@@ -144,5 +186,6 @@ export class GatewayVoice {
     clearInterval(this.#heartbeat);
     this.#heartbeat = null;
     this.#esperas.clear();
+    for (const espera of this.#esperandoGuild.splice(0)) espera(this.#vozPorCanal);
   }
 }

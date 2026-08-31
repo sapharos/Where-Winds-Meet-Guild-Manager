@@ -3,14 +3,14 @@
  *
  * Un bot sólo puede ocupar un canal de voz a la vez, así que "sonar en todos"
  * es un barrido: entra, suena, salta al siguiente. A un par de segundos por
- * canal las seis líneas se recorren en menos de quince, que para un aviso con
- * un minuto de antelación sobra.
+ * canal las líneas con gente se recorren en unos segundos -- los canales
+ * vacíos se saltan, que además de no avisar a nadie retrasaban a los demás.
  *
  * La mitad automática vive aquí también, y es sólo la jungla: la guerra dura
  * treinta minutos y la jungla vuelve cada cinco -- el mismo calendario que
  * pintan los relojes de la Sala de Guerra, calculado desde el mismo startedAt.
  * El planificador mira cada pocos segundos si toca avisar y dispara el barrido
- * un minuto antes de cada vuelta.
+ * medio minuto antes de cada vuelta.
  *
  * El boss no está aquí a conciencia. No tiene hora: sale dentro de una ventana
  * de dos minutos, en saltos de treinta segundos, y arriba o abajo. Un reloj que
@@ -20,7 +20,7 @@
  */
 
 import { pool, GUILD_ID } from './db.js';
-import { currentWar } from './war.js';
+import { getSession } from './war.js';
 import { botEnabled, playSoundboardSound } from './discordBot.js';
 import { GatewayVoice } from './discordGateway.js';
 import { VOICE_SLOTS, getVoiceChannels } from './voice.js';
@@ -32,7 +32,9 @@ const MINUTE = 60_000;
     lo dibuja y esto lo hace sonar; si el juego cambia los tiempos, son dos sitios. */
 const WAR_LENGTH = 30 * MINUTE;
 const JUNGLE_EVERY = 5 * MINUTE;
-const WARN_BEFORE = MINUTE;
+/** Medio minuto y no uno: las líneas pidieron el aviso pegado a la jungla,
+    porque con uno entero la mitad se olvidaba antes de que saliera. */
+const WARN_BEFORE = 30_000;
 
 /**
  * { jungle: soundId | null, boss: soundId | null, slots: string[] }
@@ -81,8 +83,15 @@ let barriendo = false;
 /**
  * Suena `soundId` en cada canal, en orden, y cuenta el resultado.
  * Devuelve { played, results: [{ channelId, ok, reason? }] }.
+ *
+ * Con `skipEmpty` mira primero en qué canales hay alguien conectado y se salta
+ * los vacíos: un aviso en un canal sin gente es un bot entrando y sonando para
+ * nadie, y cada canal de más retrasa el aviso en los que sí importan. Los
+ * saltados vuelven en `results` con su motivo, no en silencio. Si la pasarela
+ * no llega a decir quién está en voz, se avisa en todos, que es lo que había:
+ * mejor un aviso de más que una jungla sin cantar.
  */
-export async function sweepSound(soundId, channelIds) {
+export async function sweepSound(soundId, channelIds, { skipEmpty = false } = {}) {
   if (barriendo) {
     throw Object.assign(new Error('ya hay un barrido de sonido en marcha'), { status: 409 });
   }
@@ -91,7 +100,12 @@ export async function sweepSound(soundId, channelIds) {
   const gateway = new GatewayVoice();
   try {
     await gateway.connect();
+    const conGente = skipEmpty ? await gateway.occupied() : null;
     for (const channelId of channelIds) {
+      if (conGente && !conGente.has(channelId)) {
+        results.push({ channelId, ok: false, reason: 'sin nadie conectado' });
+        continue;
+      }
       if (!(await gateway.join(channelId))) {
         results.push({ channelId, ok: false, reason: 'no se pudo entrar (¿permiso de Conectar?)' });
         continue;
@@ -137,7 +151,8 @@ export async function warnEvent(type) {
       status: 409,
     });
   }
-  return sweepSound(horn[type], objetivo);
+  // Sólo donde haya gente: es un aviso a quien pelea, no una ronda de canales.
+  return sweepSound(horn[type], objetivo, { skipEmpty: true });
 }
 
 /* ------------------------------------------------------- el automático */
@@ -163,7 +178,9 @@ const sonados = new Map();
 
 async function tick() {
   if (!botEnabled()) return;
-  const war = await currentWar();
+  // El cronómetro y no el acta: la guerra ya no existe en el historial
+  // mientras se pelea, y su comienzo puede estar aún por llegar (preparación).
+  const war = await getSession();
   if (!war) {
     sonados.clear();
     return;

@@ -185,17 +185,18 @@ const HACE = () => {
   const query = new URLSearchParams(location.search);
   if (query.has('aviso')) return 3 * 60_000 + 55_000;
   if (query.has('boss')) return 4 * 60_000 + 40_000;
+  // Los relojes armados desde la preparación: la partida aún no ha empezado.
+  if (query.has('prepa')) return -(2 * 60_000 + 30_000);
   return 12 * 60_000;
 };
 
 export const board = () => ({
   active: { attack: 'st-1', defense: 'st-2' } as Record<WarSide, string | null>,
   locked: { attack: true, defense: true } as Record<WarSide, boolean>,
-  current: {
+  // El cronómetro, no un acta: la guerra sólo se escribe al registrarla.
+  session: {
     id: 'w-actual',
-    name: 'Asedio del Paso Norte',
     startedAt: new Date(Date.now() - HACE()).toISOString(),
-    matchType: 'league' as const,
   },
   now: new Date().toISOString(),
 });

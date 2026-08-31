@@ -35,8 +35,10 @@ import {
   getBoard,
   setActiveStrategy,
   setLock,
-  startWar,
-  endWar,
+  getSession,
+  startSession,
+  registerSession,
+  discardSession,
   updateWar,
   deleteWar,
   listWars,
@@ -52,7 +54,6 @@ import {
   saveLineup,
   applyLineup,
   deleteLineup,
-  currentWar,
   callBoss,
   currentCall,
 } from './war.js';
@@ -900,7 +901,7 @@ app.get('/api/war/call', requireAuth, asHandler(async (_req, res) => {
 // Cantarlo es de quien lleva la guerra (war.edit), que es el mismo permiso con
 // el que se arma el tablero. Un grito falso vacía tres líneas.
 app.post('/api/war/call', requireAuth, requirePermission('war.edit'), asHandler(async (req, res) => {
-  if (!(await currentWar())) {
+  if (!(await getSession())) {
     return res.status(409).json({ error: 'no hay ninguna guerra en curso' });
   }
   const call = callBoss(req.body?.spot, req.user?.username ?? null);
@@ -1218,12 +1219,19 @@ app.put('/api/war/lock/:side', requireAuth, requirePermission('war.edit'), asHan
   res.json(await setLock(req.params.side, req.body?.locked === true));
 }));
 
-app.post('/api/war/wars', requireAuth, requirePermission('war.edit'), asHandler(async (req, res) => {
-  res.json(await startWar(req.body?.name, req.body?.matchType));
+// El cronómetro: iniciar arranca sólo los relojes, desde lo que marca la
+// cuenta atrás del juego. El acta se decide al finalizar -- registrar o
+// descartar --, así que ni se exige formación bloqueada ni se pide nombre aquí.
+app.post('/api/war/session', requireAuth, requirePermission('war.edit'), asHandler(async (req, res) => {
+  res.json(await startSession(req.body?.phase, req.body?.remaining));
 }));
 
-app.post('/api/war/wars/:id/end', requireAuth, requirePermission('war.edit'), asHandler(async (req, res) => {
-  res.json(await endWar(req.params.id, req.body?.outcome));
+app.post('/api/war/session/register', requireAuth, requirePermission('war.edit'), asHandler(async (req, res) => {
+  res.json(await registerSession(req.body ?? {}));
+}));
+
+app.post('/api/war/session/discard', requireAuth, requirePermission('war.edit'), asHandler(async (_req, res) => {
+  res.json(await discardSession());
 }));
 
 // Un cambio: en la guerra en marcha, o corrigiendo un acta ya cerrada. Sin

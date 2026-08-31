@@ -304,6 +304,175 @@ export function currentCall() {
 /** A guild war lasts half an hour. Nothing about it outlives that. */
 export const WAR_MINUTES = 30;
 
+/** Antes de la partida hay cinco minutos de preparación, con su propia cuenta atrás. */
+export const PREP_MINUTES = 5;
+
+/* --------------------------------------------------------- el cronómetro */
+
+/**
+ * La guerra en marcha ya no es una fila del acta: es un cronómetro.
+ *
+ * Antes, «Iniciar guerra» creaba la guerra en el historial y de su `started_at`
+ * salían todos los relojes. Eso obligaba a dos cosas que en la práctica no se
+ * podían hacer en mitad de una partida: bloquear las dos formaciones y decidir
+ * nombre y tipo justo cuando hay que estar jugando. Y una guerra iniciada por
+ * probar los relojes quedaba escrita en el historial hasta que alguien la
+ * borraba.
+ *
+ * Ahora iniciar sólo arranca los relojes: se dice en qué fase se está
+ * (preparación o partida) y qué marca la cuenta atrás del juego, y de ahí sale
+ * el instante en que la partida empieza -- que puede estar en el futuro, si
+ * todavía es preparación. El acta se decide al finalizar: se registra con los
+ * desplegados de ese momento, o se descarta y no queda nada.
+ *
+ * Vive en app_settings y no en memoria: los relojes los miran treinta
+ * pantallas y el cuerno del bot, y un reinicio del contenedor en mitad de una
+ * guerra no puede pararlos.
+ */
+const SESSION_KEY = `war_session:${GUILD_ID}`;
+
+/** Las dos fases del juego, con su cuenta atrás en segundos. */
+export const PHASES = { preparacion: PREP_MINUTES * 60, partida: WAR_MINUTES * 60 };
+
+/** El cronómetro en marcha -- { id, startedAt } con el comienzo de la PARTIDA -- o null. */
+export async function getSession() {
+  const { rows } = await pool.query(`SELECT value FROM app_settings WHERE key = $1`, [SESSION_KEY]);
+  if (!rows.length) return null;
+  try {
+    const parsed = JSON.parse(rows[0].value);
+    return parsed?.id && parsed?.startedAt ? { id: parsed.id, startedAt: parsed.startedAt } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Arranca los relojes a partir de lo que marca la pantalla del juego.
+ *
+ * `remaining` son los segundos que le quedan a la fase en la que se está --
+ * exactamente la cifra de la cuenta atrás del juego, que es lo único que quien
+ * inicia tiene delante. En preparación la partida empieza dentro de ese resto;
+ * en partida, empezó hace lo que ya se consumió de ella.
+ */
+export async function startSession(phase, remaining) {
+  if (!(phase in PHASES)) {
+    throw Object.assign(new Error('di en qué fase estás: preparación o partida'), { status: 400 });
+  }
+  const restante = Math.round(Number(remaining));
+  if (!Number.isFinite(restante) || restante < 0 || restante > PHASES[phase]) {
+    throw Object.assign(
+      new Error(`la cuenta atrás de esa fase va de 0:00 a ${PHASES[phase] / 60}:00`),
+      { status: 400 },
+    );
+  }
+  if (await getSession()) {
+    throw Object.assign(new Error('ya hay una guerra en curso: finalízala primero'), { status: 409 });
+  }
+
+  const startedAt = new Date(
+    phase === 'preparacion'
+      ? Date.now() + restante * 1000
+      : Date.now() - (PHASES.partida - restante) * 1000,
+  ).toISOString();
+  const session = { id: randomUUID(), startedAt };
+  await pool.query(
+    `INSERT INTO app_settings (key, value) VALUES ($1, $2)
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+    [SESSION_KEY, JSON.stringify(session)],
+  );
+  return session;
+}
+
+/** Para los relojes y suelta las formaciones, dejando sitio a la siguiente. */
+async function clearSession() {
+  await pool.query(`DELETE FROM app_settings WHERE key = $1`, [
+    SESSION_KEY,
+  ]);
+  await pool.query(`DELETE FROM app_settings WHERE key = ANY($1)`, [SIDES.map(lockKey)]);
+}
+
+/** Tirar el cronómetro sin dejar rastro: la guerra no pasa al historial. */
+export async function discardSession() {
+  await clearSession();
+  return { discarded: true };
+}
+
+/**
+ * Cerrar la guerra escribiéndola en el historial.
+ *
+ * El acta se congela aquí y no al iniciar: son los desplegados de este momento
+ * -- con los cambios que hubiera durante la pelea hechos ya en el tablero --
+ * bajo los planes en vigor. Quien la cierra estuvo, así que nombre, tipo y
+ * resultado se piden ahora, que es cuando de verdad se saben.
+ */
+export async function registerSession({ name, matchType, outcome } = {}) {
+  const session = await getSession();
+  if (!session) {
+    throw Object.assign(new Error('no hay ninguna guerra en curso'), { status: 409 });
+  }
+  if (!MATCH_TYPES.includes(matchType)) {
+    throw Object.assign(new Error('elige que tipo de partida fue: liga, ranked o personalizada'), {
+      status: 400,
+    });
+  }
+  if (!OUTCOMES.includes(outcome)) {
+    throw Object.assign(new Error('marca si la guerra se gano o se perdio'), { status: 400 });
+  }
+
+  const deployed = await getDeployments();
+  if (!deployed.length) {
+    throw Object.assign(new Error('no hay nadie desplegado que registrar'), { status: 409 });
+  }
+
+  const strategies = await listStrategies();
+  const { active } = await getBoard();
+  const plans = {};
+  for (const side of SIDES) {
+    plans[side] = strategies.find((s) => s.id === active[side]) ?? null;
+  }
+
+  const id = randomUUID();
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    // El cierre es la media hora del juego, o ahora si se cierra antes; nunca
+    // antes del comienzo, que registrando desde la preparación sería negativo.
+    await client.query(
+      `INSERT INTO wars (id, guild_id, name, plans, match_type, outcome, started_at, ended_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7::timestamptz,
+               GREATEST($7::timestamptz,
+                        LEAST(now(), $7::timestamptz + make_interval(mins => $8::int))))`,
+      [
+        id,
+        GUILD_ID,
+        String(name ?? '').trim() || 'Guerra de gremio',
+        JSON.stringify(plans),
+        matchType,
+        outcome,
+        session.startedAt,
+        WAR_MINUTES,
+      ],
+    );
+    for (const d of deployed) {
+      await client.query(
+        `INSERT INTO war_participants (war_id, player_id, side, lane, unit_ids, build_id)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [id, d.playerId, d.side, d.lane, JSON.stringify(d.unitIds ?? []), d.buildId ?? null],
+      );
+    }
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+
+  await clearSession();
+  olvidarHistorial();
+  return { id, participants: deployed.length };
+}
+
 /** Liga, ranked, or a challenge arranged against one particular guild. */
 export const MATCH_TYPES = ['league', 'ranked', 'custom'];
 
@@ -933,92 +1102,6 @@ export async function importWar({ name, matchType, outcome, startedAt, participa
 }
 
 /**
- * Begin a war: take down who stands where, and under what plan.
- *
- * A copy rather than a reference to the board, because the board goes on being
- * rearranged for next week and the record of a war must not follow it. Both
- * sides have to be settled first -- half a line-up is not a line-up.
- */
-export async function startWar(name, matchType) {
-  if (!MATCH_TYPES.includes(matchType)) {
-    throw Object.assign(new Error('elige que tipo de partida fue: liga, ranked o personalizada'), {
-      status: 400,
-    });
-  }
-  if (await currentWar()) {
-    throw Object.assign(new Error('ya hay una guerra en curso'), { status: 409 });
-  }
-  for (const side of SIDES) {
-    if (!(await isLocked(side))) {
-      throw Object.assign(
-        new Error('bloquea las dos formaciones antes de iniciar la guerra'),
-        { status: 409 },
-      );
-    }
-  }
-
-  const deployed = await getDeployments();
-  if (!deployed.length) {
-    throw Object.assign(new Error('no hay nadie desplegado'), { status: 409 });
-  }
-
-  const strategies = await listStrategies();
-  const { active } = await getBoard();
-  const plans = {};
-  for (const side of SIDES) {
-    plans[side] = strategies.find((s) => s.id === active[side]) ?? null;
-  }
-
-  const id = randomUUID();
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    await client.query(
-      `INSERT INTO wars (id, guild_id, name, plans, match_type) VALUES ($1, $2, $3, $4, $5)`,
-      [id, GUILD_ID, String(name ?? '').trim() || 'Guerra de gremio', JSON.stringify(plans), matchType],
-    );
-    for (const d of deployed) {
-      await client.query(
-        `INSERT INTO war_participants (war_id, player_id, side, lane, unit_ids, build_id)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
-        [id, d.playerId, d.side, d.lane, JSON.stringify(d.unitIds ?? []), d.buildId ?? null],
-      );
-    }
-    await client.query('COMMIT');
-  } catch (err) {
-    await client.query('ROLLBACK');
-    throw err;
-  } finally {
-    client.release();
-  }
-
-  olvidarHistorial();
-  return { id, participants: deployed.length };
-}
-
-/**
- * Close the war and open both boards again for the next one.
- *
- * Whoever closes it says how it went, since they were there. The clock closing
- * it at thirty minutes leaves that unsaid, to be filled in from the history.
- */
-export async function endWar(id, outcome) {
-  if (!OUTCOMES.includes(outcome)) {
-    throw Object.assign(new Error('marca si la guerra se gano o se perdio'), { status: 400 });
-  }
-  const { rowCount } = await pool.query(
-    `UPDATE wars SET ended_at = now(), outcome = $3
-      WHERE id = $1 AND guild_id = $2 AND ended_at IS NULL`,
-    [id, GUILD_ID, outcome],
-  );
-  if (!rowCount) throw Object.assign(new Error('esa guerra no esta en curso'), { status: 404 });
-
-  await pool.query(`DELETE FROM app_settings WHERE key = ANY($1)`, [SIDES.map(lockKey)]);
-  olvidarHistorial();
-  return { ended: id };
-}
-
-/**
  * Correct the name or the match type after the fact.
  *
  * Decided in the rush of starting a war, so it is the one thing about the
@@ -1148,7 +1231,17 @@ export async function getBoard() {
   // The clock comes with it: the war timers count from when the war started,
   // and everyone has to be counting the same seconds. A browser whose clock is
   // a minute out would otherwise call the boss a minute early, for itself only.
-  return { active, locked, current: await currentWar(), now: new Date().toISOString() };
+  //
+  // `current` sigue viniendo por las guerras de antes del cronómetro: mirarlo
+  // es además lo que cierra por reloj una fila en curso que quedara de
+  // entonces. Las pantallas nuevas leen `session`.
+  return {
+    active,
+    locked,
+    current: await currentWar(),
+    session: await getSession(),
+    now: new Date().toISOString(),
+  };
 }
 
 /**
@@ -1168,9 +1261,9 @@ export async function setLock(side, locked) {
       [lockKey(side)],
     );
   } else {
-    if (await currentWar()) {
-      throw Object.assign(new Error('hay una guerra en curso: finalizala primero'), { status: 409 });
-    }
+    // Desbloquear en plena guerra se permite a conciencia: el acta ya no se
+    // congela al iniciar sino al registrar, así que corregir el tablero
+    // mientras se pelea es justo cómo se apunta un cambio.
     await pool.query(`DELETE FROM app_settings WHERE key = $1`, [lockKey(side)]);
   }
   return { locked: Boolean(locked) };

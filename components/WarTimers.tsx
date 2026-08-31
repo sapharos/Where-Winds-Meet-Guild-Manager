@@ -128,6 +128,9 @@ interface Countdown {
 const TONOS = {
   jungla: '--s-500',
   boss: '--d-500',
+  // El arranque de la partida, que sólo suena si los relojes se armaron en la
+  // preparación. En latón, que es el color de lo que ordena y no de lo que ataca.
+  partida: '--a-500',
 } as const;
 
 type Tono = keyof typeof TONOS;
@@ -144,7 +147,9 @@ const clock = (ms: number) => {
 const mark = (ms: number) => `${Math.floor(ms / MINUTE)}:${String((ms / 1000) % 60).padStart(2, '0')}`;
 
 function nextJungle(elapsed: number): Countdown | null {
-  const round = Math.floor(elapsed / JUNGLE_EVERY) + 1;
+  // En preparación (tiempo negativo) la que viene es la primera: sin el suelo,
+  // la división saldría en una «Jungla 0» puesta en el arranque de la partida.
+  const round = Math.max(0, Math.floor(elapsed / JUNGLE_EVERY)) + 1;
   const at = round * JUNGLE_EVERY;
   // Nothing is worth counting down to after the war has ended.
   if (at > WAR_LENGTH) return null;
@@ -237,7 +242,9 @@ const Reloj: React.FC<{
 );
 
 interface Props {
-  /** When the war began, as the server told it. */
+  /** Cuándo empieza (o empezó) la PARTIDA, según el servidor. Puede estar en
+      el futuro: los relojes se pueden armar desde la fase de preparación, y
+      entonces todo esto cuenta primero hacia el arranque. */
   startedAt: string;
   /** Server time minus this browser's time, so everyone counts together. */
   offset: number;
@@ -280,6 +287,14 @@ const WarTimers: React.FC<Props> = ({ startedAt, offset, canCall }) => {
 
   const jungle = nextJungle(elapsed);
   const boss = bossWindow(elapsed);
+  // Antes del arranque se está en preparación, y lo que se cuenta es cuánto
+  // falta. Jungla y boss no necesitan saberlo: sus cuentas restan sobre el
+  // mismo instante y con tiempo negativo sencillamente salen más largas.
+  const enPreparacion = elapsed < 0;
+  /** El arranque como un evento más, para que el aviso de «ya casi» suene igual. */
+  const inicio = enPreparacion
+    ? { key: 'inicio', label: 'La partida', remaining: -elapsed }
+    : null;
 
   /** Enseñar algo a pantalla completa, y hacer ruido si esta pantalla lo pidió. */
   const announce = (
@@ -314,24 +329,27 @@ const WarTimers: React.FC<Props> = ({ startedAt, offset, canCall }) => {
   };
 
   // Each warning fires once, and only for what has an hour of its own: la
-  // jungla. El boss no se avisa solo -- se canta.
+  // jungla, y el arranque de la partida si se armó desde la preparación. El
+  // boss no se avisa solo -- se canta.
   useEffect(() => {
-    if (!jungle) return;
-    WARNINGS.forEach((warning, index) => {
-      const floor = WARNINGS[index + 1]?.at ?? 0;
-      if (jungle.remaining > warning.at || jungle.remaining <= floor) return;
+    for (const evento of [inicio, jungle]) {
+      if (!evento) continue;
+      WARNINGS.forEach((warning, index) => {
+        const floor = WARNINGS[index + 1]?.at ?? 0;
+        if (evento.remaining > warning.at || evento.remaining <= floor) return;
 
-      const key = `${jungle.key}@${warning.at}`;
-      if (fired.current.has(key)) return;
-      fired.current.add(key);
+        const key = `${evento.key}@${warning.at}`;
+        if (fired.current.has(key)) return;
+        fired.current.add(key);
 
-      announce(jungle.label, `en ${warning.label}`, 'jungla', {
-        tone: warning.tone,
-        buzz: warning.buzz,
-        tag: key,
+        announce(evento.label, `en ${warning.label}`, evento.key === 'inicio' ? 'partida' : 'jungla', {
+          tone: warning.tone,
+          buzz: warning.buzz,
+          tag: key,
+        });
       });
-    });
-  }, [warnings, jungle?.key, jungle?.remaining]);
+    }
+  }, [warnings, inicio?.remaining, jungle?.key, jungle?.remaining]);
 
   /** El grito que llega de otra pantalla, recogido cada pocos segundos. */
   useEffect(() => {
@@ -390,7 +408,9 @@ const WarTimers: React.FC<Props> = ({ startedAt, offset, canCall }) => {
     // Unless a warning is about to sound anyway: arming inside the last minute
     // would otherwise play the sample and the real thing on top of each other,
     // which lands as one muddled noise at the moment attention matters most.
-    const imminent = jungle !== null && jungle.remaining <= WARNINGS[0].at;
+    const imminent =
+      (jungle !== null && jungle.remaining <= WARNINGS[0].at) ||
+      (inicio !== null && inicio.remaining <= WARNINGS[0].at);
 
     if ((await abrirAudio()) && !imminent && audio.current) {
       sound(audio.current, WARNINGS[0].tone);
@@ -491,14 +511,29 @@ const WarTimers: React.FC<Props> = ({ startedAt, offset, canCall }) => {
       )}
 
       <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-4 flex items-center gap-4 flex-wrap">
-      <div>
-        <p className="text-[10px] uppercase tracking-wider text-slate-500">En guerra</p>
-        <p className="text-lg font-bold text-slate-200 tabular-nums leading-none">{clock(elapsed)}</p>
-        {/* Half an hour is the whole of it, so the end is a countdown too. */}
-        <p className="text-[10px] text-slate-500 tabular-nums mt-0.5">
-          termina en {clock(WAR_LENGTH - elapsed)}
-        </p>
-      </div>
+      {/* En preparación el reloj principal cuenta hacia el arranque, que es lo
+          único que está pasando; con la partida en marcha, lo transcurrido. */}
+      {enPreparacion ? (
+        <div>
+          <p className="text-[10px] uppercase tracking-wider" style={{ color: tinta('partida') }}>
+            <i className="fa-solid fa-hourglass-half mr-1"></i>
+            Preparación
+          </p>
+          <p className="text-lg font-bold text-slate-200 tabular-nums leading-none">
+            {clock(-elapsed)}
+          </p>
+          <p className="text-[10px] text-slate-500 tabular-nums mt-0.5">para que empiece la partida</p>
+        </div>
+      ) : (
+        <div>
+          <p className="text-[10px] uppercase tracking-wider text-slate-500">En guerra</p>
+          <p className="text-lg font-bold text-slate-200 tabular-nums leading-none">{clock(elapsed)}</p>
+          {/* Half an hour is the whole of it, so the end is a countdown too. */}
+          <p className="text-[10px] text-slate-500 tabular-nums mt-0.5">
+            termina en {clock(WAR_LENGTH - elapsed)}
+          </p>
+        </div>
+      )}
 
       <Reloj
         tono="jungla"

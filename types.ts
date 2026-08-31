@@ -357,9 +357,37 @@ export const WAR_SIDE_LABELS: Record<WarSide, string> = {
   defense: 'Defensa',
 };
 
-// Liga, ranked o un reto concertado contra un gremio concreto. Decidido al
-// iniciar la guerra, que es cuando quien la organiza ya lo sabe.
+// Liga, ranked o un reto concertado contra un gremio concreto. Se decide al
+// finalizar la guerra, que es cuando se escribe el acta.
 export type WarMatchType = 'league' | 'ranked' | 'custom';
+
+/**
+ * El cronómetro de la guerra en marcha, que ya no es un acta.
+ *
+ * Iniciar guerra sólo arranca los relojes: `startedAt` es el instante en que
+ * la partida empieza -- en el futuro si aún es fase de preparación -- y de él
+ * cuentan jungla, boss y el cuerno del bot. El acta se decide al finalizar:
+ * registrar con los desplegados de ese momento, o descartar.
+ */
+export interface WarSession {
+  id: string;
+  startedAt: string;
+}
+
+/** Las dos fases del juego, cada una con su cuenta atrás en pantalla. */
+export type WarPhase = 'preparacion' | 'partida';
+
+export const WAR_PHASE_LABELS: Record<WarPhase, string> = {
+  preparacion: 'Preparación',
+  partida: 'Partida',
+};
+
+/** Cuánto dura la cuenta atrás de cada fase, en minutos. Gemelo de PHASES en
+    server/war.js y de PREPARACION_S/PARTIDA_S en services/relojGuerra.ts. */
+export const WAR_PHASE_MINUTES: Record<WarPhase, number> = {
+  preparacion: 5,
+  partida: 30,
+};
 
 export const WAR_MATCH_TYPE_LABELS: Record<WarMatchType, string> = {
   league: 'Liga',
