@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import MarcaDeReloj from './MarcaDeReloj';
+import YouTubeVideo, { FuenteVideo } from './YouTubeVideo';
 import { enPalabras } from '../services/relojGuerra';
 import { agrupar } from '../services/marcas';
 
@@ -29,6 +30,12 @@ export interface Marca {
 
 interface Props {
   src: string | null;
+  /**
+   * Si la grabación vive en YouTube, el id de su vídeo, y `src` viene nulo.
+   * El resto del reproductor no distingue: la fachada de YouTubeVideo imita a
+   * un HTMLVideoElement, así que marcas, teclado y sincronía valen igual.
+   */
+  youtubeId?: string | null;
   /** Dónde cae el primer fotograma en tiempo de guerra. Sin esto no hay marcas. */
   offsetMs: number | null;
   marcas: Marca[];
@@ -58,9 +65,11 @@ const mmss = (s: number) => {
 };
 
 const Reproductor: React.FC<Props> = ({
-  src, offsetMs, marcas, onMarcar, onBorrarMarca, puedeBorrar, onSincronizar,
+  src, youtubeId, offsetMs, marcas, onMarcar, onBorrarMarca, puedeBorrar, onSincronizar,
 }) => {
-  const video = useRef<HTMLVideoElement>(null);
+  // La fuente que se maneja: el `<video>` de siempre, o la fachada de YouTube.
+  // Todo lo que hay debajo le habla por esta superficie común.
+  const video = useRef<FuenteVideo | null>(null);
   const caja = useRef<HTMLDivElement>(null);
   const [sonando, setSonando] = useState(false);
   const [posicion, setPosicion] = useState(0);
@@ -80,7 +89,10 @@ const Reproductor: React.FC<Props> = ({
 
   // --- HLS ------------------------------------------------------------------
   useEffect(() => {
-    const el = video.current;
+    // Con YouTube no hay HLS que enganchar: el iframe se trae su propio vídeo.
+    // Y como en esa rama no se pinta `<video>`, la referencia es la fachada.
+    if (youtubeId) return;
+    const el = video.current as HTMLVideoElement | null;
     if (!el || !src) return;
 
     // Safari lo lleva de fábrica; el resto necesita hls.js, que se baja sólo al
@@ -112,7 +124,7 @@ const Reproductor: React.FC<Props> = ({
       vivo = false;
       hls?.destroy();
     };
-  }, [src]);
+  }, [src, youtubeId]);
 
   useEffect(() => {
     const mirar = () => setPantallaCompleta(document.fullscreenElement === caja.current);
@@ -333,7 +345,8 @@ const Reproductor: React.FC<Props> = ({
 
   const progreso = duracion ? (posicion / duracion) * 100 : 0;
 
-  if (!src) return <p className="text-sm text-slate-400">Esta grabación ya no tiene vídeo.</p>;
+  if (!src && !youtubeId)
+    return <p className="text-sm text-slate-400">Esta grabación ya no tiene vídeo.</p>;
 
   return (
     /*
@@ -361,8 +374,44 @@ const Reproductor: React.FC<Props> = ({
           mandosVisibles ? '' : 'cursor-none'
         }`}
       >
+        {youtubeId ? (
+          /*
+            La caja recibe el clic, no el iframe: YouTubeVideo le quita el
+            ratón al iframe a propósito, para que los controles sean los de
+            aquí -- que son los que llevan las marcas -- y no dos barras
+            peleándose sobre el mismo vídeo. El pulso de tiempo sustituye a
+            los eventos del elemento.
+          */
+          <div
+            onClick={() => {
+              if (!mandosVisibles) {
+                despertar();
+                return;
+              }
+              alternar();
+            }}
+            className="w-full aspect-video cursor-pointer"
+          >
+            <YouTubeVideo
+              videoId={youtubeId}
+              className="w-full h-full"
+              registrar={(f) => {
+                video.current = f;
+              }}
+              onTiempo={(pos, dur, cargadoS) => {
+                setPosicion(pos);
+                if (dur) setDuracion(dur);
+                setCargado(cargadoS);
+              }}
+              onEstado={setSonando}
+              onError={setError}
+            />
+          </div>
+        ) : (
         <video
-          ref={video}
+          ref={(el) => {
+            video.current = el;
+          }}
           playsInline
           onClick={() => {
             // Con los mandos escondidos, el primer toque sólo los trae de
@@ -386,6 +435,7 @@ const Reproductor: React.FC<Props> = ({
           onError={() => setError('No se pudo reproducir el vídeo.')}
           className="w-full aspect-video cursor-pointer"
         />
+        )}
 
         {/*
           Los controles: una pieza OPACA que flota sobre el vídeo, no un

@@ -110,6 +110,7 @@ import {
   startVodSweeper,
   recuperarPendientes,
   reintentarVod,
+  registrarYoutube,
 } from './vods.js';
 import {
   listEvents,
@@ -1323,6 +1324,24 @@ app.get('/api/vods/:id/hls/:fichero', requireAuth, requirePermission('war.view')
 
 app.get('/api/war/wars/:id/vods', requireAuth, requirePermission('war.view'), asHandler(async (req, res) => {
   res.json(await vodsDeLaGuerra(req.params.id, req.user, req.permissions));
+}));
+
+// Traer una grabación que vive en YouTube, por su enlace. La misma fila y la
+// misma revisión que una subida, pero los bytes se quedan allí: no pasa por
+// tusd ni por el almacén, así que vale incluso sin VODS_HOOK_SECRET.
+app.post('/api/war/wars/:id/vods/youtube', requireAuth, requirePermission('war.vod.upload'), asHandler(async (req, res) => {
+  const out = await registrarYoutube({
+    user: req.user,
+    permisos: req.permissions,
+    warId: req.params.id,
+    playerId: req.body?.playerId || null,
+    url: req.body?.url,
+    duracionMs: req.body?.duracionMs ?? null,
+    offsetMs: req.body?.offsetMs ?? null,
+    confianza: req.body?.confianza ?? null,
+  });
+  if (!out.ok) return res.status(out.codigo).json({ error: out.motivo });
+  res.json(out);
 }));
 
 /**

@@ -111,6 +111,13 @@ const ElegirMosaico: React.FC<Props> = ({ candidatas, onCancelar, onVer }) => {
                 <span className={`flex-1 min-w-0 truncate text-sm ${puesta ? 'text-slate-100' : 'text-slate-300'}`}>
                   {v.nombre}
                 </span>
+                {v.youtubeId && (
+                  <i
+                    className="fa-brands fa-youtube text-xs text-red-400 shrink-0"
+                    title="Vive en YouTube"
+                    aria-label="Vive en YouTube"
+                  />
+                )}
                 {/*
                   El TRAMO de guerra que cubre, de principio a fin, y no el
                   arranque con la duración al lado. Es la pregunta que se hace

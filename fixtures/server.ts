@@ -86,6 +86,8 @@ interface VodFalso {
   expiraEn: string | null;
   subidoEn: string;
   calidades: { calidad: string; playlist: string }[];
+  /** Grabación que vive en YouTube: su vídeo, con calidades vacías. */
+  youtubeId?: string | null;
   // Como va la preparacion. El servidor de verdad resuelve `procesoParado` y
   // `procesoSegundos` en SQL, contra su propio reloj; aqui llegan puestos a
   // mano porque lo que hay que poder mirar es como se pinta cada caso.
@@ -259,6 +261,15 @@ const store: Store = {
       offsetConfianza: 'manual', fijado: true, expiraEn: null,
       subidoEn: vencimiento(-28),
       calidades: [{ calidad: 'origen', playlist: 'vod-2/origen.m3u8' }],
+    },
+    {
+      // La que vive en YouTube: publicada y sincronizada, así que entra al
+      // mosaico. El id es el vídeo de demostración de la API del iframe, que
+      // es embebible; el banco lo carga de verdad desde YouTube.
+      id: 'vod-yt', warId: fake.warRows[0].id, playerId: 'p-5',
+      estado: 'aprobado', duracionMs: 1_860_000, offsetMs: -240_000,
+      offsetConfianza: 'manual', fijado: false, expiraEn: null,
+      subidoEn: vencimiento(-15), calidades: [], youtubeId: 'M7lc1UVf-VE',
     },
     {
       // Esperando revisión: es lo que ve un oficial al entrar.
@@ -1247,6 +1258,34 @@ const ESCRITURAS: [string, RegExp, Ruta][] = [
       });
     }
     return { out: body.out ?? null, in: body.in ?? null, side, lane };
+  }],
+  // El enlace de YouTube: nace en «listo», como en el servidor de verdad, para
+  // que se pueda ensayar el camino entero de pegar → revisar → publicar.
+  ['POST', /^\/war\/wars\/([^/]+)\/vods\/youtube$/, (m, _req, body) => {
+    const enlace = String(body?.url ?? '');
+    const youtubeId =
+      enlace.match(/(?:youtu\.be\/|v=|\/(?:live|shorts|embed|v)\/)([A-Za-z0-9_-]{11})/)?.[1] ??
+      (/^[A-Za-z0-9_-]{11}$/.test(enlace.trim()) ? enlace.trim() : null);
+    if (!youtubeId) throw new Error('eso no parece un enlace de YouTube');
+    if (store.vods.some((v) => v.warId === m[1] && v.youtubeId === youtubeId)) {
+      throw new Error('ese vídeo ya está en el acta de esta guerra');
+    }
+    const vod: VodFalso = {
+      id: `vodyt-${store.vods.length + 1}`,
+      warId: m[1],
+      playerId: (body?.playerId as string) || fake.session.user.playerId,
+      estado: 'listo',
+      duracionMs: Number(body?.duracionMs) || null,
+      offsetMs: Number.isInteger(body?.offsetMs) ? (body.offsetMs as number) : null,
+      offsetConfianza: body?.confianza === 'manual' ? 'manual' : null,
+      fijado: false,
+      expiraEn: null,
+      subidoEn: new Date().toISOString(),
+      calidades: [],
+      youtubeId,
+    };
+    store.vods.push(vod);
+    return { ok: true, id: vod.id, youtubeId };
   }],
   ['POST', /^\/war\/wars\/([^/]+)\/marcas$/, (m, _req, body) => {
     const marca: MarcaFalsa = {

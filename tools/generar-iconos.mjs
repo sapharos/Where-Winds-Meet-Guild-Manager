@@ -61,7 +61,7 @@ const SALIDA_CATALOGO = join(raiz, 'styles', 'iconos.catalogo.generated.css');
  * el marcado entero contra las hojas generadas y canta lo que falte.
  */
 const REGULARES = ['star', 'calendar', 'circle', 'clock'];
-const MARCAS = ['discord', 'playstation'];
+const MARCAS = ['discord', 'playstation', 'youtube'];
 
 // fixtures/ queda fuera: es el banco de pruebas y no debe decidir qué pesa la
 // aplicación. Los iconos que inventa salen del catálogo, que se carga igual.

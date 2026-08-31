@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Sheet from './Sheet';
 import { Marca } from './Reproductor';
+import YouTubeVideo, { FuenteVideo } from './YouTubeVideo';
 import { SALTO_MS, comoReloj, correccion } from '../services/relojGuerra';
 
 /**
@@ -44,8 +45,17 @@ export interface VodEnMosaico {
   nombre: string;
   offsetMs: number;
   duracionMs: number;
-  /** Playlist ya resuelta para cada calidad disponible. */
+  /** Playlist ya resuelta para cada calidad disponible. Vacío si es de YouTube. */
   fuentes: { calidad: string; url: string }[];
+  /**
+   * Grabación que vive en YouTube: su vídeo, en vez de fuentes propias.
+   *
+   * Entra al mosaico por la misma puerta -- publicada, sincronizada y con
+   * duración -- y se maneja por la misma fachada que un `<video>`. La única
+   * diferencia honesta es la corrección de deriva: YouTube no acepta el ±3 %
+   * fino, así que a su mosaico sólo se le corrige a saltos.
+   */
+  youtubeId?: string | null;
 }
 
 interface Props {
@@ -161,13 +171,31 @@ const MosaicoVideo: React.FC<{
    * caja ES la pantalla, y el vídeo la llena sin que este componente se entere.
    */
   grande?: boolean;
-  registrar: (id: string, el: HTMLVideoElement | null) => void;
-}> = ({ vod, dentro, tGuerra, numero, grande, registrar }) => (
+  registrar: (id: string, el: FuenteVideo | null) => void;
+  /**
+   * Un reproductor de YouTube quedó listo (o se recreó al intercambiar): hay
+   * que retomarlo contra el reloj de guerra. El `<video>` de siempre lo hace
+   * por `loadedmetadata` en el efecto de enganche; el iframe avisa por aquí.
+   */
+  alListo: (vod: VodEnMosaico) => void;
+}> = ({ vod, dentro, tGuerra, numero, grande, registrar, alListo }) => (
   <div
     className={`relative bg-black ${
       grande ? 'w-full h-full flex items-center justify-center' : 'overflow-hidden'
     }`}
   >
+    {vod.youtubeId ? (
+      // Sin ratón para el iframe (lo apaga YouTubeVideo): los clics tienen que
+      // llegar a la miniatura de la columna y a los mandos de la grande.
+      <YouTubeVideo
+        videoId={vod.youtubeId}
+        className={
+          grande ? `w-full h-full ${dentro ? '' : 'opacity-20'}` : `w-full aspect-video ${dentro ? '' : 'opacity-20'}`
+        }
+        registrar={(f) => registrar(vod.id, f)}
+        onListo={() => alListo(vod)}
+      />
+    ) : (
     <video
       ref={(el) => registrar(vod.id, el)}
       playsInline
@@ -186,6 +214,7 @@ const MosaicoVideo: React.FC<{
           : `w-full aspect-video ${dentro ? '' : 'opacity-20'}`
       }
     />
+    )}
     <span className="absolute top-1 left-1 px-1.5 rounded bg-slate-950/85 text-[10px] text-slate-200 max-w-[90%] truncate">
       {numero} · {vod.nombre}
       {grande && <span className="text-amber-400"> · sonando</span>}
@@ -201,7 +230,10 @@ const MosaicoVideo: React.FC<{
 );
 
 const Multistream: React.FC<Props> = ({ vods, marcas, onClose }) => {
-  const videos = useRef(new Map<string, HTMLVideoElement>());
+  // Fachadas, no elementos: un `<video>` la cumple tal cual y un mosaico de
+  // YouTube la imita, así que el reloj maestro corrige a los dos sin mirar
+  // de qué clase es cada uno.
+  const videos = useRef(new Map<string, FuenteVideo>());
   /**
    * La que ocupa el hueco grande: se ve a 1080p y es la que suena.
    *
@@ -219,6 +251,13 @@ const Multistream: React.FC<Props> = ({ vods, marcas, onClose }) => {
   const [tGuerra, setTGuerra] = useState(0);
   const relojPuesto = useRef(false);
   const [silenciado, setSilenciado] = useState(false);
+  // Espejos para `alListo`: un reproductor de YouTube queda listo cuando
+  // quiere, mucho después del efecto que reparte el silencio, así que al
+  // llegar tiene que poder leer el estado vigente sin esperar un render.
+  const principalRef = useRef(principal);
+  principalRef.current = principal;
+  const silenciadoRef = useRef(silenciado);
+  silenciadoRef.current = silenciado;
 
   /**
    * La caja de la grande, que es lo que se pone a pantalla completa.
@@ -285,6 +324,26 @@ const Multistream: React.FC<Props> = ({ vods, marcas, onClose }) => {
     [],
   );
 
+  /**
+   * Un reproductor de YouTube quedó listo, quizá recreado por un intercambio:
+   * se retoma contra el reloj de guerra y hereda el reparto del audio.
+   *
+   * Es el gemelo del `volver()` del efecto de enganche, con la misma regla --
+   * el reloj sobrevive al intercambio, el nodo no -- más el silencio: el efecto
+   * que lo reparte ya corrió cuando este iframe ni existía.
+   */
+  const alListo = useCallback(
+    (vod: VodEnMosaico) => {
+      const el = videos.current.get(vod.id);
+      if (!el) return;
+      el.muted = silenciadoRef.current || vod.id !== principalRef.current;
+      if (!cubre(vod, relojRef.current)) return;
+      el.currentTime = (relojRef.current - vod.offsetMs) / 1000;
+      if (sonandoRef.current) void el.play().catch(() => {});
+    },
+    [cubre],
+  );
+
   // --- Enganchar cada fuente, con la calidad que le toque ahora -------------
 
   /**
@@ -302,9 +361,14 @@ const Multistream: React.FC<Props> = ({ vods, marcas, onClose }) => {
 
     // La grande a la mejor calidad; la columna a 360p. Seis mosaicos a 1080p
     // son ~30 Mbps por espectador y en los pequeños no se nota.
+    //
+    // Los de YouTube no pasan por aquí: no tienen fuentes que enganchar (la
+    // calidad la decide su propio reproductor) y su «retomar al recrearse» va
+    // por `alListo`, que es su equivalente del `loadedmetadata` de abajo.
     const cambian = vods
+      .filter((vod) => !vod.youtubeId)
       .map((vod) => {
-        const el = videos.current.get(vod.id);
+        const el = videos.current.get(vod.id) as HTMLVideoElement | undefined;
         const quiere = vod.id === principal ? 'origen' : '360p';
         const fuente = vod.fuentes.find((f) => f.calidad === quiere) ?? vod.fuentes[0];
         return { vod, el, fuente };
@@ -572,7 +636,7 @@ const Multistream: React.FC<Props> = ({ vods, marcas, onClose }) => {
    * saltaría por no encontrarla. Se comprueba que el registrado siga en el
    * documento, que es cierto exactamente cuando es el bueno.
    */
-  const registrar = useCallback((id: string, el: HTMLVideoElement | null) => {
+  const registrar = useCallback((id: string, el: FuenteVideo | null) => {
     if (el) {
       videos.current.set(id, el);
       return;
@@ -636,6 +700,7 @@ const Multistream: React.FC<Props> = ({ vods, marcas, onClose }) => {
               tGuerra={tGuerra}
               numero={vods.findIndex((v) => v.id === principal) + 1}
               registrar={registrar}
+              alListo={alListo}
             />
 
             <div
@@ -755,6 +820,7 @@ const Multistream: React.FC<Props> = ({ vods, marcas, onClose }) => {
                   tGuerra={tGuerra}
                   numero={vods.findIndex((x) => x.id === v.id) + 1}
                   registrar={registrar}
+                  alListo={alListo}
                 />
               </button>
             ))}

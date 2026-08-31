@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../services/authService';
 import Sheet from './Sheet';
 import PreparaVod from './PreparaVod';
+import PreparaYoutube from './PreparaYoutube';
 import Reproductor, { Marca } from './Reproductor';
 import Multistream, { VodEnMosaico } from './Multistream';
 import ElegirMosaico from './ElegirMosaico';
@@ -33,6 +34,14 @@ export interface Vod {
   expiraEn: string | null;
   subidoEn: string;
   calidades: VodCalidad[];
+  /**
+   * Grabación que vive en YouTube: el id de su vídeo, con `calidades` vacías.
+   *
+   * Existe para quien no puede subir 2 GB aquí pero ya tiene el vídeo en su
+   * canal. Pasa por la misma revisión y la misma sincronía; no caduca nunca
+   * porque no ocupa almacén, y por eso tampoco tiene sentido fijarla.
+   */
+  youtubeId: string | null;
   /**
    * Cómo va la preparación. Ver docs/VODS.md §8.
    *
@@ -150,7 +159,7 @@ const avanceDe = (vod: Vod): { texto: string | null; clase: string; barra: boole
  * mirando la lista, así que la respuesta va en la fila.
  */
 const porQueNoEntraAlMosaico = (vod: Vod): string | null => {
-  if (vod.estado !== 'aprobado' || !vod.calidades.length) return null;
+  if (vod.estado !== 'aprobado' || (!vod.calidades.length && !vod.youtubeId)) return null;
   if (vod.offsetMs === null) {
     return 'Sin sincronizar: no puede entrar en el mosaico. Ábrela con «Ver», pausa donde se lea el cronómetro del juego y dile qué marca.';
   }
@@ -180,6 +189,8 @@ const WarVods: React.FC<Props> = ({
   const [progreso, setProgreso] = useState<ProgresoSubida | null>(null);
   const [aviso, setAviso] = useState<{ texto: string; ok: boolean } | null>(null);
   const [preparando, setPreparando] = useState<File | null>(null);
+  /** La hoja de traer un enlace de YouTube, hermana de la preparación. */
+  const [pegandoYoutube, setPegandoYoutube] = useState(false);
   /**
    * De quién es la grabación que se va a subir. Vacío significa «mía».
    *
@@ -316,6 +327,32 @@ const WarVods: React.FC<Props> = ({
     }
   };
 
+  /**
+   * El enlace de YouTube: mismo destino que una subida, sin pasar por tusd.
+   * `deQuien` vale igual que arriba, y se limpia igual: dejarlo puesto haría
+   * que el siguiente enlace quedara a nombre del mismo sin que nadie lo pida.
+   */
+  const enviarYoutube = async (datos: {
+    url: string;
+    duracionMs: number;
+    offsetMs: number | null;
+    confianza: 'manual' | null;
+  }) => {
+    await api(`/war/wars/${warId}/vods/youtube`, {
+      method: 'POST',
+      body: JSON.stringify({ ...datos, ...(deQuien ? { playerId: deQuien } : {}) }),
+    });
+    setPegandoYoutube(false);
+    setAviso({
+      texto: deQuien
+        ? `Enlace añadido a nombre de ${nombres[deQuien] ?? 'ese miembro'}. Queda publicarlo.`
+        : 'Enlace añadido. Queda esperar a que un oficial lo publique.',
+      ok: true,
+    });
+    setDeQuien('');
+    await cargar();
+  };
+
   const resolver = async (vod: Vod, aprobado: boolean) => {
     await api(`/vods/${vod.id}/resolve`, { method: 'POST', body: JSON.stringify({ aprobado }) });
     await cargar();
@@ -413,7 +450,13 @@ const WarVods: React.FC<Props> = ({
    * las demás, así que meterla sería alinearla al azar.
    */
   const paraMosaico: VodEnMosaico[] = (vods ?? [])
-    .filter((v) => v.estado === 'aprobado' && v.offsetMs !== null && v.duracionMs && v.calidades.length)
+    .filter(
+      (v) =>
+        v.estado === 'aprobado' &&
+        v.offsetMs !== null &&
+        v.duracionMs &&
+        (v.calidades.length || v.youtubeId),
+    )
     // Sin recortar a las primeras: ahora se eligen, y para elegir hay que
     // verlas todas. El tope lo aplica el selector sobre lo MARCADO.
     .map((v) => ({
@@ -425,6 +468,7 @@ const WarVods: React.FC<Props> = ({
       fuentes: v.calidades
         .map((c) => ({ calidad: c.calidad, url: urlDe(v, c.calidad)! }))
         .filter((f) => f.url),
+      youtubeId: v.youtubeId,
     }));
 
   /**
@@ -436,7 +480,9 @@ const WarVods: React.FC<Props> = ({
    */
   const fueraDelMosaico = (vods ?? []).filter((v) => porQueNoEntraAlMosaico(v) !== null).length;
 
-  const aprobadas = (vods ?? []).filter((v) => v.estado === 'aprobado' && v.calidades.length).length;
+  const aprobadas = (vods ?? []).filter(
+    (v) => v.estado === 'aprobado' && (v.calidades.length || v.youtubeId),
+  ).length;
 
   const pendientes = vods?.filter((v) => v.estado === 'listo').length ?? 0;
 
@@ -520,6 +566,21 @@ const WarVods: React.FC<Props> = ({
             >
               <i className="fa-solid fa-upload" aria-hidden="true" />
               {deQuien ? `Subir la de ${nombres[deQuien] ?? 'ese miembro'}` : 'Subir la mía'}
+            </button>
+            {/* Para quien no puede con la subida: el vídeo se queda en su
+                canal de YouTube y aquí sólo viaja el enlace. «Subir como»
+                también le vale. */}
+            <button
+              type="button"
+              onClick={() => {
+                setAviso(null);
+                setPegandoYoutube(true);
+              }}
+              title="Añadir una grabación que ya está subida a YouTube, por su enlace"
+              className="px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium flex items-center gap-2"
+            >
+              <i className="fa-brands fa-youtube" aria-hidden="true" />
+              Traer de YouTube
             </button>
             <input
               ref={archivo}
@@ -607,7 +668,8 @@ const WarVods: React.FC<Props> = ({
           {vods.map((vod) => {
             const etiqueta = ETIQUETA[vod.estado];
             const mia = vod.playerId === miPlayerId;
-            const reproducible = vod.calidades.length > 0 && vod.estado !== 'caducado';
+            const reproducible =
+              (vod.calidades.length > 0 || Boolean(vod.youtubeId)) && vod.estado !== 'caducado';
             const avance = avanceDe(vod);
             // Reintentar la suya, quien la subió; la de otro, quien aprueba --
             // el servidor manda igual, esto sólo evita enseñar un botón que va
@@ -646,6 +708,14 @@ const WarVods: React.FC<Props> = ({
                       <span className="tabular-nums">lleva {desdeHace(vod.procesoSegundos)}</span>
                     )}
                     {duracion(vod.duracionMs) && <span>{duracion(vod.duracionMs)}</span>}
+                    {/* De dónde sale el vídeo. Importa por dos cosas que se
+                        preguntan mirando la lista: no caduca, y verla es abrir
+                        el reproductor de YouTube. */}
+                    {vod.youtubeId && (
+                      <span className="text-red-400">
+                        <i className="fa-brands fa-youtube" aria-hidden="true" /> YouTube
+                      </span>
+                    )}
                     {vod.fijado && (
                       <span className="text-sky-400">
                         <i className="fa-solid fa-thumbtack" aria-hidden="true" /> fijada
@@ -786,7 +856,9 @@ const WarVods: React.FC<Props> = ({
                     </button>
                   )}
 
-                  {puedeFijar && vod.estado === 'aprobado' && (
+                  {/* Fijar salva de la retención, y un enlace de YouTube no
+                      caduca: el botón sólo confundiría. */}
+                  {puedeFijar && vod.estado === 'aprobado' && !vod.youtubeId && (
                     <button
                       type="button"
                       onClick={() => void fijar(vod)}
@@ -813,6 +885,14 @@ const WarVods: React.FC<Props> = ({
           fichero={preparando}
           onCancelar={() => setPreparando(null)}
           onListo={(datos) => void enviar(preparando, datos)}
+        />
+      )}
+
+      {pegandoYoutube && (
+        <PreparaYoutube
+          deQuien={deQuien ? (nombres[deQuien] ?? deQuien) : null}
+          onCancelar={() => setPegandoYoutube(false)}
+          onEnviar={enviarYoutube}
         />
       )}
 
@@ -846,6 +926,7 @@ const WarVods: React.FC<Props> = ({
                 viendo.calidades.find((x) => x.calidad === 'origen') ?? viendo.calidades[0];
               return c ? `/api/vods/${viendo.id}/hls/${c.playlist.split(/[\\/]/).pop()}` : null;
             })()}
+            youtubeId={viendo.youtubeId}
             offsetMs={viendo.offsetMs}
             marcas={marcas}
             onMarcar={(tMs, texto, hito) => void marcar(tMs, texto, hito, viendo.id)}

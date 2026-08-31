@@ -214,6 +214,108 @@ export async function registrarSubida({
   return id;
 }
 
+// --- Enlaces de YouTube ------------------------------------------------------
+
+/**
+ * El id del vídeo, venga como venga escrito el enlace.
+ *
+ * La gente pega lo que le da el botón de compartir de SU aplicación: youtu.be
+ * con parámetros de rastreo, watch?v= del navegador, /live/ si fue un directo,
+ * /shorts/ desde el teléfono. Pedir «el id» a secas sería pedirle a cada uno
+ * que sepa qué parte del enlace es, así que se aceptan todas las formas y se
+ * valida lo único que importa: once caracteres del alfabeto de YouTube.
+ */
+export function extraerYoutubeId(texto) {
+  const crudo = String(texto ?? '').trim();
+  if (/^[A-Za-z0-9_-]{11}$/.test(crudo)) return crudo;
+  let url;
+  try {
+    url = new URL(crudo);
+  } catch {
+    return null;
+  }
+  const host = url.hostname.replace(/^(www|m|music)\./, '');
+  let id = null;
+  if (host === 'youtu.be') {
+    id = url.pathname.slice(1).split('/')[0];
+  } else if (host === 'youtube.com') {
+    id = url.pathname === '/watch'
+      ? url.searchParams.get('v')
+      : (url.pathname.match(/^\/(?:live|shorts|embed|v)\/([^/?]+)/)?.[1] ?? null);
+  }
+  return id && /^[A-Za-z0-9_-]{11}$/.test(id) ? id : null;
+}
+
+/**
+ * Traer una grabación que vive en YouTube, por su enlace.
+ *
+ * Existe porque a algunos no les sale subir 2 GB aquí -- conexión que se cae,
+ * navegador que no puede -- y el vídeo ya lo tienen publicado en su canal. La
+ * fila que nace es la de siempre: pasa por la misma revisión, se sincroniza
+ * igual y lleva las mismas marcas. Lo que cambia es que los bytes se quedan en
+ * YouTube: ni tusd, ni ffmpeg, ni retención -- un enlace guardado no ocupa.
+ *
+ * Por eso tampoco depende de `vodsHabilitados()`: eso apaga el almacén, y aquí
+ * no hay almacén por el que pasar.
+ *
+ * Nace en `listo` directamente -- no hay nada que preparar -- y la duración y
+ * la sincronía llegan del navegador, que es el único que puede preguntárselas
+ * al reproductor de YouTube sin llave de API.
+ */
+export async function registrarYoutube({
+  user, permisos = [], warId, playerId, url, duracionMs, offsetMs, confianza,
+}) {
+  if (!user) return { ok: false, codigo: 401, motivo: 'sin sesión' };
+  if (!permisos.includes('war.vod.upload')) {
+    return { ok: false, codigo: 403, motivo: 'sin permiso para subir grabaciones' };
+  }
+  if (!esId(warId)) return { ok: false, codigo: 400, motivo: 'falta la guerra' };
+
+  const youtubeId = extraerYoutubeId(url);
+  if (!youtubeId) {
+    return { ok: false, codigo: 400, motivo: 'eso no parece un enlace de YouTube' };
+  }
+
+  // Las mismas reglas que la subida: la de otro sólo la trae quien aprueba, y
+  // hay que haber peleado esa guerra.
+  const dueño = playerId || user.playerId;
+  if (!dueño) return { ok: false, codigo: 400, motivo: 'la cuenta no tiene ficha en el roster' };
+  if (dueño !== user.playerId && !permisos.includes('war.vod.approve')) {
+    return { ok: false, codigo: 403, motivo: 'sólo puedes traer tus propias grabaciones' };
+  }
+  if (!(await participoEnLaGuerra(dueño, warId))) {
+    return { ok: false, codigo: 403, motivo: 'no consta que jugaras esa guerra' };
+  }
+
+  const repetido = await pool.query(
+    `SELECT 1 FROM war_vods WHERE war_id = $1 AND youtube_id = $2`,
+    [warId, youtubeId],
+  );
+  if (repetido.rows.length) {
+    return { ok: false, codigo: 409, motivo: 'ese vídeo ya está en el acta de esta guerra' };
+  }
+
+  const offset = Number.isInteger(offsetMs) ? offsetMs : null;
+  const id = `vodyt_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+  // `expira_en` queda nulo a conciencia: la retención existe para liberar
+  // nuestro almacén, y un enlace no ocupa nada. Si YouTube lo borra, el acta
+  // enseñará el error del reproductor, que es la verdad disponible.
+  await pool.query(
+    `INSERT INTO war_vods (id, war_id, player_id, estado, youtube_id, duracion_ms,
+                           offset_ms, offset_confianza, expira_en)
+     VALUES ($1, $2, $3, 'listo', $4, $5, $6, $7, NULL)`,
+    [
+      id, warId, dueño, youtubeId,
+      Number.isInteger(duracionMs) && duracionMs > 0 ? duracionMs : null,
+      offset,
+      offset !== null && CONFIANZAS.includes(confianza) ? confianza : null,
+    ],
+  );
+  // Igual que al quedar lista una subida: es ahora cuando hay algo que mirar.
+  sinRomperNada(avisarRevision(id));
+  return { ok: true, id, youtubeId };
+}
+
 // --- La cola ----------------------------------------------------------------
 
 /**
@@ -978,6 +1080,7 @@ export async function vodsDeLaGuerra(warId, user, permisos = []) {
   const puedeAprobar = permisos.includes('war.vod.approve');
   const { rows } = await pool.query(
     `SELECT v.id, v.war_id AS "warId", v.player_id AS "playerId", v.estado,
+            v.youtube_id AS "youtubeId",
             v.duracion_ms AS "duracionMs", v.offset_ms AS "offsetMs",
             v.offset_confianza AS "offsetConfianza", v.fijado,
             v.expira_en AS "expiraEn", v.subido_en AS "subidoEn",
@@ -1125,7 +1228,13 @@ export async function borrarVod(id) {
 export async function fijarVod(id, fijado) {
   const expira = fijado ? null : new Date(Date.now() + DIAS * 24 * 3600 * 1000);
   const { rows } = await pool.query(
-    `UPDATE war_vods SET fijado = $2, expira_en = $3 WHERE id = $1 RETURNING id, fijado`,
+    // Un enlace de YouTube no caduca nunca: la retención libera NUESTRO
+    // almacén, y ahí no hay nada suyo. Sin la guarda, soltarle el fijado le
+    // pondría una cuenta atrás que la barrida ni siquiera mira.
+    `UPDATE war_vods
+        SET fijado = $2,
+            expira_en = CASE WHEN youtube_id IS NULL THEN $3::timestamptz ELSE NULL END
+      WHERE id = $1 RETURNING id, fijado`,
     [id, Boolean(fijado), expira],
   );
   return rows[0] || null;

@@ -457,6 +457,44 @@ una duración al lado obliga a sumarlos de cabeza para cada pareja.
 
 ---
 
+## 5b. Grabaciones que viven en YouTube
+
+A algunos miembros no les sale subir 2 GB aquí --conexión que se corta,
+navegador que no puede-- pero el vídeo ya lo tienen publicado en su canal. Para
+ellos existe **«Traer de YouTube»**: pegan el enlace y nace la misma fila de
+siempre, con la misma revisión, la misma sincronía manual y las mismas marcas.
+Sólo cambia dónde viven los bytes.
+
+Decisiones y sus porqués:
+
+- **No pasa por tusd ni por ffmpeg, y funciona sin `VODS_HOOK_SECRET`.** No hay
+  bytes que recibir ni preparar: la fila nace directamente en `listo`.
+- **No caduca y no se puede fijar.** La retención existe para liberar nuestro
+  almacén, y un enlace no ocupa nada. Si YouTube borra el vídeo, el reproductor
+  lo dice («ese vídeo ya no existe / el dueño no permite verlo fuera de
+  YouTube»), que es la verdad disponible.
+- **La duración la lee el navegador del propio reproductor de YouTube** al
+  pegar el enlace (hay que darle al play un momento: hasta que arranca,
+  YouTube no la dice). Sin llave de la Data API no hay otra vía, y sin duración
+  no se sabe qué tramo cubre.
+- **La sincronía es siempre manual.** El OCR lee fotogramas y un iframe de otro
+  dominio no los deja leer. El formulario es el mismo `MarcaDeReloj` de
+  siempre, ofrecido al pegar el enlace y corregible después desde «Ver».
+- **En el reproductor y en el mosaico se maneja por una fachada**
+  (`components/YouTubeVideo.tsx`) que imita a un `HTMLVideoElement`: buscar,
+  pausar, silenciar, preguntar la hora. El resto del código no distingue de
+  dónde vienen los bytes. La diferencia honesta está en la deriva del mosaico:
+  YouTube sólo acepta velocidades a peldaños, así que la corrección fina del
+  ±3 % no existe para estos mosaicos y la sincronía se mantiene sólo a saltos
+  (uno cada varios minutos, cuando pasa el umbral).
+- **El iframe no recibe el ratón** salvo en la pantalla de pegar el enlace: los
+  controles son los nuestros --que llevan las marcas-- y los clics tienen que
+  llegar a las miniaturas de la columna.
+- **Duplicados**: el mismo vídeo no puede entrar dos veces en la misma guerra
+  (`war_id + youtube_id`).
+
+---
+
 ## 6. Datos
 
 Dos tablas nuevas, ningún cambio en las existentes:

@@ -854,6 +854,12 @@ ALTER TABLE war_vods ADD COLUMN IF NOT EXISTS proceso_error  TEXT;
 ALTER TABLE war_vods ADD COLUMN IF NOT EXISTS aviso_revision_en TIMESTAMPTZ;
 ALTER TABLE war_vods ADD COLUMN IF NOT EXISTS aviso_aprobada_en TIMESTAMPTZ;
 
+-- Grabación que vive en YouTube en vez de en el almacén: quien no puede subir
+-- 2 GB aquí la sube a su canal y trae el enlace. La fila es la misma --
+-- revisión, sincronía y marcas -- pero ruta y calidades quedan vacías, no pasa
+-- nada por tusd ni ffmpeg, y la retención no la toca: no hay bytes nuestros.
+ALTER TABLE war_vods ADD COLUMN IF NOT EXISTS youtube_id TEXT;
+
 -- Las calidades de un mismo VOD, cada una con su playlist de HLS.
 --
 -- Tabla aparte y no columnas porque no llegan a la vez: el original se
