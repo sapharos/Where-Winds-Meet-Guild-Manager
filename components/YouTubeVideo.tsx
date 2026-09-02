@@ -35,6 +35,8 @@ export interface FuenteVideo {
   readonly duration: number;
   readonly paused: boolean;
   muted: boolean;
+  /** De 0 a 1, como un `<video>`. La fachada traduce a la escala de YouTube. */
+  volume: number;
   playbackRate: number;
   play(): Promise<void>;
   pause(): void;
@@ -205,6 +207,13 @@ const YouTubeVideo: React.FC<Props> = ({
                 set muted(v: boolean) {
                   if (v) player.mute?.();
                   else player.unMute?.();
+                },
+                get volume() {
+                  // YouTube habla en 0-100; el resto de la casa, en 0-1.
+                  return (player.getVolume?.() ?? 100) / 100;
+                },
+                set volume(v: number) {
+                  player.setVolume?.(Math.round(Math.max(0, Math.min(1, v)) * 100));
                 },
                 get playbackRate() {
                   return player.getPlaybackRate?.() ?? 1;

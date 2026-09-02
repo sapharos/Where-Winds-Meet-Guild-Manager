@@ -29,7 +29,14 @@ export interface Marca {
 }
 
 interface Props {
-  src: string | null;
+  src?: string | null;
+  /**
+   * Todas las calidades disponibles, para poder cambiar entre ellas: el
+   * original (hasta 1080p) y la copia de 360p, que pesa poco y aguanta una
+   * conexión floja. Con una sola no se ofrece nada; con varias aparece el
+   * botón de calidad. `src` queda como el camino de una sola fuente.
+   */
+  fuentes?: { calidad: string; url: string }[];
   /**
    * Si la grabación vino de YouTube, el id de su vídeo -- el RESPALDO, no el
    * camino preferido: con `src` (la copia ya traída al almacén) se reproduce
@@ -66,8 +73,15 @@ const mmss = (s: number) => {
   return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 };
 
+/**
+ * Cómo se llama cada calidad en el botón. «origen» es la copia de hasta 1080p
+ * -- que es como la pide todo el mundo --; lo demás ya se llama por su altura.
+ */
+const NOMBRE_CALIDAD: Record<string, string> = { origen: '1080p' };
+const nombreDe = (calidad: string) => NOMBRE_CALIDAD[calidad] ?? calidad;
+
 const Reproductor: React.FC<Props> = ({
-  src, youtubeId, offsetMs, marcas, onMarcar, onBorrarMarca, puedeBorrar, onSincronizar,
+  src, fuentes, youtubeId, offsetMs, marcas, onMarcar, onBorrarMarca, puedeBorrar, onSincronizar,
 }) => {
   // La fuente que se maneja: el `<video>` de siempre, o la fachada de YouTube.
   // Todo lo que hay debajo le habla por esta superficie común.
@@ -77,6 +91,15 @@ const Reproductor: React.FC<Props> = ({
   const [posicion, setPosicion] = useState(0);
   const [duracion, setDuracion] = useState(0);
   const [silenciado, setSilenciado] = useState(false);
+  const [volumen, setVolumen] = useState(1);
+  /** La calidad elegida a mano; null es «la mejor que haya». */
+  const [calidad, setCalidad] = useState<string | null>(null);
+  /**
+   * Dónde iba y si sonaba, para retomarlo tras cambiar de calidad: cambiar de
+   * fuente es volver a abrir el vídeo desde cero, y sin esto el cambio te
+   * devolvía al minuto cero y en pausa -- o sea, nadie iba a usarlo dos veces.
+   */
+  const reanudar = useRef<{ t: number; sonando: boolean } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [texto, setTexto] = useState('');
   const [hito, setHito] = useState(false);
@@ -89,18 +112,39 @@ const Reproductor: React.FC<Props> = ({
   const [mandosVisibles, setMandosVisibles] = useState(true);
   const ocultar = useRef<number | null>(null);
 
+  /**
+   * La fuente que se reproduce ahora: la calidad elegida si hay lista, la
+   * mejor (el original) si no se ha elegido nada, y `src` en el camino viejo
+   * de una sola fuente.
+   */
+  const activa = useMemo(() => {
+    if (!fuentes?.length) return null;
+    return (
+      fuentes.find((f) => f.calidad === calidad) ??
+      fuentes.find((f) => f.calidad === 'origen') ??
+      fuentes[0]
+    );
+  }, [fuentes, calidad]);
+  const srcActivo = activa?.url ?? src ?? null;
+
+  const cambiarCalidad = useCallback((nueva: string) => {
+    const el = video.current;
+    if (el) reanudar.current = { t: el.currentTime, sonando: !el.paused };
+    setCalidad(nueva);
+  }, []);
+
   // --- HLS ------------------------------------------------------------------
   useEffect(() => {
-    // Sin `src` no hay HLS que enganchar: es el modo enlace de YouTube, donde
+    // Sin fuente no hay HLS que enganchar: es el modo enlace de YouTube, donde
     // el iframe se trae su propio vídeo y la referencia es la fachada.
-    if (!src) return;
+    if (!srcActivo) return;
     const el = video.current as HTMLVideoElement | null;
     if (!el) return;
 
     // Safari lo lleva de fábrica; el resto necesita hls.js, que se baja sólo al
     // abrir un vídeo y no en el paquete de todo el mundo.
     if (el.canPlayType('application/vnd.apple.mpegurl')) {
-      el.src = src;
+      el.src = srcActivo;
       return;
     }
     let hls: { destroy: () => void } | null = null;
@@ -119,14 +163,14 @@ const Reproductor: React.FC<Props> = ({
       if (!vivo || !w.Hls?.isSupported()) return;
       const i = new w.Hls();
       hls = i;
-      i.loadSource(src);
+      i.loadSource(srcActivo);
       i.attachMedia(el);
     })().catch((e) => setError(e.message));
     return () => {
       vivo = false;
       hls?.destroy();
     };
-  }, [src, youtubeId]);
+  }, [srcActivo, youtubeId]);
 
   useEffect(() => {
     const mirar = () => setPantallaCompleta(document.fullscreenElement === caja.current);
@@ -295,6 +339,18 @@ const Reproductor: React.FC<Props> = ({
           el.muted = !el.muted;
           setSilenciado(el.muted);
         },
+        // El volumen fino, como en cualquier reproductor. Subir también quita
+        // el silencio: nadie sube el volumen para seguir sin oír.
+        ArrowUp: () => {
+          el.volume = Math.min(1, el.volume + 0.1);
+          el.muted = false;
+          setVolumen(el.volume);
+          setSilenciado(false);
+        },
+        ArrowDown: () => {
+          el.volume = Math.max(0, el.volume - 0.1);
+          setVolumen(el.volume);
+        },
         n: () => saltarMarca(1),
         p: () => saltarMarca(-1),
         // Comentar. Es lo que hace posible marcar sin salir de pantalla
@@ -347,7 +403,7 @@ const Reproductor: React.FC<Props> = ({
 
   const progreso = duracion ? (posicion / duracion) * 100 : 0;
 
-  if (!src && !youtubeId)
+  if (!srcActivo && !youtubeId)
     return <p className="text-sm text-slate-400">Esta grabación ya no tiene vídeo.</p>;
 
   return (
@@ -376,7 +432,7 @@ const Reproductor: React.FC<Props> = ({
           mandosVisibles ? '' : 'cursor-none'
         }`}
       >
-        {!src && youtubeId ? (
+        {!srcActivo && youtubeId ? (
           /*
             El respaldo embebido, sólo cuando no hay copia en el almacén.
 
@@ -430,7 +486,21 @@ const Reproductor: React.FC<Props> = ({
           }}
           onPlay={() => setSonando(true)}
           onPause={() => setSonando(false)}
-          onLoadedMetadata={(e) => setDuracion(e.currentTarget.duration)}
+          onLoadedMetadata={(e) => {
+            setDuracion(e.currentTarget.duration);
+            // Si esto es un cambio de calidad, se retoma donde iba: la fuente
+            // nueva abre desde cero, pero quien mira no cambió de momento.
+            const r = reanudar.current;
+            if (r) {
+              reanudar.current = null;
+              e.currentTarget.currentTime = r.t;
+              if (r.sonando) void e.currentTarget.play().catch(() => {});
+            }
+          }}
+          onVolumeChange={(e) => {
+            setVolumen(e.currentTarget.volume);
+            setSilenciado(e.currentTarget.muted);
+          }}
           onTimeUpdate={(e) => setPosicion(e.currentTarget.currentTime)}
           onProgress={(e) => {
             const b = e.currentTarget.buffered;
@@ -584,13 +654,38 @@ const Reproductor: React.FC<Props> = ({
               </span>
             )}
 
+            {/*
+              El cambio de calidad, sólo cuando hay entre qué elegir. Un botón
+              de texto que enseña la puesta y rota a la siguiente: con dos
+              calidades es un interruptor, y un menú para dos opciones es un
+              clic de más.
+            */}
+            {fuentes && fuentes.length > 1 && activa && (
+              <button
+                type="button"
+                onClick={() => {
+                  const i = fuentes.findIndex((f) => f.calidad === activa.calidad);
+                  cambiarCalidad(fuentes[(i + 1) % fuentes.length].calidad);
+                }}
+                aria-label="Cambiar la calidad del vídeo"
+                title={`Calidad: ${nombreDe(activa.calidad)} · pulsa para cambiar`}
+                className="min-w-tap rounded px-1.5 text-[11px] font-bold tabular-nums text-slate-300 hover:bg-slate-800 hover:text-white"
+              >
+                {nombreDe(activa.calidad)}
+              </button>
+            )}
+
             <button
               type="button"
               onClick={() => {
                 const el = video.current;
                 if (!el) return;
                 el.muted = !el.muted;
+                // Quitar el silencio con el volumen a cero seguiría sin oírse
+                // y parecería que el botón no hace nada.
+                if (!el.muted && el.volume < 0.05) el.volume = 0.5;
                 setSilenciado(el.muted);
+                setVolumen(el.volume);
               }}
               aria-label={silenciado ? 'Quitar el silencio' : 'Silenciar'}
               className="min-w-tap rounded text-slate-300 hover:bg-slate-800 hover:text-white"
@@ -600,6 +695,31 @@ const Reproductor: React.FC<Props> = ({
                 aria-hidden="true"
               />
             </button>
+            {/*
+              El nivel, no sólo el interruptor. Oculto en pantallas estrechas:
+              ahí el volumen lo llevan los botones físicos del teléfono -- iOS
+              directamente ignora `volume` -- y el hueco de los mandos es
+              escaso.
+            */}
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={silenciado ? 0 : volumen}
+              onChange={(e) => {
+                const el = video.current;
+                if (!el) return;
+                const v = Number(e.target.value);
+                el.volume = v;
+                el.muted = v === 0;
+                setVolumen(v);
+                setSilenciado(el.muted);
+              }}
+              aria-label="Volumen"
+              title="Volumen (↑ ↓)"
+              className="hidden sm:block w-20 accent-amber-500 cursor-pointer"
+            />
             <button
               type="button"
               onClick={alternarPantalla}
@@ -640,7 +760,7 @@ const Reproductor: React.FC<Props> = ({
       {/* La columna de al lado. En móvil vuelve a caer debajo, sin más. */}
       <aside className="space-y-3 mt-3 xl:mt-0 xl:w-72 xl:shrink-0">
       <p className="text-[11px] text-slate-600">
-        Espacio reproduce · ← → 5 s · J L 10 s · N P entre marcas · C comentar · M silencio · F pantalla completa
+        Espacio reproduce · ← → 5 s · J L 10 s · ↑ ↓ volumen · N P entre marcas · C comentar · M silencio · F pantalla completa
       </p>
 
       {/*

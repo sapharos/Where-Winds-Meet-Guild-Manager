@@ -942,13 +942,11 @@ const WarVods: React.FC<Props> = ({
           onClose={() => setViendo(null)}
         >
           <Reproductor
-            // La mejor calidad que haya: el original si está, y si no la de
-            // 360p, que llega antes.
-            src={(() => {
-              const c =
-                viendo.calidades.find((x) => x.calidad === 'origen') ?? viendo.calidades[0];
-              return c ? `/api/vods/${viendo.id}/hls/${c.playlist.split(/[\\/]/).pop()}` : null;
-            })()}
+            // Todas las calidades que haya: el reproductor abre la mejor y
+            // ofrece cambiar a la de 360p, que aguanta una conexión floja.
+            fuentes={viendo.calidades
+              .map((c) => ({ calidad: c.calidad as string, url: urlDe(viendo, c.calidad) }))
+              .filter((f): f is { calidad: string; url: string } => Boolean(f.url))}
             youtubeId={viendo.youtubeId}
             offsetMs={viendo.offsetMs}
             marcas={marcas}
