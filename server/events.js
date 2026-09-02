@@ -149,6 +149,17 @@ function limpiar(body) {
     throw Object.assign(new Error('la encuesta no puede cerrarse antes de abrirse'), { status: 400 });
   }
 
+  // Publicar después de empezar es programar algo que nunca va a pasar: el
+  // reloj no convoca lo que ya arrancó. Se dice aquí, al guardar, que es
+  // cuando todavía se puede corregir -- descubrirlo esperando un mensaje que
+  // no llega costó una prueba entera.
+  if (opensAt && opensAt >= startsAt) {
+    throw Object.assign(
+      new Error('la publicación tiene que ir antes de que empiece el evento'),
+      { status: 400 },
+    );
+  }
+
   return {
     kind,
     title,

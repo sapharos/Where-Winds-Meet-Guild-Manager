@@ -372,6 +372,12 @@ export async function asegurarEventos({ semanas = 4, ahora = new Date() } = {}) 
  * miraba nadie -- el evento decía «se publicará» en la pantalla y se moría en
  * silencio esperando un botón. Sin fecha de apertura un evento suelto sigue
  * siendo manual: se publica cuando alguien lo publica.
+ *
+ * Una encuesta que ya empezó no se publica -- preguntar quién va a lo que está
+ * pasando no es una convocatoria -- pero un aviso sí, mientras dure: anunciar
+ * la fiesta que empezó hace cinco minutos sigue siendo anunciarla, y el reloj
+ * pasa cada cinco, así que sin este margen un aviso pegado a su hora podía
+ * caerse entre dos pasadas y no salir nunca.
  */
 export async function pendientesDePublicar({ ahora = new Date() } = {}) {
   const { rows } = await pool.query(
@@ -381,7 +387,8 @@ export async function pendientesDePublicar({ ahora = new Date() } = {}) {
         AND e.cancelled_at IS NULL
         AND (s.auto_publish OR (e.series_id IS NULL AND e.opens_at IS NOT NULL))
         AND (e.opens_at IS NULL OR e.opens_at <= $2)
-        AND e.starts_at > $2
+        AND (e.starts_at > $2
+             OR (e.poll = false AND e.starts_at + make_interval(mins => e.minutes) > $2))
       ORDER BY e.starts_at`,
     [GUILD_ID, ahora],
   );

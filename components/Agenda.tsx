@@ -1528,7 +1528,7 @@ const FormularioEvento: React.FC<{
               onChange={(e) => setDatos({ ...datos, opensAt: e.target.value })}
             />
             <p className="text-meta text-slate-500 mt-1">
-              Vacío: se publica a mano, con el botón.
+              Antes de que empiece. Vacío: se publica a mano, con el botón.
             </p>
           </div>
           {datos.poll && (
