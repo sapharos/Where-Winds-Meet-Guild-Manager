@@ -780,7 +780,7 @@ const GET: [RegExp, Ruta][] = [
   [/^\/users$/, () => store.usuarios],
   [/^\/discord\/status$/, () => ({ bot: true })],
   [/^\/discord\/voice-channels$/, () => CANALES_VOZ],
-  [/^\/events\/config\/roles$/, () => ({ bot: true, roles: ROLES_DISCORD })],
+  [/^\/events\/config\/roles$/, () => ({ bot: true, roles: ROLES_DISCORD, timezone: 'America/Bogota' })],
   // La puerta del bot. Arranca sin restricción, que es como viene de fábrica:
   // el estado que hay que poder ver antes de marcar nada.
   [/^\/discord\/bot-roles$/, () => ({ bot: true, roles: ROLES_DISCORD, allowed: rolesDelBot })],

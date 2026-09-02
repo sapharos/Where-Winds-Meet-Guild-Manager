@@ -1390,6 +1390,15 @@ const CanalDeAgenda: React.FC<{
   </label>
 );
 
+/**
+ * Una hora guardada, normalizada para un `input type="time"`, que exige HH:MM
+ * con dos dígitos: una serie vieja con «7:30» se enseñaría como campo vacío.
+ */
+const horaCampo = (valor?: string | null) => {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(valor ?? ''));
+  return m ? `${m[1].padStart(2, '0')}:${m[2]}` : '';
+};
+
 const SerieFila: React.FC<{
   serie: EventSeries;
   rolesDiscord: DiscordRole[];
@@ -1443,7 +1452,10 @@ const SerieFila: React.FC<{
         </div>
         <label>
           <span className={etiqueta}>Hora ({b.timezone})</span>
-          <input className={campo} value={b.timeLocal} onChange={(e) => setB({ ...b, timeLocal: e.target.value })} />
+          {/* `type="time"` y no texto libre: un «12:00 pm» escrito a mano no
+              pasaba la validación del servidor y caía en silencio al valor por
+              defecto -- la publicación de mediodía salía a medianoche. */}
+          <input type="time" className={campo} value={horaCampo(b.timeLocal)} onChange={(e) => setB({ ...b, timeLocal: e.target.value })} />
         </label>
 
         {/* A qué roles de Discord se les pregunta en cada convocatoria que
@@ -1497,7 +1509,7 @@ const SerieFila: React.FC<{
             anuncia -- pero el cierre desaparece: no se cierra lo que no se
             contesta. */}
         <label>
-          <span className={etiqueta}>{b.poll === false ? 'Se anuncia (días antes)' : 'Abre (días antes)'}</span>
+          <span className={etiqueta}>{b.poll === false ? 'Se anuncia (días antes y hora)' : 'Abre (días antes y hora)'}</span>
           <div className="flex gap-2">
             <input
               type="number"
@@ -1505,12 +1517,12 @@ const SerieFila: React.FC<{
               value={b.opensDaysBefore}
               onChange={(e) => setB({ ...b, opensDaysBefore: Number(e.target.value) || 0 })}
             />
-            <input className={campo} value={b.opensTime} onChange={(e) => setB({ ...b, opensTime: e.target.value })} />
+            <input type="time" className={campo} value={horaCampo(b.opensTime)} onChange={(e) => setB({ ...b, opensTime: e.target.value })} />
           </div>
         </label>
         {b.poll !== false && (
           <label>
-            <span className={etiqueta}>Cierra (días antes)</span>
+            <span className={etiqueta}>Cierra (días antes y hora)</span>
             <div className="flex gap-2">
               <input
                 type="number"
@@ -1518,7 +1530,7 @@ const SerieFila: React.FC<{
                 value={b.closesDaysBefore}
                 onChange={(e) => setB({ ...b, closesDaysBefore: Number(e.target.value) || 0 })}
               />
-              <input className={campo} value={b.closesTime} onChange={(e) => setB({ ...b, closesTime: e.target.value })} />
+              <input type="time" className={campo} value={horaCampo(b.closesTime)} onChange={(e) => setB({ ...b, closesTime: e.target.value })} />
             </div>
           </label>
         )}

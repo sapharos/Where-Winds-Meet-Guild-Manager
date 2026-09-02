@@ -84,7 +84,7 @@ import {
   retirarEvento,
   startAgendaScheduler,
 } from './discordCommands.js';
-import { listSeries, saveSeries, deleteSeries, seedSeries, asegurarEventos } from './agenda.js';
+import { listSeries, saveSeries, deleteSeries, seedSeries, asegurarEventos, ZONA } from './agenda.js';
 import {
   listTextChannels,
   listGuildRoles,
@@ -478,6 +478,10 @@ app.get('/api/events/config/roles', requireAuth, asHandler(async (_req, res) => 
   res.json({
     bot: botEnabled(),
     roles: botEnabled() ? await listGuildRoles().catch(() => []) : [],
+    // La zona del gremio viaja con esta respuesta porque la piden las mismas
+    // pantallas: es lo que permite decirle a quien mira desde Argentina a qué
+    // hora suya suena un recordatorio programado en hora de Bogotá.
+    timezone: ZONA,
   });
 }));
 

@@ -67,6 +67,55 @@ function paraCampo(iso?: string | null) {
   return local.toISOString().slice(0, 16);
 }
 
+/**
+ * Una hora de pared de otra zona, dicha en la del navegador.
+ *
+ * Es lo que hace legible «cada 2 días a las 19:00» para un gremio repartido
+ * por todo el continente: la hora guardada es la del gremio, y quien mira
+ * desde Argentina necesita saber que ese aviso a él le suena a las 21:00.
+ *
+ * Null cuando no hay nada que traducir -- misma zona, o una hora rota -- y el
+ * texto se queda como estaba. El desfase se calcula con la fecha de hoy;
+ * cambia en los husos con horario de verano, pero errar por una hora unos
+ * días al año es mejor que no decir nada.
+ */
+function horaEnMiZona(hhmm: string, zona?: string | null): string | null {
+  try {
+    if (!zona || zona === miHuso()) return null;
+    const [hh, mm] = hhmm.split(':').map(Number);
+    if (!Number.isFinite(hh) || !Number.isFinite(mm)) return null;
+
+    // El instante en que un reloj de esa zona marca esa hora, hoy: se supone
+    // UTC y se corrige por el desfase leído del propio formateador, dos veces,
+    // igual que hace el servidor.
+    const desfase = (fecha: Date) => {
+      const partes = new Intl.DateTimeFormat('en-US', {
+        timeZone: zona,
+        hour12: false,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+      }).formatToParts(fecha);
+      const v: Record<string, number> = {};
+      for (const p of partes) if (p.type !== 'literal') v[p.type] = Number(p.value);
+      return Date.UTC(v.year, v.month - 1, v.day, v.hour % 24, v.minute) - fecha.getTime();
+    };
+    const [y, m, d] = new Intl.DateTimeFormat('en-CA', { timeZone: zona })
+      .format(new Date())
+      .split('-')
+      .map(Number);
+    const supuesto = Date.UTC(y, m - 1, d, hh, mm);
+    const instante = new Date(supuesto - desfase(new Date(supuesto - desfase(new Date(supuesto)))));
+
+    const local = instante.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit', hour12: false });
+    return local === hhmm ? null : local;
+  } catch {
+    return null;
+  }
+}
+
 const ORDEN: EventAnswer[] = ['yes', 'maybe', 'no'];
 
 /**
@@ -149,6 +198,9 @@ const Agenda: React.FC<Props> = ({ players, myPlayerId, canManage, canReset = fa
   // los lee, porque una convocatoria guarda ids y el nombre hay que ir a
   // buscarlo. Sin bot llega vacío y todo lo demás sigue igual.
   const [rolesDiscord, setRolesDiscord] = useState<DiscordRole[]>([]);
+  // La zona en que el servidor interpreta las horas de pared -- la del
+  // recordatorio repetido. Hace falta aquí para traducirla a la de quien mira.
+  const [zonaGremio, setZonaGremio] = useState<string | null>(null);
   const [events, setEvents] = useState<GuildEvent[] | null>(null);
   const [past, setPast] = useState(false);
   /** Lista de lo que viene, o el mes entero. */
@@ -188,8 +240,11 @@ const Agenda: React.FC<Props> = ({ players, myPlayerId, canManage, canReset = fa
   }, [cargar]);
 
   useEffect(() => {
-    void api<{ roles: DiscordRole[] }>('/events/config/roles')
-      .then((r) => setRolesDiscord(r.roles ?? []))
+    void api<{ roles: DiscordRole[]; timezone?: string }>('/events/config/roles')
+      .then((r) => {
+        setRolesDiscord(r.roles ?? []);
+        setZonaGremio(r.timezone ?? null);
+      })
       // Sin bot no hay roles que ofrecer, y no es un error que enseñar: el
       // formulario lo dice en su sitio y todo lo demás sigue funcionando.
       .catch(() => setRolesDiscord([]));
@@ -457,6 +512,7 @@ const Agenda: React.FC<Props> = ({ players, myPlayerId, canManage, canReset = fa
             canManage={canManage}
             miRespuesta={miRespuesta(abierto)?.answer}
             rolesDiscord={rolesDiscord}
+            zonaGremio={zonaGremio}
             onContestar={(answer) => contestar(abierto, answer)}
             onContestarPor={async (playerId, answer) => {
               const actualizado = await api<GuildEvent>(
@@ -488,6 +544,7 @@ const Agenda: React.FC<Props> = ({ players, myPlayerId, canManage, canReset = fa
         <FormularioEvento
           borrador={editando}
           rolesDiscord={rolesDiscord}
+          zonaGremio={zonaGremio}
           onGuardar={guardar}
           onCerrar={() => setEditando(null)}
         />
@@ -700,6 +757,7 @@ const DetalleEvento: React.FC<{
   canManage: boolean;
   miRespuesta?: EventAnswer;
   rolesDiscord: DiscordRole[];
+  zonaGremio?: string | null;
   onContestar: (answer: EventAnswer) => void;
   onContestarPor: (playerId: string, answer: EventAnswer) => void;
   onEditar: () => void;
@@ -715,6 +773,7 @@ const DetalleEvento: React.FC<{
   canManage,
   miRespuesta,
   rolesDiscord,
+  zonaGremio,
   onContestar,
   onContestarPor,
   onEditar,
@@ -792,6 +851,11 @@ const DetalleEvento: React.FC<{
               </a>
             )}
           </>
+        ) : event.opensAt && new Date(event.opensAt) > new Date() ? (
+          // Con fecha de apertura por delante, la publicación está programada:
+          // decir «no se ha publicado» a secas suena a que algo falla, cuando
+          // lo que pasa es que todavía no le toca.
+          `Se publicará sola el ${fechaCorta(event.opensAt)}.`
         ) : (
           'Todavía no se ha publicado en Discord.'
         )}
@@ -837,7 +901,14 @@ const DetalleEvento: React.FC<{
             ? 'Sin recordatorios.'
             : `${aviso ? 'Se avisa' : 'Se recuerda'} ${event.reminderMode === 'dm' ? 'por privado' : 'en el canal'} ${
                 event.reminderEveryDays && event.reminderTime
-                  ? `cada ${event.reminderEveryDays === 1 ? 'día' : `${event.reminderEveryDays} días`} a las ${event.reminderTime}`
+                  ? `cada ${event.reminderEveryDays === 1 ? 'día' : `${event.reminderEveryDays} días`} a las ${event.reminderTime} del gremio${
+                      // La hora guardada es la del gremio; a quien mira desde
+                      // otro huso se le dice además la suya, que es la que le
+                      // va a sonar.
+                      horaEnMiZona(event.reminderTime, zonaGremio)
+                        ? ` (las ${horaEnMiZona(event.reminderTime, zonaGremio)} en tu hora)`
+                        : ''
+                    }`
                   : aviso
                     ? 'una vez, seis horas antes de que empiece'
                     : 'una vez, seis horas antes de que cierre'
@@ -1169,8 +1240,9 @@ const ComoRecordar: React.FC<{
   cada: number | null;
   hora: string;
   aviso?: boolean;
+  zonaGremio?: string | null;
   onCambiar: (cambio: { reminderMode?: ReminderMode; reminderEveryDays?: number | null; reminderTime?: string }) => void;
-}> = ({ modo, cada, hora, aviso = false, onCambiar }) => {
+}> = ({ modo, cada, hora, aviso = false, zonaGremio, onCambiar }) => {
   const campo = 'w-full bg-slate-950 border border-slate-800 rounded p-2 text-sm outline-none focus:ring-1 focus:ring-amber-500';
   // Los dos van juntos: el servidor descarta una cadencia sin hora, así que
   // encender la repetición propone una hora en vez de guardar algo a medias.
@@ -1254,8 +1326,15 @@ const ComoRecordar: React.FC<{
                   onChange={(e) => onCambiar({ reminderTime: e.target.value })}
                 />
                 {/* La hora es la del gremio y no la de quien programa: el
-                    recordatorio sale del servidor, no de este navegador. */}
-                <p className="text-meta text-slate-500 mt-1">Hora del gremio</p>
+                    recordatorio sale del servidor, no de este navegador. A un
+                    oficial en otro huso se le dice además a qué hora suya
+                    equivale, que es como se pilla el error antes de guardar. */}
+                <p className="text-meta text-slate-500 mt-1">
+                  Hora del gremio{zonaGremio ? ` (${zonaGremio})` : ''}
+                  {hora && horaEnMiZona(hora, zonaGremio)
+                    ? ` — las ${horaEnMiZona(hora, zonaGremio)} en tu hora`
+                    : ''}
+                </p>
               </div>
             </div>
           ) : (
@@ -1276,9 +1355,10 @@ const ComoRecordar: React.FC<{
 const FormularioEvento: React.FC<{
   borrador: Partial<GuildEvent>;
   rolesDiscord: DiscordRole[];
+  zonaGremio?: string | null;
   onGuardar: (borrador: Partial<GuildEvent>) => void;
   onCerrar: () => void;
-}> = ({ borrador, rolesDiscord, onGuardar, onCerrar }) => {
+}> = ({ borrador, rolesDiscord, zonaGremio, onGuardar, onCerrar }) => {
   const [datos, setDatos] = useState({
     id: borrador.id,
     kind: (borrador.kind ?? 'war') as EventKind,
@@ -1311,11 +1391,12 @@ const FormularioEvento: React.FC<{
             onClick={() =>
               onGuardar({
                 ...datos,
-                // El campo da hora local; el servidor guarda el instante. Un
-                // aviso no lleva ventana: el servidor la descartaría igual,
-                // pero mandarla sería pedirle que descarte lo que se ve puesto.
+                // El campo da hora local; el servidor guarda el instante. La
+                // apertura viaja siempre -- en un aviso es cuándo se publica --
+                // y el cierre sólo con encuesta: no se cierra lo que no se
+                // contesta.
                 startsAt: new Date(datos.startsAt).toISOString(),
-                opensAt: datos.poll && datos.opensAt ? new Date(datos.opensAt).toISOString() : null,
+                opensAt: datos.opensAt ? new Date(datos.opensAt).toISOString() : null,
                 closesAt: datos.poll && datos.closesAt ? new Date(datos.closesAt).toISOString() : null,
               } as Partial<GuildEvent>)
             }
@@ -1395,6 +1476,7 @@ const FormularioEvento: React.FC<{
               type="datetime-local"
               className={campo}
               value={datos.startsAt}
+              min={paraCampo()}
               onChange={(e) => setDatos({ ...datos, startsAt: e.target.value })}
             />
             {/* Quien programa escribe en su hora y a cada miembro se le enseña en
@@ -1426,24 +1508,30 @@ const FormularioEvento: React.FC<{
           cada={datos.reminderEveryDays}
           hora={datos.reminderTime}
           aviso={!datos.poll}
+          zonaGremio={zonaGremio}
           onCambiar={(cambio) => setDatos({ ...datos, ...cambio })}
         />
 
-        {/* La ventana es de la encuesta: en un aviso no hay nada que se abra
-            ni que se cierre, y los campos desaparecen en vez de apagarse. */}
-        {datos.poll && (
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs uppercase tracking-wider text-slate-500 mb-1">
-                Se abre
-              </label>
-              <input
-                type="datetime-local"
-                className={campo}
-                value={datos.opensAt}
-                onChange={(e) => setDatos({ ...datos, opensAt: e.target.value })}
-              />
-            </div>
+        {/* La apertura es de todos -- es cuándo se publica solo, y un aviso
+            también se publica --; el cierre sólo de la encuesta: no se cierra
+            lo que no se contesta. */}
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs uppercase tracking-wider text-slate-500 mb-1">
+              {datos.poll ? 'Se abre y publica' : 'Se publica'}
+            </label>
+            <input
+              type="datetime-local"
+              className={campo}
+              value={datos.opensAt}
+              min={paraCampo()}
+              onChange={(e) => setDatos({ ...datos, opensAt: e.target.value })}
+            />
+            <p className="text-meta text-slate-500 mt-1">
+              Vacío: se publica a mano, con el botón.
+            </p>
+          </div>
+          {datos.poll && (
             <div>
               <label className="block text-xs uppercase tracking-wider text-slate-500 mb-1">
                 Se cierra
@@ -1452,11 +1540,12 @@ const FormularioEvento: React.FC<{
                 type="datetime-local"
                 className={campo}
                 value={datos.closesAt}
+                min={paraCampo()}
                 onChange={(e) => setDatos({ ...datos, closesAt: e.target.value })}
               />
             </div>
-          </div>
-        )}
+          )}
+        </div>
 
         <div>
           <label className="block text-xs uppercase tracking-wider text-slate-500 mb-1">Notas</label>

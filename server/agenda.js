@@ -144,7 +144,25 @@ const entero = (v, min, max, porDefecto) => {
   return Number.isFinite(n) && n >= min && n <= max ? n : porDefecto;
 };
 
-const HHMM = (v, porDefecto) => (/^\d{1,2}:\d{2}$/.test(String(v ?? '')) ? String(v) : porDefecto);
+/**
+ * Una hora de pared que viene de un formulario: «HH:MM» o error.
+ *
+ * Antes, lo que no encajaba caía en silencio al valor por defecto, y el
+ * defecto de la apertura es medianoche: escribir «12:00 pm» programaba la
+ * publicación a las 00:00 y nadie podía saber por qué. Lo que no se entiende
+ * se rechaza donde todavía se puede decir.
+ */
+const HHMM = (valor, porDefecto) => {
+  if (valor === undefined || valor === null || String(valor).trim() === '') return porDefecto;
+  const hora = horaDePared(valor);
+  if (!hora) {
+    throw Object.assign(
+      new Error(`«${valor}» no es una hora válida: se escribe HH:MM, de 00:00 a 23:59`),
+      { status: 400 },
+    );
+  }
+  return hora;
+};
 
 /**
  * Los días de una serie, saneados: enteros de 0 a 6, sin repetir, en el orden
@@ -348,13 +366,20 @@ export async function asegurarEventos({ semanas = 4, ahora = new Date() } = {}) 
  * La condición es la fecha de apertura y no la de creación, que es lo que hace
  * que se pueda crear el calendario de tres semanas por delante sin llenar el
  * canal de encuestas que no tocan hasta dentro de un mes.
+ *
+ * Entran también los eventos sueltos, los que no vienen de ninguna serie, si
+ * tienen fecha de apertura: ponerla es programar la publicación, y antes no la
+ * miraba nadie -- el evento decía «se publicará» en la pantalla y se moría en
+ * silencio esperando un botón. Sin fecha de apertura un evento suelto sigue
+ * siendo manual: se publica cuando alguien lo publica.
  */
 export async function pendientesDePublicar({ ahora = new Date() } = {}) {
   const { rows } = await pool.query(
     `SELECT e.id FROM guild_events e
-       JOIN event_series s ON s.guild_id = e.guild_id AND s.id = e.series_id
-      WHERE e.guild_id = $1 AND s.auto_publish AND e.discord_message_id IS NULL
+       LEFT JOIN event_series s ON s.guild_id = e.guild_id AND s.id = e.series_id
+      WHERE e.guild_id = $1 AND e.discord_message_id IS NULL
         AND e.cancelled_at IS NULL
+        AND (s.auto_publish OR (e.series_id IS NULL AND e.opens_at IS NOT NULL))
         AND (e.opens_at IS NULL OR e.opens_at <= $2)
         AND e.starts_at > $2
       ORDER BY e.starts_at`,
@@ -417,8 +442,10 @@ export async function pendientesDeAviso({ ahora = new Date(), zona = ZONA } = {}
   const { rows } = await pool.query(
     `SELECT e.id, e.poll, e.reminded_at AS "remindedAt",
             e.reminder_every_days AS "reminderEveryDays", e.reminder_time AS "reminderTime",
-            e.starts_at AS "startsAt", e.closes_at AS "closesAt"
+            e.starts_at AS "startsAt", e.closes_at AS "closesAt",
+            s.timezone AS "serieZona"
        FROM guild_events e
+       LEFT JOIN event_series s ON s.guild_id = e.guild_id AND s.id = e.series_id
       WHERE e.guild_id = $1 AND e.cancelled_at IS NULL
         AND e.discord_message_id IS NOT NULL
         AND e.reminder_mode <> 'none'
@@ -430,7 +457,10 @@ export async function pendientesDeAviso({ ahora = new Date(), zona = ZONA } = {}
 
   return rows
     .filter((e) => {
-      if (e.reminderEveryDays && e.reminderTime) return tocaRepetir(e, ahora, zona);
+      // «A las 19:00» de la zona de su serie, si viene de una: la serie de un
+      // gremio puede vivir en otro huso que el servidor, y su recordatorio
+      // tiene que sonar a la hora de la serie, no a la del entorno.
+      if (e.reminderEveryDays && e.reminderTime) return tocaRepetir(e, ahora, e.serieZona || zona);
       if (e.remindedAt) return false;
       const ancla = e.poll === false ? e.startsAt : e.closesAt;
       return ancla && new Date(ancla) - ahora <= AVISO_HORAS * 3600000;

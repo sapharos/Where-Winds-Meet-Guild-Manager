@@ -137,11 +137,12 @@ function limpiar(body) {
   if (!title) throw Object.assign(new Error('el evento necesita un nombre'), { status: 400 });
 
   const startsAt = fecha(body?.startsAt);
-  // Sin encuesta no hay ventana: no se abre ni se cierra lo que no se contesta.
-  // `opens_at` se conserva en los que vienen de una serie -- ahí es la fecha en
-  // que se anuncia -- pero eso lo escribe la serie, no este formulario.
+  // La apertura es de todos: en una encuesta es cuándo se puede empezar a
+  // contestar, y en un aviso es cuándo se anuncia -- las dos son «cuándo se
+  // publica», y ponerla programa la publicación. El cierre sí es sólo de la
+  // encuesta: no se cierra lo que no se contesta.
   const poll = body?.poll !== false;
-  const opensAt = poll && body?.opensAt ? fecha(body.opensAt) : null;
+  const opensAt = body?.opensAt ? fecha(body.opensAt) : null;
   const closesAt = poll && body?.closesAt ? fecha(body.closesAt) : null;
 
   if (opensAt && closesAt && closesAt <= opensAt) {
@@ -430,6 +431,31 @@ export async function nextWar() {
 export async function saveEvent(body, createdBy) {
   const limpio = limpiar(body);
   const id = body?.id || randomUUID();
+
+  // Nada se programa hacia atrás: un evento que empieza ayer no convoca a
+  // nadie, y una publicación en el pasado saldría en el próximo turno del
+  // reloj, que nunca es lo que se quiso decir. Sólo se mira lo que cambia --
+  // corregirle las notas a una guerra ya jugada tiene que seguir pudiéndose --
+  // y con un minuto de cortesía, que entre escribir y guardar pasa tiempo.
+  const { rows: previas } = await pool.query(
+    `SELECT starts_at AS "startsAt", opens_at AS "opensAt", closes_at AS "closesAt"
+       FROM guild_events WHERE guild_id = $1 AND id = $2`,
+    [GUILD_ID, id],
+  );
+  const antes = previas[0] ?? null;
+  const limite = Date.now() - 60000;
+  const distinto = (nuevo, viejo) =>
+    nuevo.getTime() !== (viejo ? new Date(viejo).getTime() : null);
+  for (const [campo, queja] of [
+    ['startsAt', 'el evento no puede empezar en el pasado'],
+    ['opensAt', 'la publicación no puede quedar en el pasado'],
+    ['closesAt', 'el cierre de la encuesta no puede quedar en el pasado'],
+  ]) {
+    const valor = limpio[campo];
+    if (valor && valor.getTime() < limite && (!antes || distinto(valor, antes[campo]))) {
+      throw Object.assign(new Error(queja), { status: 400 });
+    }
+  }
 
   await pool.query(
     `INSERT INTO guild_events
